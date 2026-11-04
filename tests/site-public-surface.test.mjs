@@ -26,7 +26,7 @@
 //      visitor with no script, reduced motion, a data-saver request, a hidden tab, a refused autoplay, the app / boot views, or a page scrolled
 //      away sees none of it. Pinned as markup, stylesheet and BEHAVIOUR (js/site.js run in tests/fixtures/hero-intro-env.mjs, a small fake
 //      browser). The 480px file under 900px and the 720px file above, never precached, no audio track, no poster.
-//   7. The material: two stainless grades (SS304 food-grade as the standard, SS316 laboratory-grade) and three finishes (brushed, mirror, satin) are
+//   7. The material: two stainless grades (SS304 food-grade as the standard, SS316 laboratory-grade) and four finishes (hairline the standard, then brushed, mirror, satin) are
 //      stated on the homepage and the catalogue; no past project is credited with a grade; no configurator or quote-flow option exists for either yet.
 //
 // Mutation-tested in a scratch copy, never the shared tree (see the STATUS.md entry for the list that was run).
@@ -1167,7 +1167,7 @@ describe('6 · the hero logo intro: a translucent clip behind the headline that 
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
-describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-grade, brushed, mirror or satin', () => {
+describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-grade, hairline (standard), brushed, mirror or satin', () => {
   const homeText = visibleText(home.html.slice(home.html.indexOf('<div id="site"'), home.html.indexOf('<!-- /#site -->')));
   const proofSub = visibleText(home.html.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0].match(/<li><span class="proof-val">SS304[\s\S]*?<\/li>/)[0]);
   const catText = visibleText(catalogue.html.slice(catalogue.html.indexOf('<body')).replace(/<script[\s\S]*?<\/script>/g, ''));
@@ -1182,22 +1182,24 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     for (const k of ['description', 'og:description', 'twitter:description']) for (const p of [home, catalogue]) assert.ok(/SS304/.test(p.meta(k)) && /SS316/.test(p.meta(k)) && p.meta(k).indexOf('SS304') < p.meta(k).indexOf('SS316'), `${p.file}: ${k}`);
     assert.ok(catText.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
     assert.equal(materialRows.length, 11, 'one Material row per configurable card (eleven families)');
-    for (const r of materialRows) assert.equal(r, 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish');
+    for (const r of materialRows) assert.equal(r, 'SS304 food-grade (standard) or SS316 laboratory-grade · hairline finish as standard, brushed, mirror or satin on request');
     for (const t of [homeText, catText]) { assert.ok(t.includes('SS304') && t.includes('SS316')); assert.ok(t.indexOf('SS304') < t.indexOf('SS316'), 'SS304 must come first'); }
   });
 
-  it('names all three finishes — brushed, mirror and satin — on the homepage (the Fabrication step) and on every configurable card, and no longer calls "No.4 brushed" THE finish', () => {
+  it('names the standard finish (hairline) and the three on-request finishes (brushed, mirror and satin) on the homepage (the Fabrication step), all four on every configurable card (hairline as the standard, then the three on request), and no longer calls "No.4 brushed" THE finish', () => {
     const fab = visibleText(home.html.match(/<h3>Fabrication<\/h3>\s*<p>([\s\S]*?)<\/p>/)[1]);
-    assert.equal(fab, 'Built to order in SS304 or SS316, finished brushed, mirror or satin, with seams welded and ground smooth.');
-    for (const f of ['brushed', 'mirror', 'satin']) { assert.ok(homeText.includes(f), `the homepage lacks "${f}"`); assert.ok(materialRows.every((r) => r.includes(f)), `a card lacks "${f}"`); }
+    assert.equal(fab, 'Built to order in SS304 or SS316, finished hairline as standard, with seams welded and ground smooth.');
+    assert.ok(homeText.includes('Our standard finish is hairline, with brushed, mirror or satin on request.'), 'the homepage fabrication block lacks the standard-finish sentence');
+    for (const f of ['hairline', 'brushed', 'mirror', 'satin']) assert.ok(homeText.includes(f), `the homepage lacks "${f}"`);
+    for (const f of ['hairline', 'brushed', 'mirror', 'satin']) assert.ok(materialRows.every((r) => r.includes(f)), `a card lacks "${f}"`);
     assert.ok(!/No\.?4/.test(homeText), 'the homepage still says No.4');
     assert.ok(!materialRows.some((r) => /No\.?4/.test(r)));
     assert.ok(!/No\.?4/.test(read('index.html').match(/<meta name="description"[^>]*>/)[0]));
   });
 
-  it('credits no past project with a grade or finish: the projects, About, warranty and Luzon sections never say SS304, SS316, grade, mirror or satin', () => {
+  it('credits no past project with a grade or finish: the projects, About, warranty and Luzon sections never say SS304, SS316, grade, hairline, mirror or satin', () => {
     const sec = (id) => home.html.match(new RegExp(`<section id="${id}"[\\s\\S]*?</section>`))[0];
-    for (const id of ['projects', 'about', 'warranty', 'luzon', 'contact']) assert.ok(!/SS ?3(04|16)|grade|mirror|satin|brushed/i.test(visibleText(sec(id))), `#${id} states a grade or finish`);
+    for (const id of ['projects', 'about', 'warranty', 'luzon', 'contact']) assert.ok(!/SS ?3(04|16)|grade|hairline|mirror|satin|brushed/i.test(visibleText(sec(id))), `#${id} states a grade or finish`);
     // and nowhere does a sentence tie SS316 to a named client or a delivered job
     for (const t of [homeText, catText]) for (const sentence of t.split(/(?<=[.!?])\s+/)) if (/SS ?316/.test(sentence)) assert.ok(!/ISPSC|DMMMSU|Don Mariano|Ilocos|completed|delivered to|installed (at|in|for)|our (previous|past) /i.test(sentence), `SS316 is tied to a project: ${sentence.slice(0, 80)}`);
   });
@@ -1272,6 +1274,6 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
   it('leaves the master\'s own product notes alone: every fixed card still carries exactly the note the generator takes from the master (the "(local only)" fresh-build test in catalogue-public.test.mjs), and the generator\'s display overrides name no grade', () => {
     for (const [id, v] of Object.entries(B.NOTE_OVERRIDES)) assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(v)), `NOTE_OVERRIDES ${id}`);
     for (const [id, v] of Object.entries(B.TEXT_FIXES)) assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(v)), `TEXT_FIXES ${id}`);
-    assert.equal(B.FAMILY_MATERIAL, 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish');
+    assert.equal(B.FAMILY_MATERIAL, 'SS304 food-grade (standard) or SS316 laboratory-grade · hairline finish as standard, brushed, mirror or satin on request');
   });
 });

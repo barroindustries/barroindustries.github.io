@@ -334,7 +334,7 @@ describe('buildLine — a configured line in the builder\'s item shape (§3.1, r
     assert.ok(!('sourceRef' in it));
     assert.equal(it.formulaType, 'per_length', 'the primary\'s formulaType');
     assert.equal(it.notes, 'Near the loading door');
-    assert.equal(it.leadTime, '—'); assert.equal(it.laborHours, null);
+    assert.equal(it.leadTime, '25 working days', 'the family\'s lead time (owner ruling 2026-11-05 #4: 25 working days minimum) — it used to be "—" on every configured line'); assert.equal(it.laborHours, null);
     assert.deepEqual(it._cfg, { reason: basis.reason, missing: basis.missing, base: basis.base, deltas: basis.deltas, warnings: basis.warnings, pricedSize: basis.pricedSize });
     noUndefined(it);
     assert.deepEqual(JSON.parse(JSON.stringify(it)), it, 'survives a JSON round trip (saved as a draft / filed as a quote)');
@@ -1967,5 +1967,89 @@ describe('the staff-only steel grade (Material) and the line titles', () => {
       void grade;
       assert.equal(QB.buildLine(DEPS, { family: f, primary: PRIMARIES.sink, config: noGrade, size: PF.defaultDims(f) }).config.grade, 304);
     });
+  });
+});
+
+// ═══════════════════════════════════════ SELLING QUOTE — the document fields of a configured line (QB-SELLING-QUOTE-SPEC §3.1 / §3.2, owner rulings 2026-11-05) ═══════════════════════════════════════
+// buildLine adds the fields the printed spec sheet reads: `finish` (the family's finishDefault — hairline), `includes` / `excludes` (the family's templates for THIS configuration, split on " · "),
+// `specLines` ([]) and `leadTime` (the family's "25 working days"). No figure comes from them (they are DATA in scripts/public-families.json) and a family — or a dependency — that has none gets exactly
+// what a line carried before ('' / [] / '—'). Mutation-tested in scratch copies: finish not taken from the family; includes not filled from the configuration / not split / a None option printing;
+// excludes not split; the lead time left at "—"; specLines missing; an empty template giving a phrase; fillTemplate not handed the line's CANONICAL configuration; the price touched.
+describe('buildLine — the document fields of a configured line', () => {
+  const build = (id, config, size) => QB.buildLine(DEPS, { family: fam(id), primary: PRIMARIES[id], config: { ...PF.defaultConfig(fam(id)), ...(config || {}) }, size: size || PF.standardDims(fam(id), { ...PF.defaultConfig(fam(id)), ...(config || {}) }), qty: 1 });
+  it('every family: finish "hairline", the ruled lead time, no extra rows, includes / excludes as lists of phrases — and the line still survives a JSON round trip with no undefined', () => {
+    for (const id of Object.keys(PRIMARIES)) {
+      const it = build(id);
+      assert.equal(it.finish, 'hairline', id);
+      assert.equal(it.leadTime, '25 working days', id);
+      assert.deepEqual(it.specLines, [], id);
+      assert.ok(Array.isArray(it.includes) && Array.isArray(it.excludes), id);
+      for (const p of [...it.includes, ...it.excludes]) assert.ok(typeof p === 'string' && p === p.trim() && p.length > 0 && !/[{}]/.test(p), `${id}: "${p}"`);
+      noUndefined(it);
+      assert.deepEqual(JSON.parse(JSON.stringify(it)), it);
+    }
+  });
+
+  it('includes follow the configuration (a basin count, the faucet, the add-ons, the wheels); an option that is None / Without drops its phrase; excludes are the family\'s plain phrases', () => {
+    assert.deepEqual(build('sink', { basins: 3, faucet: 'prerinse' }).includes, ['3 basins with waste fittings and strainers', 'pre-rinse spray faucet', 'adjustable bullet feet']);
+    assert.deepEqual(build('sink').excludes, ['water supply and drain line to the sink', 'angle valves']);
+    assert.deepEqual(build('stove', { addons: ['griller', 'griddle'] }).includes, ['burners as configured with gas valves', 'griller, griddle', 'adjustable bullet feet']);
+    assert.deepEqual(build('stove').includes, ['burners as configured with gas valves', 'adjustable bullet feet'], 'no add-ons: no empty phrase');
+    assert.deepEqual(build('stove').excludes, ['LPG tanks, regulator and hose beyond the appliance connection (see Gas Line)']);
+    assert.deepEqual(build('hood', { filters: 'none', lighting: false }).includes, ['canopy with grease trough and oil cup']);
+    assert.deepEqual(build('rack', { wheels: false }).includes, ['shelves as configured', 'adjustable bullet feet']);
+    assert.deepEqual(build('cooking_line').includes, [], 'the griddle / griller / fryer family has no includes');
+    assert.deepEqual(build('cooking_line').excludes, ['gas line and LPG supply']);
+    assert.deepEqual(build('cabinet').excludes, [], 'a family the approved table gives no exclusions has none');
+    assert.deepEqual(build('hood').excludes, ['ducting, blower and fresh-air supply (quoted separately)', 'electrical to the switch']);
+  });
+
+  it('a conditional option follows the line: a pre-rinse unit is included only for a soiled-side dish table that chose it', () => {
+    assert.deepEqual(build('dish_table', { side: 'soiled', sink: 'prerinse' }).includes, ['soiled side as configured', 'pre-rinse unit', 'adjustable bullet feet']);
+    assert.deepEqual(build('dish_table', { side: 'soiled' }).includes, ['soiled side as configured', 'adjustable bullet feet']);
+    assert.deepEqual(build('dish_table', { side: 'clean' }).includes, ['clean side as configured', 'adjustable bullet feet']);
+  });
+
+  it('they come from the family DATA only: a family without the fields gives \'\' / [] / "—" (exactly what a line carried before), and so does a dependency without fillTemplate', () => {
+    const bare = { ...fam('sink') }; delete bare.finishDefault; delete bare.includes; delete bare.excludes; delete bare.leadTime;
+    const it = QB.buildLine(DEPS, { family: bare, primary: PRIMARIES.sink, config: PF.defaultConfig(bare), size: PF.defaultDims(bare), qty: 1 });
+    assert.deepEqual([it.finish, it.includes, it.excludes, it.specLines, it.leadTime], ['', [], [], [], '—']);
+    const noFill = { ...DEPS, PF: { ...PF, fillTemplate: undefined } };
+    const it2 = QB.buildLine(noFill, { family: fam('sink'), primary: PRIMARIES.sink, config: PF.defaultConfig(fam('sink')), size: PF.defaultDims(fam('sink')), qty: 1 });
+    assert.deepEqual(it2.includes, []);
+    assert.equal(it2.finish, 'hairline');
+    for (const junk of [5, null, ['x'], { a: 1 }]) {
+      const odd = { ...fam('sink'), finishDefault: junk, includes: junk, excludes: junk, leadTime: junk };
+      const it3 = QB.buildLine(DEPS, { family: odd, primary: PRIMARIES.sink, config: PF.defaultConfig(odd), size: PF.defaultDims(odd), qty: 1 });
+      assert.deepEqual([it3.includes, it3.excludes], [[], []], JSON.stringify(junk));
+      assert.ok(typeof it3.finish === 'string' && typeof it3.leadTime === 'string', 'always strings, never undefined');
+    }
+  });
+
+  it('a family\'s lists are data a person edits: stray spaces and an empty phrase still give trimmed, non-empty phrases', () => {
+    const odd = { ...fam('sink'), excludes: ' a ' + ' · ' + '   ' + ' · ' + ' b ' };
+    const it = QB.buildLine(DEPS, { family: odd, primary: PRIMARIES.sink, config: PF.defaultConfig(odd), size: PF.defaultDims(odd), qty: 1 });
+    assert.deepEqual(it.excludes, ['a', 'b']);
+  });
+
+  it('the includes are filled for the CANONICAL configuration the line stores (a configuration with an absent group reads it as its default), and the price is exactly what it was', () => {
+    const cfg = { basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'prerinse' };      // no grade, no top: the staff-only groups are absent
+    const size = { W: 1800, D: 700, H: 900 };
+    const basis = ours('sink', { grade: 304, ...cfg, top: 1.5 }, size, 'approved');
+    const it = QB.buildLine(DEPS, { family: fam('sink'), primary: PRIMARIES.sink, config: cfg, size, qty: 2, basis });
+    assert.deepEqual(it.includes, ['2 basins with waste fittings and strainers', 'pre-rinse spray faucet', 'adjustable bullet feet']);
+    assert.equal(it.unitPrice, basis.unitPrice);
+    assert.equal(it.amount, basis.unitPrice * 2);
+    const before = QB.buildLine({ ...DEPS, FAM: { ...FAM } }, { family: { ...fam('sink'), includes: undefined, excludes: undefined, finishDefault: undefined, leadTime: undefined }, primary: PRIMARIES.sink, config: cfg, size, qty: 2, basis });
+    assert.equal(before.unitPrice, it.unitPrice, 'the document fields change no figure');
+    assert.deepEqual(before._cfg, it._cfg);
+  });
+
+  it('migrateLegacyConfiguredLine and fromRequestItem are NOT given the fields: a converted or website line is a legacy line (a re-configure fills them), so no reopened quote changes its document', () => {
+    const conv = QB.migrateLegacyConfiguredLine(DEPS, { id: 'PW-004', name: 'Sink', qty: 1, unit: 'pc', unitPrice: 5000, amount: 5000, dims: 'L500 × W500 × H850 mm', specs: [] });
+    assert.ok(conv);
+    for (const k of ['finish', 'includes', 'excludes', 'specLines']) assert.equal(k in conv, false, k);
+    const from = QB.fromRequestItem({ familyId: 'sink', config: PF.defaultConfig(fam('sink')), size: { W: 500, D: 500, H: 850 }, qty: 1, name: 'Sink' }, { unitPrice: 0, priced: false }, 'QR-1', DEPS);
+    for (const k of ['finish', 'includes', 'excludes', 'specLines']) assert.equal(k in from, false, k);
   });
 });

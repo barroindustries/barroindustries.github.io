@@ -3,8 +3,8 @@
 //
 //   /products/                                           hub: "Stainless steel kitchen equipment"
 //   /products/stainless-steel-sinks/                     one page per configurable product (11): its keyword cluster, its REAL options (read from
-//   /products/stainless-steel-dish-tables/               scripts/public-families.json, the configurators' own definition), SS304 / SS316, brushed /
-//   /products/stainless-steel-work-tables/               mirror / satin, made to size, the warranty, a "price intent" block and a short FAQ
+//   /products/stainless-steel-dish-tables/               scripts/public-families.json, the configurators' own definition), SS304 / SS316, hairline (standard) /
+//   /products/stainless-steel-work-tables/               brushed / mirror / satin, made to size, the warranty, a "price intent" block and a short FAQ
 //   /products/commercial-gas-stoves/
 //   /products/commercial-wok-ranges/
 //   /products/commercial-griddles-grillers-and-fryers/
@@ -222,9 +222,9 @@ const MSG_ICON = '<svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16"
 const msgLink = (cls, text) => `<a ${cls ? `class="${cls}" ` : ''}href="${MSGR}" rel="noopener" target="_blank" data-brand>${MSG_ICON}${text}</a>`;
 const PRICE_SENTENCE = 'Prices depend on size and options.';
 const PRICE_LINE = 'Prices depend on size and options. Get an estimated range online in minutes — no account needed.';
-const SS_SENTENCE = 'Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request, in a brushed, mirror or satin finish.';
+const SS_SENTENCE = 'Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.';
 // Owner ruling 2026-10-28 ("just 304 for oven"): the deck-oven page states SS304 only for the oven itself (the company-wide proof bar is unchanged).
-const SS_SENTENCE_OVEN = 'Food-grade SS304 stainless steel, in a brushed, mirror or satin finish.';
+const SS_SENTENCE_OVEN = 'Food-grade SS304 stainless steel. Our standard finish is hairline, with brushed, mirror or satin on request.';
 const OVEN_PATH = '/products/gas-deck-ovens/';
 // the standard construction (owner ruling 2026-10-28): said on the /products/ hub, in the FAQ answer about the material, in llms.txt and in the two PDFs — always scoped to
 // MADE-TO-ORDER pieces, so it cannot contradict the notes of the bought-in items (CE-016 "SS202 1.0mm inner", CE-020 "SS1.2mm top, 0.8mm lower", ...)
@@ -747,7 +747,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
     const bar = SERVICES.html.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0];
     each((p) => {
       assert.equal(p.html.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0], bar, `${p.path}: the proof bar differs from /services/`);
-      for (const w of p.kind === 'service' ? ['SS304', 'SS316'] : ['SS304', 'SS316', 'brushed', 'mirror', 'satin']) assert.ok(new RegExp(w, 'i').test(textOf(p.main)), `${p.path}: lacks "${w}"`);
+      for (const w of p.kind === 'service' ? ['SS304', 'SS316'] : ['SS304', 'SS316', 'hairline', 'brushed', 'mirror', 'satin']) assert.ok(new RegExp(w, 'i').test(textOf(p.main)), `${p.path}: lacks "${w}"`);
     });
     const cards = SERVICES.html.match(/<section id="warranty"[\s\S]*?<\/section>/)[0].match(/<article class="wcard">[\s\S]*?<\/article>/g).map(textOf);
     for (const p of PAGES.filter((x) => x.kind !== 'hub')) {
@@ -758,10 +758,10 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
     assert.ok(byPath('/products/').body.includes(WARRANTY_TEXT));
   });
 
-  it('never states a grade or a finish for a past project: no SS304, SS316, grade, brushed, mirror or satin in a project caption', () => {
+  it('never states a grade or a finish for a past project: no SS304, SS316, grade, hairline, brushed, mirror or satin in a project caption', () => {
     each((p) => {
       const caps = [...p.html.matchAll(/<figcaption>(?:(?!Representative image)[\s\S])*?<\/figcaption>/g)].map((m) => textOf(m[0])).concat([...p.html.matchAll(/<p class="pg-cap">[\s\S]*?<\/p>/g)].map((m) => textOf(m[0])));
-      for (const c of caps) assert.ok(!/\bSS3(04|16)\b|\bgrades?\b|\bbrushed\b|\bmirror\b|\bsatin\b/i.test(c), `${p.path}: a project caption states a grade or finish: ${c}`);
+      for (const c of caps) assert.ok(!/\bSS3(04|16)\b|\bgrades?\b|\bhairline\b|\bbrushed\b|\bmirror\b|\bsatin\b/i.test(c), `${p.path}: a project caption states a grade or finish: ${c}`);
       assert.ok(caps.length >= 1);
     });
   });
@@ -794,7 +794,7 @@ describe('the options on each product page are the ones the configurators offer 
       assert.equal(r.Construction, PF.constructionLine(fam, PF.defaultConfig(fam)) + '.', `${s}: the Construction row is not the family's construction line at its defaults`);
       assert.equal(r.Material, s === OVEN_PATH.split('/')[2] ? 'Food-grade SS304.' : 'Food-grade SS304 as standard, or laboratory-grade SS316 on request.');
       if (s === OVEN_PATH.split('/')[2]) assert.ok(!/SS316/.test(textOf(p.main).replace(/SS304 \/ SS316[^.]*?laboratory-grade/, '')), 'the oven page names SS316 outside the company proof bar');
-      assert.equal(r.Finish, 'Brushed, mirror or satin.');
+      assert.equal(r.Finish, 'Hairline as standard, or brushed, mirror or satin on request.');
       assert.equal(Object.keys(r).filter((k) => !['Size', 'Construction', 'Material', 'Finish'].includes(k)).length, PF.publicGroups(fam).length, `${s}: the page lists a different number of option groups than the configurator offers the public`);
       assert.deepEqual(Object.keys(r).slice(-4), ['Size', 'Construction', 'Material', 'Finish'], `${s}: the rows end Size, Construction, Material, Finish`);
       assert.ok(!Object.keys(r).includes('Top plate'), `${s}: a staff-only option is listed`);
@@ -1008,10 +1008,10 @@ describe('the standard construction (owner ruling 2026-10-28): a 1.5 mm (16 gaug
   const FAQP = load('/faq/', 'faq/index.html');
   const CAT = load('/catalogue/', 'catalogue/index.html');
 
-  it('says it once on the /products/ hub, in the "Two grades, three finishes" section — under the lead, before the grade cards — and the SS304 vs SS316 link is still right under the finishes', () => {
+  it('says it once on the /products/ hub, in the "Two grades, four finishes" section — under the lead, before the grade cards — and the SS304 vs SS316 link is still right under the finishes', () => {
     const hub = byPath('/products/');
     const sec = hub.section('materials');
-    assert.ok(sec.includes('<h2 id="materials-h">Two grades, three finishes</h2>'));
+    assert.ok(sec.includes('<h2 id="materials-h">Two grades, four finishes</h2>'));
     const text = textOf(sec);
     assert.equal(text.split(HUB_CONSTRUCTION).length, 2, 'the hub sentence must appear exactly once in the section');
     assert.ok(text.indexOf('Seams are welded and ground smooth') < text.indexOf(HUB_CONSTRUCTION) && text.indexOf(HUB_CONSTRUCTION) < text.indexOf('SS304 food grade'), 'under the lead, before the grade cards');

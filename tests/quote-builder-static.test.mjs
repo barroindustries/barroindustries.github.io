@@ -85,6 +85,7 @@ const PF = require('../js/product-families.js');
 const FAM = require('../js/qr-families.js');
 const PC = require('../js/pricing-core.js');
 const QB = require('../js/qb-configured.js');
+const QS = require('../js/qb-spec-sheet.js');     // the pure spec-sheet helpers the builder prints every line with (QB-SELLING-QUOTE-SPEC Phase 1)
 // a group's index in the definition: the panel's ids and handlers use it (the staff-only grade is group 0 of every family, so nothing may assume 0 is the first public group)
 const gAt = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key);
 
@@ -130,12 +131,14 @@ function makeEnv({ search = '', protocol = 'http:', script = SCRIPT, db = undefi
     print() {}, parent: null, Event: class { constructor(type) { this.type = type; } },     // (a quote below its floor price ticks #reqApprovalCheck and fires 'change')
   };
   win.window = win; win.self = win; win.parent = { postMessage: (msg, origin) => posted.push({ msg, origin }) };
-  win.ProductFamilies = PF; win.QR_FAMILIES = FAM; win.PricingCore = PC; win.QBConfigured = QB;
+  win.ProductFamilies = PF; win.QR_FAMILIES = FAM; win.PricingCore = PC; win.QBConfigured = QB; win.QBSpecSheet = QS;
   Object.assign(win, { priceCatalogItem: PC.priceCatalogItem, validateSelection: PC.validateSelection, estimateRange: PC.estimateRange, estimateGate: PC.estimateGate });
   if (db) win.db = db;
   const ctx = vm.createContext(win);
   (script === SCRIPT ? COMPILED : new vm.Script(script, { filename: 'quote-builder-v2.html<script>' })).runInContext(ctx);
   const run = (code) => vm.runInContext(code, ctx);
+  // the markup's own defaults for the two document options (the first <option> is selected, the checkbox is `checked`) — a stub select would otherwise read '' = "as issued"
+  el('warrantyPlan').value = 'service6'; el('showStandardPage').checked = true;
   return { ctx, run, el, removed, posted, listeners, store,
     toast: () => el('qbToast').textContent,
     // plain-data copy out of the vm realm (so deepEqual compares prototypes of THIS realm)
@@ -249,40 +252,60 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 47: the newest What\'s New entry is version 47 (the 316 premium is a percentage of the whole line), dated; entries 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
+  it('TUTORIAL_VERSION is 49: the newest What\'s New entry is version 49 (the timeline rule, quotations "as issued", the printed page tail), dated; entry 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 47);
+    assert.equal(b.run('TUTORIAL_VERSION'), 49);
     const wn = b.plain('WHATS_NEW');
-    assert.equal(wn[0].ver, 47);
-    assert.equal(wn[1].ver, 46, '46 stays as history: the percentage is a new entry');
-    assert.equal(wn[2].ver, 45, '45 stays as history');
-    assert.equal(wn[3].ver, 44, '44 stays as history');
-    assert.equal(wn[4].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
-    assert.match(wn[0].date, /^2026-10-\d\d$/);
+    assert.equal(wn[0].ver, 49);
+    assert.equal(wn[1].ver, 48, '48 stays as history: this change is a new entry');
+    assert.equal(wn[2].ver, 47, '47 stays as history');
+    assert.equal(wn[3].ver, 46, '46 stays as history');
+    assert.equal(wn[4].ver, 45, '45 stays as history');
+    assert.equal(wn[5].ver, 44, '44 stays as history');
+    assert.equal(wn[6].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
+    assert.equal(wn[0].date, '2026-11-05');
+    assert.equal(wn[1].date, '2026-11-05');
+    assert.match(wn[2].date, /^2026-10-\d\d$/);
     assert.deepEqual(wn.map((e) => e.ver), [...wn.map((e) => e.ver)].sort((x, y) => y - x), 'newest first');
-    assert.deepEqual(wn[0].items, ['The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.']);
-    const t47 = wn[0].items.join(' ');
+    // 49 — the owner's timeline ruling and the as-issued rule, in plain user language: one bullet per change
+    const t49 = wn[0].items.join(' ');
+    for (const must of ['at least 25 working days (Sundays not counted)', 'Barro Kitchens and Barro Industries quotations', '12 working days plus 3 for every ₱20,000 of materials, if that is longer', 'estimated completion date', 'priority-order threshold',
+      'the printed timeline note says so', 'Brilliant Steel is unchanged', 'filed before the warranty plan existed', 'keeps the warranty and site-requirements wording and the timeline it was issued with', '“As issued”', 'Pick a Warranty plan',
+      'bottom margin of every page', 'close the “Our standard” page']) {
+      assert.ok(t49.includes(must), `What's New 49 does not say: ${must}`);
+    }
+    assert.equal(wn[0].items.length, 3, 'three bullets: the timeline rule, quotations as issued, the printed page tail');
+    // 48 — QB-SELLING-QUOTE-SPEC Phase 1, in plain user language: one bullet per change
+    const t48 = wn[1].items.join(' ');
+    for (const must of ['spec sheet', 'dimension legend', 'one-line summary', 'Details ▸', 'hairline is the standard', 'brushed, mirror, satin', 'Includes, Not included', '25 working days minimum, from downpayment and approved drawings',
+      '“Our standard” page', 'Warranty plan', '6-month service warranty', 'Full kitchen', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'The Warranty term now states the 6-month service warranty',
+      'names the company that is quoting', 'no size, no specs, no finish, no photo', 'Quote strength', 'will not file a made-to-order line that has no size', 'PREP_WASHING', 'current quote number', 'Brilliant Steel quotes are unchanged']) {
+      assert.ok(t48.includes(must), `What's New 48 does not say: ${must}`);
+    }
+    assert.equal(wn[1].items.length, 6, 'six bullets: the sheet, Details, Our standard, the warranty plan, the chips and the check, the small fixes');
+    const t47 = wn[2].items.join(' ');
     assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b|\d\s?%|\bper cent\b/i.test(t47), false, 'the What\'s New entry states no figure');
-    const t46 = wn[1].items.join(' ');
+    assert.deepEqual(wn[2].items, ['The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.']);
+    const t46 = wn[3].items.join(' ');
     for (const must of ['Configured lines now carry a proper name on the quote', '"SS Range Stove"', '"SS Range Stove Combination (Griller, Fryer)"', '"SS Griddle"', '"SS Lava-Rock Griller"', '"Gas Deck Oven"',
       'the name updates when you re-configure the line', 'Every configured product starts with a Material row', 'Stainless Steel 304 Food Grade as standard', 'Stainless Steel 316 Laboratory Grade',
       'a staff-only choice (the website never offers it)', 'shows "Priced after review" until Finance enters the 316 percentage for that product in Inventory › Family pricing']) {
       assert.ok(t46.includes(must), `What's New 46 does not say: ${must}`);
     }
     assert.equal(/316 amount/.test(wn.map((e) => e.items.join(' ')).join(' ')), false, 'no What\'s New entry still calls the 316 premium an amount');
-    assert.equal(wn[1].items.length, 2, 'two bullets: the line names, and the Material row');
-    const t45 = wn[2].items.join(' ');
+    assert.equal(wn[3].items.length, 2, 'two bullets: the line names, and the Material row');
+    const t45 = wn[4].items.join(' ');
     for (const must of ['Five more products can be configured right in the builder', 'dish tables, wok ranges, griddles / grillers / fryers, gas deck ovens and range hoods', 'an option Finance has not priced yet asks you for a price instead of guessing',
       '"⚙ convert to configured"', 'Some choices only show when they apply', 'fry baskets for a fryer', 'pre-rinse sink on the soiled side of a dish table', 'a size an option does not allow is flagged as you type', '"Use N mm"',
       'a slim hood is at most 500 mm deep', 'a deck oven\'s width follows its trays per deck']) {
       assert.ok(t45.includes(must), `What's New 45 does not say: ${must}`);
     }
-    assert.equal(wn[2].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
-    const t44 = wn[3].items.join(' ');
+    assert.equal(wn[4].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
+    const t44 = wn[5].items.join(' ');
     for (const must of ['partner portal is retired', 'Brilliant Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
       assert.ok(t44.includes(must), `What's New 44 does not say: ${must}`);
     }
-    const text = wn[4].items.join(' ');
+    const text = wn[6].items.join(' ');
     for (const must of ['Configure a sink, prep table, stove, cabinet, wall shelf or rack', 'Priced after review', 'Apply cost-based to all', 'estimate range', 'links it back', 'hello@barroindustries.com']) {
       assert.ok(text.includes(must), `What's New 43 does not say: ${must}`);
     }
@@ -827,7 +850,7 @@ describe('R5 — a line flagged "needs a price" blocks filing until it has one',
     for (const [id, v] of Object.entries({ quoteNo: 'BKMLWB261028-001R1', quoteDate: '2026-10-28', salesperson: 'A', clientName: 'Client', clientPhone: '1', clientEmail: 'a@b.c' })) b.el(id).value = v;
   };
   const withLines = (b, lines) => b.run(`items.length = 0; items.push(...${JSON.stringify(lines)});`);
-  const flagged = { id: 'PW-004', category: 'prep_washing', name: 'Sink', familyId: 'sink', qty: 1, unit: 'pc', unitPrice: 0, amount: 0, priceBasis: 'manual', needsPrice: true };
+  const flagged = { id: 'PW-004', category: 'prep_washing', name: 'Sink', familyId: 'sink', dims: 'L900 × W500 × H850 mm', qty: 1, unit: 'pc', unitPrice: 0, amount: 0, priceBasis: 'manual', needsPrice: true };   // dims: the size block (QB-SELLING-QUOTE-SPEC #5) is a separate gate, tested on its own
   const priced = { ...flagged, unitPrice: 24500, amount: 24500, priceBasis: 'website', needsPrice: undefined };
 
   it('needsPriceReason: counts only lines that are flagged AND still at 0, in the words of the spec', () => {
@@ -2829,7 +2852,7 @@ describe('GRADE-TITLES — Material is drawn first, a 316 line is "Priced after 
     const cfg = makeEnv().plain('TOUR_STEPS').find((s) => s.target === '#configPanel').body;
     assert.match(cfg, /Every product opens with the staff-only Material option — Stainless Steel 304 Food Grade as standard, or 316 Laboratory Grade, which adds a percentage of the whole line price — and each line is named for what it is on the quote \(SS Sink, SS Griddle…\)\./);
     assert.equal(/316 amount/.test(li + ' ' + cfg), false, 'the Help and the demo no longer call the 316 premium an amount');
-    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(li + ' ' + cfg + ' ' + makeEnv().plain('WHATS_NEW')[0].items.join(' ')), false);
+    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(li + ' ' + cfg + ' ' + makeEnv().plain('WHATS_NEW').find((e) => e.ver === 47).items.join(' ')), false, 'the 316-percentage entry (47) states no figure');
   });
 });
 
@@ -2854,3 +2877,1395 @@ describe('GRADE-TITLES follow-up — panel header title and hand-off retitle', (
     assert.equal(c.run('items[0].name'), 'Sink');
   });
 });
+
+// ═══════════════════════════════════════ SELLING QUOTE — Phase 1 (specs/QB-SELLING-QUOTE-SPEC.md, owner rulings 2026-11-05) ═══════════════════════════════════════
+// The quotation as the selling point: every line prints as a SPEC SHEET (js/qb-spec-sheet.js), "Details ▸" edits the finish / includes / not-included / extra rows, chips and a
+// quote strength show what is missing, Verify & File blocks a made-to-order line with no size and lists the weak ones, the Warranty term follows a per-quote plan (the 6-month
+// service warranty, or the full-kitchen plan with the KitchenShield PMS), an "Our standard" page follows the terms, a summary strip and a dimension legend print once, section
+// headings never print an id — and Brilliant Steel is left exactly as it was. The price math is frozen: every test below that edits a field also checks that no figure moved.
+//
+// Mutation-tested in scratch copies (never the shared tree) — each of these must fail here: the sheet slot not .print-only / the editor lines not .no-print / Brilliant Steel getting the sheet;
+// canFile() without the size gate / the gate ignoring numeric sizes / the gate on Brilliant Steel; fileQuotation() without its second gate; the modal without its red block / its weak list;
+// a handler touching unitPrice / amount / priceBasis; editFinish accepting an unknown finish; the four fields lost by the payload / a template; warrantyPlan or showStandardPage missing from
+// PRICING_IDS; a legacy state gaining the Standard page; a stored Warranty term losing to the default; saveTerm storing an unedited default; the Standard page on Brilliant Steel / unticked / with the
+// KitchenShield paragraph on the standard plan / printing a warranty the Warranty term does not say; the summary strip stating a warranty a rewritten term contradicts; the legend without a size;
+// the footer / Standard page order; the preview listing the payment sections twice; a raw section id; the annex header on a stale number; a re-configure overwriting the finish / not regenerating the
+// includes; a line creator forgetting the four fields; the tutorial version / entry / steps.
+const SELL_DEPS = { PF, PC, FAM, constants: {} };
+const sellLine = (familyId, config, size, qty, price, extra) => {
+  const f = FAM.families[familyId];
+  const cfg = Object.assign({}, PF.defaultConfig(f), config || {});
+  const it = QB.buildLine(SELL_DEPS, { family: f, primary: { id: f.primary, category: 'prep_washing', formulaType: 'per_length' }, config: cfg, size, qty, basis: { priced: false } });
+  assert.ok(it, `buildLine refused ${familyId}`);
+  delete it._cfg; delete it.needsPrice;
+  it.unitPrice = price; it.amount = price * qty; it.priceBasis = 'manual'; it.priceManual = true;     // a typed price, like the review's sample quote
+  return Object.assign(it, extra || {});
+};
+// the review's sample quote (2026-11-05): five configured lines and three catalogue lines — a typed price on every one, so the database never re-prices it
+const catLine = (id, category, name, dims, specs, qty, price, lead, formulaType) => ({ id, category, name, dims, specs, specStr: '', qty, unit: 'pc', unitPrice: price, amount: price * qty, priceManual: true, leadTime: lead, laborHours: null, formulaType });
+const sampleItems = () => [
+  sellLine('prep_table', {}, { W: 1800, D: 700, H: 850 }, 2, 28500, { notes: 'Under the pass-through window' }),
+  sellLine('sink', { basins: 3, faucet: 'prerinse' }, { W: 2100, D: 700, H: 850 }, 1, 46800),
+  sellLine('stove', { positions: ['hp_large', 'hp_large', 'lp_small', 'lp_small'], addons: ['griddle'] }, { W: 1500, D: 800, H: 850 }, 1, 68500),
+  sellLine('hood', {}, { W: 3000, D: 1000 }, 1, 54000),
+  sellLine('rack', { tiers: 4, wheels: true }, { W: 1200, D: 500, H: 1800 }, 3, 14500),
+  catLine('PW-004', 'prep_washing', 'SS Wash Sink (Single) with Gooseneck Faucet', 'L500 × W500 × H850 mm', [{ label: 'Basin Depth', value: '300mm' }, { label: 'Faucet Type', value: 'Gooseneck' }], 1, 16500, '7-10 days', 'per_length'),
+  catLine('RF-004', 'refrigeration', 'Undercounter Chiller', '', [], 1, 62000, '14-21 days', 'fixed'),
+  catLine('FS-001', 'fire_suppression', 'Fire Suppression System (Wet Chemical, Small)', '', [], 1, 85000, '21-30 days', 'fixed'),
+];
+const LEGACY_FIELDS = ['finish', 'includes', 'excludes', 'specLines'];
+const legacyOf = (items) => items.map((it) => { const c = JSON.parse(JSON.stringify(it)); LEGACY_FIELDS.forEach((k) => delete c[k]); if (c.familyId) c.leadTime = '—'; return c; });
+const sellBuilder = (items, { co = 'BK', plan = 'service6', page = true } = {}) => {
+  const b = builder();
+  b.run(`currentCo = ${JSON.stringify(co)};`);
+  if (co === 'BS') b.ctx.document.body.classList.add('co-bs');
+  b.el('showStandardPage').type = 'checkbox';       // the real input is one: getPricingFields() reads .checked for a checkbox, .value otherwise
+  b.el('warrantyPlan').value = plan; b.el('showStandardPage').checked = page;
+  b.run(`items.length = 0; items.push(...${JSON.stringify(items || sampleItems())}); cfgRefreshAll(); renderItems();`);
+  return b;
+};
+const money = (b) => JSON.parse(b.run('JSON.stringify(computeTotals())'));
+const priceFields = (b) => b.plain('items.map(i => [i.unitPrice, i.amount, i.qty, i.priceBasis, i.priceManual === true, i.basisUnitPrice, i.needsPrice === true])');
+const fillVerifySell = (b) => { for (const [id, v] of Object.entries({ quoteNo: 'BKMLWB261105-001R1', quoteDate: '2026-11-05', salesperson: 'A', clientName: 'Client', clientPhone: '1', clientEmail: 'a@b.c' })) b.el(id).value = v; };
+
+describe('SELLING QUOTE — the markup, the loader and the constants', () => {
+  it('js/qb-spec-sheet.js loads last in the builder\'s own script list (after qb-configured.js, ahead of the main script) and is NOT an app-kit script', () => {
+    const loader = (HTML.match(/<script>\(function\(\)\{var v=new URLSearchParams[^\n]*?<\/script>\n/) || [''])[0];
+    const tags = [...loader.matchAll(/'(js\/[a-z-]+\.js)'/g)].map((m) => m[1]);
+    assert.deepEqual(tags.slice(-2), ['js/qb-configured.js', 'js/qb-spec-sheet.js']);
+    assert.equal(tags.length, 7);
+    assert.equal(typeof makeEnv().run('window.QBSpecSheet.rows'), 'string' === typeof 1 ? 'x' : 'function');
+    assert.equal(/<script[^>]*src="js\/qb-spec-sheet/.test(HTML), false, 'never a bare <script src> in the builder: the loader writes it with ?v=');
+    assert.equal(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').includes('qb-spec-sheet'), false, 'not an app-kit script of index.html');
+  });
+
+  it('the new blocks are in the markup, in print order: …terms → footer → "Our standard" → (internal panel) → photo annex; and the Terms tab carries the warranty plan and the tick', () => {
+    const at = (id) => HTML.indexOf(`id="${id}"`);
+    for (const id of ['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox']) assert.ok(at(id) > 0, id);
+    assert.ok(at('termsSection') < at('printFooter') && at('printFooter') < at('standardPage') && at('standardPage') < at('photoAnnex') && at('photoAnnex') < at('agentBox'), 'footer, then the Standard page, then the annex');
+    assert.match(HTML, /<div class="print-only print-footer" id="printFooter">/);
+    assert.match(HTML, /<div class="print-only" id="standardPage"><\/div>/);
+    assert.match(HTML, /<div class="print-only doc-notes" id="itemsNotes"><\/div>/);
+    assert.match(HTML, /<div class="print-only summary-strip" id="summaryStrip"><\/div>/);
+    assert.match(HTML, /<span class="ms-chip shadow no-print" id="qualityChip" style="display:none;"><\/span>/);
+    assert.match(HTML, /<div class="no-print" id="termsOptionsBox"/);
+    const sel = HTML.match(/<select id="warrantyPlan" onchange="onWarrantyPlanChange\(\)">([\s\S]*?)<\/select>/)[1];
+    assert.deepEqual([...sel.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]), ['service6', 'kitchenshield12'], 'the standard plan is first (the default)');
+    assert.match(sel, /6-month service warranty \(standard\)/);
+    assert.match(sel, /Full kitchen — 6-month service warranty \+ 12 months PMS with KitchenShield™/);
+    assert.match(HTML, /<input type="checkbox" id="showStandardPage" checked onchange="onShowStandardPageChange\(\)">/);
+    assert.equal(/fullKitchen/.test(HTML), false, 'the fullKitchen checkbox of the first draft of the spec is replaced by the warranty plan (ruling #1)');
+  });
+
+  it('warrantyPlan and showStandardPage ride PRICING_IDS (so a draft, a template, a revision and a filed quote keep them), after every older key', () => {
+    const ids = makeEnv().plain('PRICING_IDS');
+    assert.deepEqual(ids.slice(-2), ['warrantyPlan', 'showStandardPage']);
+    assert.equal(new Set(ids).size, ids.length);
+    assert.ok(HTML.includes('id="warrantyPlan"') && HTML.includes('id="showStandardPage"'), 'both have their control in the Terms tab');
+  });
+
+  it('the preview clones the same blocks the PDF prints, in print order, each once (the payment sections live INSIDE the terms); Brilliant Steel keeps its old order', () => {
+    const b = makeEnv();
+    assert.deepEqual(b.plain('QB_DOC_SOURCE_IDS'), ['lhPrintHeader', 'phSubject', 'billStrip', 'itemsSection', 'diSection', 'timelineSection', 'remarksSection', 'termsSection', 'printFooter', 'standardPage', 'photoAnnex']);
+    assert.deepEqual(b.plain('QB_DOC_SOURCE_IDS_BS'), ['lhPrintHeader', 'phSubject', 'billStrip', 'itemsSection', 'diSection', 'timelineSection', 'remarksSection', 'termsSection', 'photoAnnex', 'printFooter']);
+    for (const list of [b.plain('QB_DOC_SOURCE_IDS'), b.plain('QB_DOC_SOURCE_IDS_BS')]) assert.equal(list.some((id) => id === 'paymentSection' || id === 'paymentDetailsSection'), false, 'listing the payment sections as well showed them twice in the Client preview');
+    assert.deepEqual(b.plain('qbDocSourceIds()'), b.plain('QB_DOC_SOURCE_IDS'));
+    b.run(`setCompany('BS')`);
+    assert.deepEqual(b.plain('qbDocSourceIds()'), b.plain('QB_DOC_SOURCE_IDS_BS'));
+    b.run(`setCompany('BI')`);
+    assert.deepEqual(b.plain('qbDocSourceIds()'), b.plain('QB_DOC_SOURCE_IDS'));
+    // unifyPaymentIntoTerms puts both payment sections INSIDE #termsSection: that is why the preview must not list them
+    assert.match(HTML, /terms\.insertBefore\(el, anchor\)/);
+  });
+
+  it('the print CSS: the Standard page is its own page and only when it has content; the sheet\'s cells keep their own two columns; the room for the sheet is Barro Kitchens / Barro Industries only; the alignment fix stays', () => {
+    assert.match(HTML, /#standardPage\{display:none!important;\}\n\s*#standardPage\.has-std\{display:block!important;page-break-before:always;break-before:page;\}/);
+    assert.match(HTML, /\.items-table \.spec-sheet td\.ss-l\{width:24mm!important;\}\n\s*\.items-table \.spec-sheet td\.ss-v\{width:auto!important;\}/);
+    assert.match(HTML, /body:not\(\.co-bs\) \.items-table th:nth-child\(2\)\{width:54%!important;\}/);
+    assert.match(HTML, /body:not\(\.co-bs\) \.items-table th:nth-child\(3\),\n\s*body:not\(\.co-bs\) \.items-table th:nth-child\(4\)\{width:7%!important;\}/);
+    assert.match(HTML, /body:not\(\.co-bs\) \.cat-row\{page-break-after:avoid;break-after:avoid;\}/);
+    // …and the Client preview gets the same room (Barro Kitchens / Barro Industries only; 4 + 54 + 7 + 7 + 12 + 16 = 100), Brilliant Steel's preview keeps its widths
+    assert.match(HTML, /body:not\(\.co-bs\) \.qb-doc-sheet \.items-table th:nth-child\(2\)\{width:54%!important;\}\nbody:not\(\.co-bs\) \.qb-doc-sheet \.items-table th:nth-child\(3\),\nbody:not\(\.co-bs\) \.qb-doc-sheet \.items-table th:nth-child\(4\)\{width:7%!important;\}\nbody:not\(\.co-bs\) \.qb-doc-sheet \.items-table th:nth-child\(5\)\{width:12%!important;\}\nbody:not\(\.co-bs\) \.qb-doc-sheet \.items-table th:nth-child\(6\)\{width:16%!important;\}/);
+    assert.match(HTML, /\.qb-doc-sheet \.items-table th:nth-child\(2\)\{width:46%!important;\}\n\.qb-doc-sheet \.items-table th:nth-child\(5\)\{width:14%!important;\}\n\.qb-doc-sheet \.items-table th:nth-child\(6\)\{width:18%!important;\}/);
+    // Brilliant Steel keeps the widths it always had (4 + 46 + 9 + 9 + 14 + 18 = 100)
+    assert.match(HTML, /\.items-table th:nth-child\(2\),\n\s*\.items-table td:nth-child\(2\)\{width:46%!important;\}/);
+    assert.match(HTML, /\.items-table th:nth-child\(5\)\{width:14%!important;\}\n\s*\.items-table th:nth-child\(6\)\{width:18%!important;\}/);
+    // the already-applied print alignment fix is kept
+    assert.match(HTML, /\.spec-edit\{display:block;font-size:8pt;color:#333;\}\n\s*\.dims-edit\{display:block;font-size:8pt;color:#333;\}/);
+    // the crew copy carries no sales text
+    assert.match(HTML, /body\.body-workforce #standardPage,\nbody\.body-workforce #summaryStrip,\nbody\.body-workforce #itemsNotes\{display:none!important;\}/);
+    assert.match(HTML, /body\.co-bs #termsOptionsBox\{display:none!important;\}/);
+    assert.match(HTML, /\.qb-doc-sheet #standardPage:not\(\.has-std\)\{display:none!important;\}/);
+    assert.match(HTML, /\.qb-doc-sheet #photoAnnex\.has-photos\{margin-top:22px;padding-top:18px;border-top:2px dashed #c9d3e2;\}/);
+  });
+});
+
+describe('SELLING QUOTE — a Barro Kitchens line prints as a spec sheet; the Estimator keeps its editable lines and gains Details ▸', () => {
+  it('the description cell: name, the .print-only spec sheet (Size first), then the editable Specs / Dims / Notes lines — all .no-print — then the cost / config rows and the Details ▸ row', () => {
+    const b = sellBuilder();
+    const html = b.el('itemsTbody').innerHTML;
+    const row = html.split('<tr class="item-row"').find((r) => r.includes('SS Sink'));
+    assert.ok(row.indexOf('class="name-cell') < row.indexOf('class="print-only sheet-slot"') && row.indexOf('class="print-only sheet-slot"') < row.indexOf('<span class="spec-tag no-print">Specs</span>'));
+    assert.match(row, /<div class="print-only sheet-slot"><table class="spec-sheet"><tr class="ss-row ss-size"><td class="ss-l">Size<\/td><td class="ss-v">L2100 × W700 × H850 mm<\/td><\/tr><tr class="ss-row ss-spec"><td class="ss-l">Material<\/td>/);
+    assert.match(row, /<div class="spec-line  no-print"><span class="spec-tag no-print">Specs<\/span>/);
+    assert.match(row, /<div class="spec-line  no-print"><span class="spec-tag no-print">Dims<\/span>/);
+    assert.match(row, /<div class="notes-cell cell-edit pe-empty no-print"/);
+    assert.ok(row.indexOf('line-details-toggle') > row.indexOf('data-cfg-edit'), 'the Details row comes after the config row');
+    assert.match(row, /<button type="button" class="cfg-link line-details-toggle" aria-expanded="false" onclick="toggleLineDetails\(1\)">Details ▸<\/button>/);
+    // the printed sentence of old is still the editable Specs line (existing tests read it), unchanged
+    assert.match(row, /<span class="spec-edit cell-edit"[^>]*>Material: Stainless Steel 304 Food Grade • Sinks: 3 • /);
+  });
+
+  it('the sheet carries the finish, includes, not-included and the ruled lead time of a freshly configured line; a catalogue line only what it has; a bare catalogue line only its name', () => {
+    const b = sellBuilder();
+    const rowOf = (name) => b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes(name));
+    const sheetOf = (name) => (rowOf(name).match(/<table class="spec-sheet">[\s\S]*?<\/table>/) || [''])[0];
+    const sink = sheetOf('SS Sink');
+    for (const must of ['<td class="ss-l">Finish</td><td class="ss-v">Hairline finish</td>', '<td class="ss-l">Includes</td><td class="ss-v">3 basins with waste fittings and strainers; pre-rinse spray faucet; adjustable bullet feet</td>',
+      '<td class="ss-l">Not included</td><td class="ss-v">Water supply and drain line to the sink; angle valves</td>', '<td class="ss-l">Lead time</td><td class="ss-v">25 working days min.</td>', '<tr class="ss-row ss-construction">']) assert.ok(sink.includes(must), must);
+    const wash = sheetOf('SS Wash Sink (Single)');
+    assert.equal(/Finish|Includes|Lead time|Construction/.test(wash), false, 'a catalogue line states nothing it does not have (its "7-10 days" never prints)');
+    assert.match(wash, /Basin Depth<\/td><td class="ss-v">300mm/);
+    assert.equal(sheetOf('Undercounter Chiller'), '', 'a bare catalogue line has no sheet');
+    assert.match(rowOf('Undercounter Chiller'), /<div class="print-only sheet-slot"><\/div>/);
+  });
+
+  it('a LEGACY configured line (none of the new fields) prints exactly the rows it always had — size, material, options, construction — no finish, no includes, no lead time (a reopened quote never changes its document)', () => {
+    const b = sellBuilder(legacyOf(sampleItems()));
+    const sheet = (b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('SS Rack')).match(/<table class="spec-sheet">[\s\S]*?<\/table>/) || [''])[0];
+    assert.deepEqual([...sheet.matchAll(/<td class="ss-l">([^<]*)<\/td>/g)].map((m) => m[1]), ['Size', 'Material', 'Tiers', 'Wheels', 'Construction']);
+    assert.equal(b.run('QBSpecSheet.docNotes(items).lead'), '', 'no ruled lead on a legacy quote: no lead sentence');
+  });
+
+  it('a line in the preparer\'s own wording prints the free text as ONE paragraph and shows "custom wording" + "↺ regenerate"; regenerate deletes the override and the generated rows print again', () => {
+    const b = sellBuilder();
+    b.run(`items[1].specEdit = 'My own wording\\nsecond line'; renderItems();`);
+    const row = b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('SS Sink'));
+    assert.match(row, /<tr class="ss-row ss-spec"><td class="ss-v" colspan="2">My own wording<br>second line<\/td><\/tr>/);
+    assert.equal(/<td class="ss-l">Material<\/td>/.test(row), false);
+    assert.match(row, /<span class="ms-chip warn" title="[^"]*">custom wording<\/span><button type="button" class="cfg-link" onclick="regenerateSpecs\(1\)"/);
+    const before = priceFields(b);
+    b.run('regenerateSpecs(1)');
+    assert.equal(b.run(`'specEdit' in items[1]`), false);
+    assert.match(b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('SS Sink')), /<td class="ss-l">Material<\/td>/);
+    assert.deepEqual(priceFields(b), before);
+    // a custom line with no structured specs has nothing to regenerate to: no chip
+    b.run(`items.push({id:'CUSTOM',category:'miscellaneous',name:'Gate',dims:'L2000 mm',specs:[],specEdit:'Mild steel',qty:1,unit:'pc',unitPrice:9000,amount:9000,formulaType:'fixed'}); renderItems();`);
+    assert.equal(/custom wording/.test(b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('Gate'))), false);
+  });
+
+  it('the chips: "no size" (made-to-order, red), "no specs", "no finish", "no photo" — a photo linked to a line clears its chip; fee lines and Brilliant Steel get none', () => {
+    const b = sellBuilder();
+    const chips = (name) => { const row = b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes(name)); const box = (row.match(/<span class="ld-chips"[^>]*>([\s\S]*?)<\/span><\/div>/) || [, ''])[1]; return [...(box.match(/<span class="ms-chip (?:bad|warn|shadow)" title="[^"]*">([^<]*)<\/span>/g) || [])].map((x) => x.replace(/<[^>]*>/g, '')); };
+    assert.deepEqual(chips('SS Sink'), ['no photo']);
+    assert.deepEqual(chips('SS Wash Sink (Single)'), ['no finish', 'no photo'], 'catalogue lines per length are made to order: they lack a finish; they have specs and a size');
+    assert.deepEqual(chips('Undercounter Chiller'), ['no specs', 'no photo']);
+    b.run(`quotePhotos.push({ url: 'https://firebasestorage.googleapis.com/x', caption: '', itemIndex: 1 }); renderItems();`);
+    assert.deepEqual(chips('SS Sink'), [], 'a linked photo clears the chip');
+    b.run(`items.push({id:'CUSTOM',category:'miscellaneous',name:'Pass-through shelf',dims:'',specs:[],specEdit:'',qty:1,unit:'pc',unitPrice:1000,amount:1000,formulaType:'fixed'}); renderItems();`);
+    assert.deepEqual(chips('Pass-through shelf'), ['no size', 'no specs', 'no finish', 'no photo']);
+    assert.match(b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('Pass-through shelf')), /<span class="ms-chip bad" title="[^"]*">no size<\/span>/);
+    const bs = sellBuilder(sampleItems(), { co: 'BS' });
+    assert.equal(/line-details|ms-chip (?:bad|warn|shadow)" title="No photo|no photo|no size/.test(bs.el('itemsTbody').innerHTML), false, 'Brilliant Steel: no Details row, no chips');
+  });
+
+  it('Brilliant Steel\'s rows are the OLD rows: no sheet slot, no Details row, and the Specs / Dims / Notes lines keep their classes (they print, as they always did)', () => {
+    const bs = sellBuilder(sampleItems(), { co: 'BS' });
+    const row = bs.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('SS Sink'));
+    assert.equal(/sheet-slot|spec-sheet|line-details/.test(row), false);
+    assert.match(row, /<div class="spec-line "><span class="spec-tag no-print">Specs<\/span><span class="spec-edit cell-edit"/);
+    assert.match(row, /<div class="spec-line "><span class="spec-tag no-print">Dims<\/span><span class="dims-edit cell-edit"/);
+    assert.match(row, /<div class="notes-cell cell-edit pe-empty" contenteditable="true"/);
+    assert.equal(bs.run('docSheetOn()'), false);
+    assert.equal(bs.run('lineDetailsHtml(items[0], 0)'), '');
+    assert.equal(bs.run('lineChipsHtml(items[0], 0)'), '', 'the chips helper itself refuses Brilliant Steel (not only its callers)');
+    assert.equal(bs.el('qualityChip').style.display, 'none');
+  });
+
+  it('without the helper file (an offline copy that failed to load it) the builder degrades to the old rows — it never throws', () => {
+    const b = builder();
+    b.run('delete window.QBSpecSheet;');
+    b.run(`items.length = 0; items.push(...${JSON.stringify(sampleItems())}); cfgRefreshAll();`);
+    assert.doesNotThrow(() => b.run('renderItems(); renderDocExtras(); buildVerifyModal();'));
+    assert.equal(b.run('docSheetOn()'), false);
+    assert.equal(b.run('canFile.name'), 'canFile');
+    assert.equal(/sheet-slot/.test(b.el('itemsTbody').innerHTML), false);
+  });
+
+  it('the Details editor (open): the four finishes + "not stated" with the current one pressed, includes / not-included one per line, extra rows; closed, nothing of it is in the markup', () => {
+    const b = sellBuilder();
+    assert.equal(/class="line-details no-print"/.test(b.el('itemsTbody').innerHTML), false);
+    b.run('toggleLineDetails(1)');
+    const row = b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('SS Sink'));
+    assert.match(row, /aria-expanded="true" onclick="toggleLineDetails\(1\)">Details ▾<\/button>/);
+    const ed = row.match(/<div class="line-details no-print" data-ld="1">[\s\S]*?<div class="ld-hint">/)[0];
+    assert.deepEqual([...ed.matchAll(/<button type="button" class="ld-pill" aria-pressed="(true|false)"[^>]*>([^<]*)<\/button>/g)].map((m) => [m[2], m[1]]), [['Hairline', 'true'], ['Brushed', 'false'], ['Mirror', 'false'], ['Satin', 'false'], ['not stated', 'false']]);
+    assert.ok(ed.includes('onclick="editFinish(1,\'hairline\')"') && ed.includes('onclick="editFinish(1,\'\')"'));
+    assert.match(ed, /<textarea rows="3" placeholder="One item per line" aria-label="Includes" onchange="editIncludes\(1,this\)">3 basins with waste fittings and strainers\npre-rinse spray faucet\nadjustable bullet feet<\/textarea>/);
+    assert.match(ed, /<textarea rows="2" placeholder="One item per line" aria-label="Not included" onchange="editExcludes\(1,this\)">water supply and drain line to the sink\nangle valves<\/textarea>/);
+    assert.match(ed, /onclick="addSpecLine\(1\)">＋ Add a row<\/button>/);
+    // the open state is screen state: never in the payload or the saved draft
+    b.run('flushSaveToStorageNow()');
+    assert.equal(/_detailsOpen|line-details/.test(b.store.get('bkqb_items') + JSON.stringify(b.plain('buildQuotePayload()'))), false);
+    b.run('toggleLineDetails(1)');
+    assert.equal(/class="line-details no-print"/.test(b.el('itemsTbody').innerHTML), false);
+  });
+
+  it('user text never reaches the markup raw: a "<" in an include, an extra row, a note and a name is escaped in the sheet AND in the editor', () => {
+    const b = sellBuilder();
+    b.run(`items[1].includes = ['<img src=x onerror=alert(1)>']; items[1].excludes = ['a "quoted" <b>']; items[1].specLines = [{ label: '<i>L', value: '</td><script>x</script>' }]; items[1].notes = '<u>n</u>'; items[1].name = '<s>Sink</s>'; toggleLineDetails(1);`);
+    const row = b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('Sink'));
+    { const stripped = row.replace(/<\/?(tr|td|div|span|table|button|textarea|input|section)\b[^>]*>/g, ''); const m = /<(img|script|i|u|s|b)[ >]/.exec(stripped); assert.equal(m, null, m ? stripped.slice(Math.max(0, m.index - 80), m.index + 120) : ''); }
+    assert.ok(row.includes('&lt;img src=x onerror=alert(1)&gt;') && row.includes('&lt;/td&gt;&lt;script&gt;x&lt;/script&gt;'));
+    // the editor's own inputs (the strip above eats a tag-looking value inside an attribute, so look at them directly)
+    assert.ok(row.includes('value="&lt;i&gt;L"') && row.includes('value="&lt;/td&gt;&lt;script&gt;x&lt;/script&gt;"'), 'the extra-row inputs hold the escaped label and value');
+    assert.equal(row.includes('value="<i>L"') || row.includes('value="</td>'), false, 'an extra-row input carries raw markup');
+  });
+});
+
+describe('SELLING QUOTE — the Details handlers change the line\'s own fields and NEVER a price', () => {
+  const lineOf = (b) => b.plain('items[1]');
+  it('editFinish / editIncludes / editExcludes / addSpecLine / editSpecLine / removeSpecLine / regenerateSpecs: each sets its field, saves, repaints, flashes — and every price, basis and the totals are byte-identical', () => {
+    const b = sellBuilder();
+    const prices = priceFields(b), totals = JSON.stringify(money(b));
+    const el = (value) => ({ value });
+    b.run(`editFinish(1, 'mirror')`);
+    assert.equal(lineOf(b).finish, 'mirror');
+    b.run(`editIncludes(1, ${JSON.stringify(el(' one \n\ntwo\nthree '))})`);
+    assert.deepEqual(lineOf(b).includes, ['one', 'two', 'three']);
+    b.run(`editExcludes(1, ${JSON.stringify(el('a\nb'))})`);
+    assert.deepEqual(lineOf(b).excludes, ['a', 'b']);
+    b.run('addSpecLine(1)');
+    assert.deepEqual(lineOf(b).specLines, [{ label: '', value: '' }]);
+    assert.equal(b.run('_detailsOpen.has(items[1])'), true, 'adding a row opens the editor');
+    b.run(`editSpecLine(1, 0, 'label', ${JSON.stringify(el('  Capacity '))}); editSpecLine(1, 0, 'value', ${JSON.stringify(el('2 x 10 L'))})`);
+    assert.deepEqual(lineOf(b).specLines, [{ label: 'Capacity', value: '2 x 10 L' }]);
+    assert.match(b.el('itemsTbody').innerHTML.split('<tr class="item-row"').find((r) => r.includes('SS Sink')), /<td class="ss-l">Finish<\/td><td class="ss-v">Mirror finish<\/td>/);
+    b.run('removeSpecLine(1, 0)');
+    assert.deepEqual(lineOf(b).specLines, []);
+    b.run(`items[1].specEdit = 'x'; regenerateSpecs(1)`);
+    assert.equal('specEdit' in lineOf(b), false);
+    assert.deepEqual(priceFields(b), prices, 'no price, basis or flag moved');
+    assert.equal(JSON.stringify(money(b)), totals, 'the totals are byte-identical');
+  });
+
+  it('caps and guards: an unknown finish is ignored (the line keeps its finish), "not stated" clears it, 12 includes of 160 characters at most, a row\'s label 60 and value 300, 12 extra rows at most, a stranger\'s index or field does nothing', () => {
+    const b = sellBuilder();
+    b.run(`editFinish(1, 'matte'); editFinish(1, 'HAIRLINE'); editFinish(1, 5);`);
+    assert.equal(lineOf(b).finish, 'hairline');
+    b.run(`editFinish(1, '')`);
+    assert.equal(lineOf(b).finish, '');
+    b.run(`editIncludes(1, ${JSON.stringify({ value: Array.from({ length: 20 }, (_, i) => `${i}${'x'.repeat(200)}`).join('\n') })})`);
+    assert.equal(lineOf(b).includes.length, 12);
+    assert.equal(lineOf(b).includes.every((t) => t.length === 160), true);
+    for (let i = 0; i < 14; i++) b.run('addSpecLine(1)');
+    assert.equal(lineOf(b).specLines.length, 12);
+    assert.match(b.toast(), /Twelve extra rows/);
+    b.run(`editSpecLine(1, 0, 'label', ${JSON.stringify({ value: 'L'.repeat(100) })}); editSpecLine(1, 0, 'value', ${JSON.stringify({ value: 'V'.repeat(400) })})`);
+    assert.deepEqual([lineOf(b).specLines[0].label.length, lineOf(b).specLines[0].value.length], [60, 300]);
+    const snap = JSON.stringify(b.plain('items'));
+    b.run(`editSpecLine(1, 0, 'price', { value: '1' }); editSpecLine(1, 99, 'label', { value: 'x' }); editSpecLine(99, 0, 'label', { value: 'x' }); editFinish(99, 'mirror'); editIncludes(99, { value: 'x' }); removeSpecLine(1, 99); removeSpecLine(99, 0); regenerateSpecs(99); toggleLineDetails(99); addSpecLine(99)`);
+    assert.equal(JSON.stringify(b.plain('items')), snap);
+  });
+
+  it('the finish is a pill group: pressing a pill sets exactly that finish; the sheet follows', () => {
+    const b = sellBuilder();
+    for (const f of ['brushed', 'satin', 'mirror', 'hairline']) {
+      b.run(`editFinish(1, ${JSON.stringify(f)})`);
+      assert.equal(lineOf(b).finish, f);
+      assert.ok(b.el('itemsTbody').innerHTML.includes(`<td class="ss-l">Finish</td><td class="ss-v">${QS.FINISH_LABELS[f]}</td>`));
+    }
+  });
+});
+
+describe('SELLING QUOTE — the price math is untouched (acceptance 3): totals, VAT, discount, commission, payment schedule are byte-identical with and without the new fields', () => {
+  it('the sample quote\'s totals are the figures the review\'s printed quotation carried before this phase — ₱433,300 subtotal, ₱51,996 VAT, ₱485,296 grand total — for the new lines and for the same lines stripped of every new field', () => {
+    for (const items of [sampleItems(), legacyOf(sampleItems())]) {
+      const b = sellBuilder(items);
+      b.el('showVat').checked = true;
+      const t = money(b);
+      assert.deepEqual([t.subtotal, t.vatAmt, t.grand, t.discountAmt, t.commissionAmt], [433300, 51996, 485296, 0, 0]);
+    }
+  });
+
+  it('every pricing control — VAT, a percent discount, a commission, a down payment and staggered balance, an installment plan, milestones, an options quote — gives the same JSON with the new fields as without them', () => {
+    const variants = [
+      () => {}, (b) => { b.el('showVat').checked = true; }, (b) => { b.el('showVat').checked = true; b.el('discountPct').value = '10'; b.el('commissionPct').value = '3'; },
+      (b) => { b.el('dpMode').value = '30'; b.el('balMode').value = 'stagger3'; }, (b) => { b.el('dpMode').value = '20'; b.el('balMode').value = 'install6'; b.el('interestRate').value = '8'; },
+      (b) => { b.el('optionsMode').checked = true; b.el('discountPct').value = '5'; b.el('showVat').checked = true; },
+      (b) => { b.run(`payMilestones = [{pct:40,label:'Upon order',date:''},{pct:30,label:'Upon fabrication',date:''},{pct:30,label:'Upon delivery',date:''}]`); },
+    ];
+    const pack = (b) => {
+      b.run('renderItems()');
+      const pl = b.plain('buildQuotePayload()');
+      return JSON.stringify({ totals: money(b), totalsTbl: b.el('totalsTbl').innerHTML, paymentSummary: b.el('paymentSummary').innerHTML,
+        payload: { subtotal: pl.subtotal, discountAmount: pl.discountAmount, netAmount: pl.netAmount, vatAmount: pl.vatAmount, total: pl.total, grandTotal: pl.grandTotal, commissionPct: pl.commissionPct, commissionAmount: pl.commissionAmount, payment: pl.payment, optionsBasis: pl.optionsBasis, options: (pl.options || []).map(({ label, ...r }) => r), timeline: pl.timeline },
+        prices: priceFields(b) });
+    };
+    variants.forEach((setV, i) => {
+      const a = sellBuilder(sampleItems()); setV(a);
+      const c = sellBuilder(legacyOf(sampleItems())); setV(c);
+      assert.equal(pack(a), pack(c), `variant ${i}`);
+    });
+  });
+
+  it('the document options change no figure: the warranty plan, the Standard page tick, the finish, includes, extra rows and the Details toggle leave computeTotals() and every price as they were', () => {
+    const b = sellBuilder(); b.el('showVat').checked = true; b.el('discountPct').value = '10';
+    const totals = JSON.stringify(money(b)), prices = priceFields(b);
+    b.el('warrantyPlan').value = 'kitchenshield12'; b.run('onWarrantyPlanChange()');
+    b.el('showStandardPage').checked = false; b.run('onShowStandardPageChange()');
+    b.run(`editFinish(0, 'satin'); editIncludes(0, { value: 'a\\nb' }); addSpecLine(0); toggleLineDetails(0); renderItems(); renderDocExtras();`);
+    assert.equal(JSON.stringify(money(b)), totals);
+    assert.deepEqual(priceFields(b), prices);
+  });
+
+  it('the new modules carry no price logic: the builder\'s print / sheet code reads no unitPrice (the only reads of a price are the ones that were already there)', () => {
+    const raw = HTML.slice(HTML.indexOf('//  SPEC SHEET, LINE DETAILS, COMPLETENESS, SUMMARY AND "OUR STANDARD"'), HTML.indexOf('function renderItems(){'));
+    assert.ok(raw.length > 6000);
+    const block = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    assert.equal(/unitPrice|\.amount|priceBasis|priceManual|basisUnitPrice|computeTotals|\.grand\b|formatPeso|capitalMaterials/.test(block), false);
+  });
+});
+
+describe('SELLING QUOTE — Verify & File: a made-to-order line with no size is a HARD block; the rest of the document check only warns (owner ruling #5)', () => {
+  // a custom line with a bill of materials: made to order (a "no costing" custom line is bought-in, so it would never be blocked)
+  const noSize = { id: 'CUSTOM', category: 'miscellaneous', name: 'Stainless pass-through shelf', dims: '', specs: [], specEdit: '', qty: 1, unit: 'pc', unitPrice: 12000, amount: 12000, formulaType: 'fixed', costMat: 5000, bom: [{ name: 'x', qty: 1, unitPrice: 5000 }] };
+  it('canFile() is false while a made-to-order line states no size — with every other check filled — and true once it has a dims text (or a numeric size)', () => {
+    const b = sellBuilder([sampleItems()[1]]);
+    fillVerifySell(b);
+    assert.equal(b.run('canFile()'), true, 'the harness fills every other check');
+    b.run(`items.push(${JSON.stringify(noSize)}); renderItems();`);
+    assert.equal(b.run('canFile()'), false);
+    assert.match(b.run('sizeBlockReason()'), /^1 made-to-order line\(s\) have no size — add the dimensions \(e\.g\. L1200 × W600 × H850 mm\) in the Dims line \(#2 Stainless pass-through shelf\)\.$/);
+    b.run(`items[1].dims = 'L1200 × W600 × H850 mm'; renderItems();`);
+    assert.equal(b.run('canFile()'), true);
+    b.run(`items[1].dims = ''; items[1].size = { W: 1200 }; renderItems();`);
+    assert.equal(b.run('canFile()'), true, 'a numeric size is a size');
+    b.run(`items[1].size = {}; renderItems();`);
+    assert.equal(b.run('canFile()'), false);
+  });
+
+  it('a configured line with no size, a per-length catalogue line with none, are blocked too; a bought-in fixed line, a pass-through, a "no costing" custom line and a fee line are not', () => {
+    const b = sellBuilder([]);
+    fillVerifySell(b);
+    const blocked = (line) => { b.run(`items.length = 0; items.push(${JSON.stringify({ category: 'miscellaneous', qty: 1, unit: 'pc', unitPrice: 5000, amount: 5000, ...line })}); renderItems();`); return b.run('canFile()') === false; };
+    assert.equal(blocked({ id: 'PW-004', name: 'Sink', familyId: 'sink', config: {}, size: {}, dims: '', priceBasis: 'manual', priceManual: true }), true);
+    assert.equal(blocked({ id: 'PW-004', name: 'Sink', formulaType: 'per_length', dims: '' }), true);
+    assert.equal(blocked({ id: 'RF-004', name: 'Chiller', formulaType: 'fixed', dims: '' }), false);
+    assert.equal(blocked({ id: 'CUSTOM', name: 'Client-supplied unit', dims: '', noCosting: true }), false);
+    assert.equal(blocked({ id: 'CUSTOM', name: 'Supplier item', dims: '', passThrough: true, costMat: 1000 }), false);
+    assert.equal(blocked({ id: 'MISCFEE', name: 'Delivery', dims: '', formulaType: 'per_length' }), false);
+  });
+
+  it('Brilliant Steel is never blocked by it (its quotations are left exactly as they were)', () => {
+    const b = sellBuilder([noSize], { co: 'BS' });
+    fillVerifySell(b);
+    assert.equal(b.run('sizeBlockReason()'), '');
+    assert.equal(b.run('canFile()'), true);
+    b.run('buildVerifyModal()');
+    assert.equal(/Made-to-order Lines Without a Size|Document completeness/.test(b.el('verifyBody').innerHTML), false);
+  });
+
+  it('fileQuotation() is a second gate: it posts nothing for a made-to-order line with no size even if canFile() were fooled, and files the quote once the size is typed', async () => {
+    const b = sellBuilder([sampleItems()[1], noSize]);
+    fillVerifySell(b);
+    b.run('canFile = () => true;');
+    await b.run('fileQuotation()');
+    assert.equal(b.posted.filter((p) => /^QUOTE_/.test(p.msg.type)).length, 0, 'an unsized line reached the bridge');
+    assert.match(b.toast(), /1 made-to-order line\(s\) have no size/);
+    b.run(`items[1].dims = 'L900 mm'`);
+    await b.run('fileQuotation()');
+    assert.ok(b.posted.find((p) => p.msg.type === 'QUOTE_FILED'), 'a sized quote files');
+  });
+
+  it('the modal: a red "Made-to-order Lines Without a Size" block naming the line by the number the table shows, the File button disabled — and the document-completeness list beside it', () => {
+    const b = sellBuilder([...sampleItems(), noSize]);
+    fillVerifySell(b);
+    b.run('buildVerifyModal()');
+    const html = b.el('verifyBody').innerHTML;
+    assert.match(html, /Made-to-order Lines Without a Size/);
+    assert.match(html, /1 made-to-order line\(s\) have no size — add the dimensions \(e\.g\. L1200 × W600 × H850 mm\) in the Dims line \(#\d+ Stainless pass-through shelf\)\./);
+    assert.equal(b.el('fileBtn').disabled, true);
+    const q = b.plain('docQuality()');
+    assert.match(html, new RegExp(`Document completeness — Quote strength ${q.outOf10}/10`));
+    assert.match(html, /\d lines? (?:has|have) no specs, \d (?:has|have) no finish — you can still file\./);
+    // numbered as the TABLE numbers them (section order), not by array position
+    const shown = b.plain(`lineNoOf(${b.run('items.length') - 1})`);
+    assert.ok(html.includes(`#${shown} Stainless pass-through shelf`), `the block names the line as the table does (#${shown})`);
+  });
+
+  it('the modal escapes every line name it prints (the size block and the completeness list) and numbers a line by the TABLE\'s number even when its section prints before the lines that come earlier in the list', () => {
+    const early = { ...noSize, category: 'cooking_line', name: 'Shelf <b>X</b>' };       // a section that prints first: its number is not its position
+    const weak = { id: 'CUSTOM', category: 'miscellaneous', name: 'Plain <i>Y</i>', dims: 'L1 mm', specs: [], specEdit: '', qty: 1, unit: 'pc', unitPrice: 1000, amount: 1000, formulaType: 'fixed' };
+    const b = sellBuilder([...sampleItems(), early, weak]);
+    fillVerifySell(b);
+    b.run('buildVerifyModal()');
+    const html = b.el('verifyBody').innerHTML;
+    assert.equal(/<b>X<\/b>|<i>Y<\/i>/.test(html), false, 'a line name reached the modal raw');
+    const at = b.run('items.length') - 2;                                                  // the array position of the sample's last-but-one line: the "early" one
+    const shown = b.plain(`lineNoOf(${at})`);
+    assert.notEqual(shown, at + 1, 'fixture: the number the table shows is not the array position');
+    assert.ok(html.includes(`(#${shown} Shelf &lt;b&gt;X&lt;/b&gt;)`), `the size block names it as #${shown} and escapes it: ${html.slice(html.indexOf('Made-to-order'), html.indexOf('Made-to-order') + 400)}`);
+    assert.equal(html.includes(`#${at + 1} Shelf`), false, 'never the array position');
+    assert.ok(html.includes('Plain &lt;i&gt;Y&lt;/i&gt; — no specs'), 'the completeness list escapes too');
+  });
+
+  it('a quote with every sheet complete says so and does not block; weak lines (no specs / no finish) only WARN — the quote still files', async () => {
+    const complete = sellBuilder([sampleItems()[0], sampleItems()[1]]);
+    fillVerifySell(complete);
+    complete.run('buildVerifyModal()');
+    assert.match(complete.el('verifyBody').innerHTML, /Every line has its specs and a finish\./);
+    assert.equal(complete.el('fileBtn').disabled, false);
+    const weak = sellBuilder([sampleItems()[1], sampleItems()[6], sampleItems()[5]]);
+    fillVerifySell(weak);
+    weak.run('buildVerifyModal()');
+    const html = weak.el('verifyBody').innerHTML;
+    assert.match(html, /1 line has no specs, 1 has no finish — you can still file\./);
+    assert.match(html, /Undercounter Chiller — no specs/);
+    assert.match(html, /SS Wash Sink \(Single\) with Gooseneck Faucet — no finish/);
+    assert.equal(/Made-to-order Lines Without a Size/.test(html), false);
+    assert.equal(weak.run('canFile()'), true);
+    await weak.run('fileQuotation()');
+    assert.ok(weak.posted.find((p) => p.msg.type === 'QUOTE_FILED'));
+  });
+
+  it('the quote strength: "Quote strength n/10" beside the Quote Items title and in the running pill; hidden with no lines; scored per line (a bought-in line with specs and a photo is complete)', () => {
+    const b = sellBuilder();
+    const q = b.plain('docQuality()');
+    assert.equal(q.count, 8);
+    assert.equal(b.el('qualityChip').textContent, `Quote strength ${q.outOf10}/10`);
+    assert.match(b.el('qualityChip').className, /^ms-chip (?:ok|warn|bad) no-print$/);
+    assert.notEqual(b.el('qualityChip').style.display, 'none');
+    assert.match(b.el('runningTotalPill').textContent, new RegExp(` · Strength ${q.outOf10}/10$`));
+    b.run('items.length = 0; renderItems();');
+    assert.equal(b.el('qualityChip').style.display, 'none');
+    // ≥ 8 green, 5-7 amber, < 5 red
+    const cls = (items) => { const c = sellBuilder(items); return c.el('qualityChip').className; };
+    assert.match(cls([{ ...sampleItems()[1] }]), /ms-chip ok/, 'a complete sheet that only lacks a photo is 8/10');
+    assert.match(cls([{ ...sampleItems()[1], finish: '' }]), /ms-chip warn/, 'no finish and no photo: 6/10');
+    assert.match(cls([{ ...sampleItems()[6] }]), /ms-chip bad/);
+    assert.match((() => { const c = sellBuilder([sampleItems()[1]]); c.run(`quotePhotos.push({ url: 'https://firebasestorage.googleapis.com/x', caption: '', itemIndex: 0 }); renderItems();`); return c.el('qualityChip').className; })(), /ms-chip ok/);
+  });
+});
+
+describe('SELLING QUOTE — what a saved quote carries: the four new fields, the warranty plan and the Standard page tick', () => {
+  const fieldsOf = (it) => ({ finish: it.finish, includes: it.includes, excludes: it.excludes, specLines: it.specLines, leadTime: it.leadTime });
+  it('the new fields survive buildQuotePayload() (the filed items AND editableState.items), loadEditableState(), the localStorage draft and stripTemplateState()', () => {
+    const b = sellBuilder();
+    b.run(`items[1].finish = 'satin'; items[1].includes = ['one', 'two']; items[1].excludes = ['three']; items[1].specLines = [{ label: 'Capacity', value: '2 x 10 L' }];`);
+    const want = fieldsOf(b.plain('items[1]'));
+    assert.deepEqual(want, { finish: 'satin', includes: ['one', 'two'], excludes: ['three'], specLines: [{ label: 'Capacity', value: '2 x 10 L' }], leadTime: '25 working days' });
+    const pl = b.plain('buildQuotePayload()');
+    assert.deepEqual(fieldsOf(pl.items[1]), want);
+    assert.deepEqual(fieldsOf(pl.editableState.items[1]), want);
+    b.run('flushSaveToStorageNow()');
+    assert.deepEqual(fieldsOf(JSON.parse(b.store.get('bkqb_items'))[1]), want);
+    // …through a reopen, through a template, and back
+    const re = sellBuilder([]);
+    re.run(`loadEditableState(${JSON.stringify(pl.editableState)}, { asRevision: false })`);
+    assert.deepEqual(fieldsOf(re.plain('items[1]')), want);
+    const tpl = b.plain(`stripTemplateState(buildQuotePayload().editableState)`);
+    assert.deepEqual(fieldsOf(tpl.items[1]), want);
+    assert.equal(tpl.clientName, '');
+    const fromTpl = sellBuilder([]);
+    fromTpl.run(`loadEditableState(${JSON.stringify(tpl)}, { asRevision: false })`);
+    assert.deepEqual(fieldsOf(fromTpl.plain('items[1]')), want);
+    assert.equal(fromTpl.run('buildQuotePayload().items.every(i => !("_cfg" in i))'), true, '`_cfg` still never leaves');
+  });
+
+  it('warrantyPlan and showStandardPage ride getPricingFields() → the payload\'s editableState.pricing → loadEditableState(); a draft resumes them', () => {
+    const b = sellBuilder(sampleItems(), { plan: 'kitchenshield12', page: false });
+    const pr = b.plain('getPricingFields()');
+    assert.equal(pr.warrantyPlan, 'kitchenshield12');
+    assert.equal(pr.showStandardPage, false);
+    const pl = b.plain('buildQuotePayload()');
+    assert.equal(pl.editableState.pricing.warrantyPlan, 'kitchenshield12');
+    assert.equal(pl.editableState.pricing.showStandardPage, false);
+    const re = sellBuilder([], { plan: 'service6', page: true });
+    re.run(`loadEditableState(${JSON.stringify(pl.editableState)}, { asRevision: false })`);
+    assert.equal(re.el('warrantyPlan').value, 'kitchenshield12');
+    assert.equal(re.el('showStandardPage').checked, false);
+    b.run('flushSaveToStorageNow()');
+    const saved = JSON.parse(b.store.get('bkqb_pricing'));
+    assert.deepEqual([saved.warrantyPlan, saved.showStandardPage], ['kitchenshield12', false]);
+  });
+
+  it('a state with NO plan reads two ways: a REOPEN / REVISION of a filing (the app stamps sourceDocId) is "as issued" (the select holds \'\', no Standard page); anything else — a draft saved before the plan existed, a link, a state with no pricing — is the current rules (6-month plan, Standard page ticked)', () => {
+    const state = (extra) => ({ currentCo: 'BK', items: legacyOf(sampleItems()), pricing: { showVat: true, quoteValidDays: '30' }, ...extra });
+    const b = sellBuilder([], { plan: 'kitchenshield12', page: true });
+    b.run(`loadEditableState(${JSON.stringify(state({ sourceDocId: 'Q-1', sourceCollection: 'bk_quotes', rootQuoteId: 'Q-1' }))}, { asRevision: false })`);
+    assert.equal(b.el('warrantyPlan').value, '');
+    assert.equal(b.run('isLegacyDoc()'), true);
+    assert.equal(b.el('showStandardPage').checked, false);
+    assert.equal(b.el('standardPage').innerHTML, '');
+    b.run(`loadEditableState({ currentCo: 'BK', items: [], sourceDocId: 'Q-2' }, { asRevision: false })`);
+    assert.equal(b.el('warrantyPlan').value, '', 'a reopened filing with no pricing at all is "as issued" too');
+    assert.equal(b.el('showStandardPage').checked, false);
+    // not a reopen: the current rules
+    b.run(`loadEditableState(${JSON.stringify(state())}, { asRevision: false })`);
+    assert.equal(b.el('warrantyPlan').value, 'service6');
+    assert.equal(b.run('isLegacyDoc()'), false);
+    assert.equal(b.el('showStandardPage').checked, true, 'a draft saved before the plan existed is a quote of the current rules: the page is ticked');
+    b.run(`loadEditableState({ currentCo: 'BK', items: [] }, { asRevision: false })`);
+    assert.equal(b.el('warrantyPlan').value, 'service6');
+    assert.equal(b.el('showStandardPage').checked, true);
+    // a stored tick / plan is honoured as it is, reopen or not
+    b.run(`loadEditableState(${JSON.stringify(state({ sourceDocId: 'Q-3', pricing: { warrantyPlan: 'kitchenshield12', showStandardPage: false } }))}, { asRevision: false })`);
+    assert.deepEqual([b.el('warrantyPlan').value, b.el('showStandardPage').checked, b.run('isLegacyDoc()')], ['kitchenshield12', false, false]);
+    // a garbled plan is never "as issued" by accident (an unknown value would otherwise blank the select)
+    for (const junk of ['service12', 'KITCHENSHIELD12', 7, null, true]) {
+      b.run(`loadEditableState(${JSON.stringify(state({ pricing: { warrantyPlan: junk } }))}, { asRevision: false })`);
+      assert.equal(b.el('warrantyPlan').value, 'service6', String(junk));
+    }
+  });
+
+  it('changing the warranty plan, or the Standard-page tick, schedules a save — so a draft, a template and a filed quote keep the choice', () => {
+    const b = sellBuilder();
+    b.run('renderTotals = function () {}; renderItems = function () {};');      // renderTotals() saves too: only the handlers' own save may schedule here
+    b.run('flushSaveToStorageNow()');
+    assert.equal(b.run('_saveToStorageTimer === null'), true, 'fixture: nothing pending');
+    b.el('warrantyPlan').value = 'kitchenshield12'; b.run('onWarrantyPlanChange()');
+    assert.equal(b.run('_saveToStorageTimer !== null'), true, 'the plan change was not saved');
+    b.run('flushSaveToStorageNow()');
+    assert.equal(JSON.parse(b.store.get('bkqb_pricing')).warrantyPlan, 'kitchenshield12');
+    assert.equal(b.run('_saveToStorageTimer === null'), true);
+    b.el('showStandardPage').checked = false; b.run('onShowStandardPageChange()');
+    assert.equal(b.run('_saveToStorageTimer !== null'), true, 'the tick was not saved');
+    b.run('flushSaveToStorageNow()');
+    assert.equal(JSON.parse(b.store.get('bkqb_pricing')).showStandardPage, false);
+  });
+
+  it('a brand-new quote (🗑 New) starts on the 6-month plan with the Standard page ticked', () => {
+    const b = sellBuilder(sampleItems(), { plan: 'kitchenshield12', page: false });
+    b.run('clearForm()');
+    assert.equal(b.el('warrantyPlan').value, 'service6');
+    assert.equal(b.el('showStandardPage').checked, true);
+  });
+});
+
+describe('SELLING QUOTE — the Warranty and Site Requirements terms in the builder: per plan, per company; a stored wording always wins; an unedited block keeps following its default', () => {
+  const WARRANTY_6 = '6-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.';
+  const KS = 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.';
+  const termHtml = (b, id) => { const grid = b.el('termsGrid').innerHTML; return (grid.split('<div class="terms-block').find((x) => x.includes(`saveTerm('${id}'`)) || '').split('>').slice(-2, -1).join('>') ? grid.split('<div class="terms-block').find((x) => x.includes(`saveTerm('${id}'`)).match(/<div class="term-content"[^>]*>([\s\S]*?)<\/div>/)[1] : ''; };
+
+  it('renderTerms() prints the plan\'s wording: the 6-month sentence by default, plus the PMS sentence on the full-kitchen plan; switching the plan re-renders it', () => {
+    const b = sellBuilder();
+    b.run('renderTerms()');
+    assert.equal(termHtml(b, 'tc_warranty'), WARRANTY_6);
+    b.el('warrantyPlan').value = 'kitchenshield12'; b.run('onWarrantyPlanChange()');
+    assert.equal(termHtml(b, 'tc_warranty'), `${WARRANTY_6} ${KS}`);
+    b.el('warrantyPlan').value = 'service6'; b.run('onWarrantyPlanChange()');
+    assert.equal(termHtml(b, 'tc_warranty'), WARRANTY_6);
+  });
+
+  it('a quote filed before this phase with a stored termsContent.tc_warranty keeps its stored wording — whatever the plan (regression: the stored override still wins)', () => {
+    const OLD = '12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.';
+    const b = sellBuilder([], { plan: 'kitchenshield12' });
+    b.run(`loadEditableState({ currentCo: 'BK', items: [], termsContent: { tc_warranty: ${JSON.stringify(OLD)} }, pricing: { warrantyPlan: 'kitchenshield12', showStandardPage: true } }, { asRevision: false })`);
+    assert.equal(termHtml(b, 'tc_warranty'), OLD);
+    assert.equal(b.run('termsContent.tc_warranty'), OLD);
+  });
+
+  it('saveTerm stores a block only when the preparer CHANGED it: clicking in and out of the default leaves nothing stored (so a later plan change still reaches it); an edit is stored and then wins', () => {
+    const b = sellBuilder();
+    b.run('renderTerms()');
+    b.run(`saveTerm('tc_warranty', { innerHTML: ${JSON.stringify(WARRANTY_6)} })`);
+    assert.equal(b.run(`'tc_warranty' in termsContent`), false, 'an unedited default is not stored');
+    b.el('warrantyPlan').value = 'kitchenshield12'; b.run('onWarrantyPlanChange()');
+    assert.equal(termHtml(b, 'tc_warranty'), `${WARRANTY_6} ${KS}`, 'it follows the plan');
+    b.run(`saveTerm('tc_warranty', { innerHTML: 'Our own warranty wording.' })`);
+    assert.equal(b.run('termsContent.tc_warranty'), 'Our own warranty wording.');
+    b.el('warrantyPlan').value = 'service6'; b.run('onWarrantyPlanChange()');
+    assert.equal(termHtml(b, 'tc_warranty'), 'Our own warranty wording.', 'a stored wording wins');
+    // an old stored default (a block that was clicked in before this rule) is also "the stored wording": it is the preparer's, and stays
+    b.run(`saveTerm('tc_validity', { innerHTML: 'This quotation is valid for 30 days from date of issuance. Prices are subject to change after validity.' })`);
+    assert.equal(b.run(`'tc_validity' in termsContent`), false);
+  });
+
+  it('Site Requirements names the company that is quoting (Barro Kitchens / Barro Industries OPC); Brilliant Steel keeps its old wording, for both terms, whatever the plan', () => {
+    const b = sellBuilder();
+    for (const [co, name] of [['BK', 'Barro Kitchens'], ['BI', 'Barro Industries OPC']]) {
+      b.run(`setCompany(${JSON.stringify(co)})`);
+      assert.equal(termHtml(b, 'tc_site'), `Client is responsible for ensuring site is ready for installation. ${name} is not liable for delays due to unprepared site conditions.`, co);
+      assert.equal(termHtml(b, 'tc_warranty'), WARRANTY_6, co);
+    }
+    b.el('warrantyPlan').value = 'kitchenshield12';
+    b.run(`setCompany('BS')`);
+    assert.equal(termHtml(b, 'tc_warranty'), '12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.');
+    assert.equal(termHtml(b, 'tc_site'), 'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.');
+    b.run(`setCompany('BK')`);
+    assert.match(termHtml(b, 'tc_warranty'), /KitchenShield™\.$/, 'back on Barro Kitchens the plan applies again');
+  });
+});
+
+describe('SELLING QUOTE — "Our standard", the summary strip and the dimension legend', () => {
+  const stdOf = (b) => b.el('standardPage').innerHTML;
+  const headings = (html) => [...html.matchAll(/<h4>([^<]*)<\/h4>/g)].map((m) => m[1]);
+
+  it('a ticked Barro Kitchens quote prints the page: materials & finishes, the standard construction of THIS quote\'s configured lines (one bullet per distinct sentence, led by the family), warranty, how we work, references, registrations, the contact line', () => {
+    const b = sellBuilder();
+    const html = stdOf(b);
+    assert.equal(b.el('standardPage').classList.contains('has-std'), true);
+    assert.deepEqual(headings(html), ['Materials &amp; finishes', 'Standard construction', 'Warranty &amp; after-sales', 'How we work', 'References', 'Registrations']);
+    assert.ok(html.includes('<div class="std-title">Our standard</div><div class="std-meta">Barro Kitchens, by Barro Industries OPC</div>'));
+    assert.ok(html.includes('<p>Our standard material is SS304 food-grade stainless steel. SS316 laboratory grade is available on request. Standard finish: hairline. Brushed, mirror or satin on request.</p>'));
+    assert.deepEqual([...html.matchAll(/<li><strong>([^<]*)<\/strong> — ([^<]*)<\/li>/g)].map((m) => m[1]), ['Preparation table', 'Sink', 'Stove', 'Range hood', 'Rack'], 'five distinct families, in line order — the catalogue lines add none');
+    assert.ok(html.includes('<li><strong>Rack</strong> — SS304 stainless steel · 1.2 mm shelves · square-tube frame · on wheels</li>'));
+    assert.ok(html.includes(`<p>${WARRANTY_SERVICE}</p>`) && !html.includes('KitchenShield'));
+    assert.ok(html.includes('<ol><li>Site measurement and design</li><li>Fabrication in our Quezon City shop</li><li>Delivery</li><li>Installation and commissioning</li><li>Turnover and after-sales service</li></ol>'));
+    assert.ok(html.includes('<p>Institutional clients include DMMMSU and ISPSC.</p>') && html.includes('<p>Barro Industries OPC is SEC-registered, VAT-registered and PhilGEPS-registered.</p>'));
+    assert.equal(html.includes('std-contact'), false, 'the contact line is the thank-you block that closes the page (layoutDocTail()), not a second copy inside it');
+    b.run(`setCompany('BK')`);
+    assert.equal(b.el('pfCreds').textContent, 'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila');
+    assert.equal(/PREP_WASHING|COOKING_LINE|prep_washing|cooking_line|undefined|\[object/.test(html), false, 'a heading is a human label, never an id');
+    assert.equal(/<img|<svg|<picture|<canvas|url\(/i.test(html), false, 'text only: no logo, no agency mark');
+  });
+
+  it('the full-kitchen plan adds the KitchenShield paragraph to the warranty block — on that plan only; Barro Industries names itself "Barro Industries"', () => {
+    const ks = sellBuilder(sampleItems(), { plan: 'kitchenshield12' });
+    assert.ok(stdOf(ks).includes(`<p>${WARRANTY_SERVICE}</p><p>This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>`));
+    assert.equal(stdOf(sellBuilder(sampleItems(), { plan: 'service6' })).includes('KitchenShield'), false);
+    const bi = sellBuilder(sampleItems(), { co: 'BI' });
+    assert.ok(stdOf(bi).includes('<div class="std-meta">Barro Industries</div>'));
+  });
+
+  it('the page is omitted — nothing printed, the block empty and without its class — when UNTICKED, with no lines, and on Brilliant Steel even if ticked', () => {
+    const off = sellBuilder(sampleItems(), { page: false });
+    assert.equal(stdOf(off), '');
+    assert.equal(off.el('standardPage').classList.contains('has-std'), false);
+    assert.equal(stdOf(sellBuilder([], { page: true })), '');
+    const bs = sellBuilder(sampleItems(), { co: 'BS', page: true });
+    assert.equal(stdOf(bs), '');
+    assert.equal(bs.el('standardPage').classList.contains('has-std'), false);
+    // …and it comes back with the tick
+    off.el('showStandardPage').checked = true; off.run('onShowStandardPageChange()');
+    assert.notEqual(stdOf(off), '');
+  });
+
+  it('the construction block is omitted when no configured line prints one (catalogue lines only, or the preparer\'s own wording)', () => {
+    const cat = sellBuilder(sampleItems().slice(5));
+    assert.equal(headings(stdOf(cat)).includes('Standard construction'), false);
+    const custom = sellBuilder([{ ...sampleItems()[1], specEdit: 'my words' }]);
+    assert.equal(headings(stdOf(custom)).includes('Standard construction'), false);
+  });
+
+  it('it never states a warranty the Warranty term does not: with the term switched off, or its wording rewritten / stored, the warranty block and the strip\'s warranty part are left out', () => {
+    const b = sellBuilder();
+    assert.equal(b.run('warrantyIsDefault()'), true);
+    b.run(`termsEnabled.tc_warranty = false; renderDocExtras();`);
+    assert.equal(headings(stdOf(b)).includes('Warranty &amp; after-sales'), false);
+    assert.equal(b.el('summaryStrip').textContent.includes('warranty'), false);
+    b.run(`termsEnabled.tc_warranty = true; termsContent.tc_warranty = 'Our own warranty wording.'; renderDocExtras();`);
+    assert.equal(b.run('warrantyIsDefault()'), false);
+    assert.equal(headings(stdOf(b)).includes('Warranty &amp; after-sales'), false);
+    assert.equal(/warranty|PMS/.test(b.el('summaryStrip').textContent), false);
+    b.run(`delete termsContent.tc_warranty; renderDocExtras();`);
+    assert.match(b.el('summaryStrip').textContent, /6-month service warranty$/);
+  });
+
+  it('the summary strip: validity · payment · lead time · delivery · warranty, from the fields already on the quote — and the KitchenShield part on the full-kitchen plan; empty on Brilliant Steel and with no lines', () => {
+    const b = sellBuilder();
+    b.el('diMethod').value = 'Company delivery truck';
+    b.run('renderTotals()');
+    assert.equal(b.el('summaryStrip').textContent, 'Valid 30 days · 50% down payment, balance on completion · Lead time from 25 working days · Delivery: Company delivery truck · 6-month service warranty');
+    b.el('quoteValidDays').value = '120'; b.el('dpMode').value = '30'; b.el('balMode').value = 'stagger3'; b.el('warrantyPlan').value = 'kitchenshield12';
+    b.run('renderTotals()');
+    assert.equal(b.el('summaryStrip').textContent, 'Valid 120 days · 30% down payment, balance in 3 staggered payments · Lead time from 25 working days · Delivery: Company delivery truck · 6-month service warranty · 12-month PMS with KitchenShield™');
+    b.run(`payMilestones = [{pct:50,label:'a',date:''},{pct:50,label:'b',date:''}]; renderTotals();`);
+    assert.match(b.el('summaryStrip').textContent, /^Valid 120 days · 2 payment milestones · /);
+    assert.equal(sellBuilder(sampleItems(), { co: 'BS' }).el('summaryStrip').textContent, '');
+    assert.equal(sellBuilder([]).el('summaryStrip').textContent, '');
+  });
+
+  it('the legend under the items table: the dimension legend + tolerance reference only when a line has a size, the ruled lead-time sentence once; gone on Brilliant Steel; the tolerance reference follows its term', () => {
+    const b = sellBuilder();
+    assert.equal(b.el('itemsNotes').innerHTML, '<p class="dims-legend">Dimensions are Length × Width × Height in mm (hoods: Length × Depth). Fabricated dimensions carry the ±5 mm tolerance stated in the terms.</p><p class="lead-legend">Lead time: 25 working days minimum, from downpayment and approved drawings.</p>');
+    b.run(`termsEnabled.tc_tolerance = false; renderDocExtras();`);
+    assert.equal(b.el('itemsNotes').innerHTML.includes('tolerance'), false);
+    assert.ok(b.el('itemsNotes').innerHTML.includes('Dimensions are Length × Width × Height in mm (hoods: Length × Depth).'));
+    assert.equal(sellBuilder(sampleItems().slice(6)).el('itemsNotes').innerHTML, '', 'two bare catalogue lines: no size, no ruled lead: nothing to say');
+    assert.equal(sellBuilder(sampleItems(), { co: 'BS' }).el('itemsNotes').innerHTML, '');
+    assert.equal(sellBuilder(legacyOf(sampleItems())).el('itemsNotes').innerHTML.includes('Lead time'), false, 'a legacy quote carries no ruled lead time: no sentence');
+  });
+
+  it('the summary, the legend and the Standard page follow the fields live: validity, delivery, a term switched off, a rewritten warranty (updatePrintHeader / updateDiPrint / toggleTerm / saveTerm repaint them)', () => {
+    const b = sellBuilder();
+    b.el('quoteValidDays').value = '45'; b.run('updatePrintHeader()');
+    assert.match(b.el('summaryStrip').textContent, /^Valid 45 days/);
+    b.el('diMethod').value = 'Client pick-up'; b.run('updateDiPrint()');
+    assert.match(b.el('summaryStrip').textContent, /Delivery: Client pick-up/);
+    b.run(`toggleTerm('tc_tolerance', { checked: false })`);
+    assert.equal(b.el('itemsNotes').innerHTML.includes('tolerance'), false);
+    b.run(`toggleTerm('tc_warranty', { checked: false })`);
+    assert.equal(/warranty/.test(b.el('summaryStrip').textContent), false);
+    b.run(`toggleTerm('tc_warranty', { checked: true }); saveTerm('tc_warranty', { innerHTML: 'Custom' })`);
+    assert.equal(/warranty/.test(b.el('summaryStrip').textContent), false);
+  });
+});
+
+describe('SELLING QUOTE — the document\'s order, section headings and annex header', () => {
+  // a tiny linked tree standing in for the DOM: enough for insertBefore / nextSibling
+  const miniTree = (ids) => {
+    const parent = { children: [] };
+    const nodes = {};
+    ids.forEach((id) => { nodes[id] = { id, innerHTML: '', classList: { add() {}, remove() {}, contains: () => false, toggle() {} }, cloneNode() { return { removeAttribute() {}, querySelectorAll: () => [] }; }, insertBefore() {}, appendChild() {}, parentNode: parent, get nextSibling() { const i = parent.children.indexOf(this); return parent.children[i + 1] || null; } }; parent.children.push(nodes[id]); });
+    parent.insertBefore = (node, ref) => { const i = parent.children.indexOf(node); if (i >= 0) parent.children.splice(i, 1); const j = ref ? parent.children.indexOf(ref) : -1; if (j < 0) parent.children.push(node); else parent.children.splice(j, 0, node); return node; };
+    return { nodes, order: () => parent.children.map((n) => n.id) };
+  };
+  it('layoutDocTail(): the footer sits right after the terms and the Standard page right after it (Barro Kitchens / Barro Industries); Brilliant Steel gets the footer back after the annex and the agent box — its old order', () => {
+    const b = builder();
+    const tree = miniTree(['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox']);
+    const real = b.ctx.document.getElementById;
+    b.ctx.document.getElementById = (id) => tree.nodes[id] || real(id);
+    b.run(`currentCo = 'BK'; layoutDocTail();`);
+    assert.deepEqual(tree.order(), ['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox']);
+    b.run(`currentCo = 'BS'; layoutDocTail();`);
+    assert.deepEqual(tree.order(), ['termsSection', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox', 'printFooter'], 'the old order: …annex, agent box, footer');
+    b.run(`currentCo = 'BI'; layoutDocTail();`);
+    assert.deepEqual(tree.order(), ['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox']);
+    b.run(`layoutDocTail(); layoutDocTail();`);
+    assert.deepEqual(tree.order(), ['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox'], 'idempotent');
+    // the Standard page is pulled in right behind the footer even when the footer already sits in place and the page is somewhere else
+    const stray = miniTree(['termsSection', 'printFooter', 'internalPanel', 'standardPage', 'photoAnnex', 'agentBox']);
+    b.ctx.document.getElementById = (id) => stray.nodes[id] || real(id);
+    b.run(`currentCo = 'BK'; layoutDocTail();`);
+    assert.deepEqual(stray.order(), ['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox']);
+    b.ctx.document.getElementById = (id) => tree.nodes[id] || real(id);
+    // setCompany() runs it on its own (the Standard page repaint that also lays the tail out is stubbed away: only setCompany's own call can place the footer)
+    b.run('renderStandardPage = function () {};');
+    b.run(`setCompany('BS')`);
+    assert.equal(tree.order().at(-1), 'printFooter');
+    b.run(`setCompany('BK')`);
+    assert.deepEqual(tree.order().slice(0, 3), ['termsSection', 'printFooter', 'standardPage']);
+  });
+
+  it('the thank-you CLOSES the "Our standard" page: with the page on the order is terms → Our standard → thank-you & company details → annex (it used to land ALONE on a page of its own when the signatures ended the page above); with the page off the thank-you follows the terms; Brilliant Steel keeps its old order', () => {
+    const b = builder();
+    const tree = miniTree(['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox']);
+    let stdOn = true;
+    tree.nodes.standardPage.classList.contains = (c) => stdOn && c === 'has-std';
+    const real = b.ctx.document.getElementById;
+    b.ctx.document.getElementById = (id) => tree.nodes[id] || real(id);
+    const ON = ['termsSection', 'standardPage', 'printFooter', 'internalPanel', 'photoAnnex', 'agentBox'], OFF = ['termsSection', 'printFooter', 'standardPage', 'internalPanel', 'photoAnnex', 'agentBox'];
+    for (const co of ['BK', 'BI']) { b.run(`currentCo = '${co}'; layoutDocTail();`); assert.deepEqual(tree.order(), ON, co); }
+    b.run('layoutDocTail(); layoutDocTail();');
+    assert.deepEqual(tree.order(), ON, 'idempotent');
+    stdOn = false; b.run('layoutDocTail();');
+    assert.deepEqual(tree.order(), OFF, 'page off: terms → thank-you');
+    stdOn = true; b.run('layoutDocTail();');
+    assert.deepEqual(tree.order(), ON, 'ticked again');
+    // the page is pulled up behind the terms even when something else sits between them (and the thank-you follows it wherever it was)
+    const stray = miniTree(['termsSection', 'internalPanel', 'standardPage', 'printFooter', 'photoAnnex', 'agentBox']);
+    stray.nodes.standardPage.classList.contains = (c) => c === 'has-std';
+    b.ctx.document.getElementById = (id) => stray.nodes[id] || real(id);
+    b.run(`currentCo = 'BK'; layoutDocTail();`);
+    assert.deepEqual(stray.order(), ['termsSection', 'standardPage', 'printFooter', 'internalPanel', 'photoAnnex', 'agentBox']);
+    b.ctx.document.getElementById = (id) => tree.nodes[id] || real(id);
+    // the thank-you is placed when the page is (de)populated: renderStandardPage() lays the tail out
+    const c = sellBuilder(sampleItems());
+    c.run('var __n = 0; layoutDocTail = function () { __n++; }; renderStandardPage();');
+    assert.equal(c.run('__n'), 1, 'populated');
+    c.el('showStandardPage').checked = false; c.run('__n = 0; renderStandardPage();');
+    assert.equal(c.run('__n'), 1, 'emptied');
+    // Brilliant Steel: the footer after the annex and the agent box, whatever the page state
+    stdOn = true; b.run(`currentCo = 'BS'; layoutDocTail();`);
+    assert.equal(tree.order().at(-1), 'printFooter');
+    // …and back on Barro Kitchens the footer returns from the end of the document to right behind the Standard page
+    b.run(`currentCo = 'BK'; layoutDocTail();`);
+    assert.deepEqual(tree.order(), ON, 'from the Brilliant Steel order back to the current one');
+  });
+
+  it('the Client preview follows the printed order: with a Standard page the thank-you block comes right after it; with none (unticked), directly after the terms; Brilliant Steel\'s list is unchanged', () => {
+    const on = sellBuilder(sampleItems());
+    assert.deepEqual(on.plain('qbDocSourceIds()'), ['lhPrintHeader', 'phSubject', 'billStrip', 'itemsSection', 'diSection', 'timelineSection', 'remarksSection', 'termsSection', 'standardPage', 'printFooter', 'photoAnnex']);
+    const off = sellBuilder(sampleItems(), { page: false });
+    assert.deepEqual(off.plain('qbDocSourceIds()'), off.plain('QB_DOC_SOURCE_IDS'));
+    assert.deepEqual(sellBuilder(sampleItems(), { co: 'BS' }).plain('qbDocSourceIds()'), sellBuilder(sampleItems(), { co: 'BS' }).plain('QB_DOC_SOURCE_IDS_BS'));
+  });
+
+  it('the running identifier: a bottom page-MARGIN box on a named page for Barro Kitchens / Barro Industries on a browser that draws them (Chrome / Edge 131+, detected by CSSMarginRule), the old fixed footer for Brilliant Steel and for any other browser — written into --run-id as a safe CSS string', () => {
+    // the detection script is in the head (before the stylesheet) and only adds a class
+    assert.match(HTML, /<title>Quote Builder — Barro Industries<\/title>\n<script>try\{ if\(typeof CSSMarginRule==='function'\) document\.documentElement\.classList\.add\('mb-footer'\); \}catch\(e\)\{\}<\/script>\n<style>/);
+    // the named page and its margin box (12 mm at the bottom for these documents), and the two rules that switch the old footer off for them only
+    assert.match(HTML, /@page bkdoc\{size:A4 portrait;margin:11mm 10mm 12mm;\n\s*@bottom-center\{content:var\(--run-id,""\);font-family:var\(--font\);font-size:7pt;color:#888;vertical-align:top;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:\.5px solid #ddd;padding-top:1\.5mm;\}\}/);
+    assert.match(HTML, /@media print\{\n\s*html\.mb-footer body:not\(\.co-bs\)\{page:bkdoc;\}\n\s*html\.mb-footer body:not\(\.co-bs\) \.print-run-footer\{display:none!important;\}\n\}/);
+    // Brilliant Steel (and every browser without margin boxes) keeps the fixed footer and the 7 mm margin EXACTLY as they were
+    assert.match(HTML, /\.print-run-footer\{display:block!important;position:fixed;bottom:2mm;left:10mm;right:10mm;\n\s*font-size:7pt;color:#888;text-align:center;border-top:\.5px solid #ddd;padding-top:1\.5mm;\}\n\s*@page\{size:A4 portrait;margin:11mm 10mm 7mm;\}\n\}/);
+    assert.equal((HTML.match(/@page\{/g) || []).length, 1, 'the unnamed @page rule is still the one Brilliant Steel prints on');
+    assert.equal((HTML.match(/page:bkdoc/g) || []).length, 1);
+    assert.equal(/body\.co-bs[^{]*\{[^}]*\bpage:/.test(HTML), false, 'nothing gives Brilliant Steel a named page');
+    // the text: control characters out, backslash and quote escaped
+    const b = sellBuilder(sampleItems());
+    const props = {}; b.ctx.document.documentElement.style = { setProperty: (k, v) => { props[k] = v; } };
+    b.el('quoteNo').value = 'BKLUFB261105-001R1'; b.el('clientName').value = 'Maria Santos';
+    b.run('updatePrintRunFooter()');
+    assert.equal(props['--run-id'], '"BKLUFB261105-001R1 — Maria Santos"');
+    assert.equal(b.el('printRunFooter').textContent, 'BKLUFB261105-001R1 — Maria Santos', 'the fixed footer carries the same text');
+    b.el('clientName').value = 'A "quoted" \\ name\nline\u0007x';
+    b.run('updatePrintRunFooter()');
+    assert.equal(props['--run-id'], '"BKLUFB261105-001R1 — A \\"quoted\\" \\\\ name line x"');
+    b.el('quoteNo').value = ''; b.el('clientName').value = '';
+    b.run('updatePrintRunFooter()');
+    assert.equal(props['--run-id'], '""');
+    // a page that cannot set the property (an old engine) never throws
+    b.ctx.document.documentElement.style = {};
+    assert.doesNotThrow(() => b.run('updatePrintRunFooter()'));
+  });
+
+  it('a company switch repaints the items table BEFORE it re-clones the Client preview (the table\'s markup depends on the company: a preview cloned first kept the old company\'s spec sheets)', () => {
+    const b = builder();
+    b.run(`var __order = []; var __ri = renderItems, __rc = renderClientPreview; renderItems = function () { __order.push('items'); return __ri.apply(this, arguments); }; renderClientPreview = function () { __order.push('preview'); return __rc.apply(this, arguments); }; setCompany('BS');`);
+    const order = b.plain('__order');
+    assert.ok(order.includes('items') && order.includes('preview'), JSON.stringify(order));
+    assert.ok(order.indexOf('items') < order.indexOf('preview'), `the preview was cloned before the items table was repainted: ${JSON.stringify(order)}`);
+    assert.equal(order.at(-1), 'preview', 'and the preview is the last word');
+  });
+
+  it('section headings print the human label, never the raw id — with the product database not loaded, for a built-in id, an unknown id, a renamed section; the database label still wins', () => {
+    const b = makeEnv();
+    b.run(`DB = { products: [], categories: [], laborRoles: [], constants: {} }; items.length = 0;`);
+    const label = (id, catLabel) => { b.run(`items.length = 0; items.push(${JSON.stringify({ id: 'X', category: id, name: 'n', qty: 1, amount: 1, unitPrice: 1, ...(catLabel ? { catLabel } : {}) })});`); return b.run(`sectionLabel(${JSON.stringify(id)})`); };
+    assert.equal(label('prep_washing'), 'Preparation & Washing');
+    assert.equal(label('cooking_line'), 'Cooking Line');
+    assert.equal(label('exhaust_system'), 'Exhaust System');
+    assert.equal(label('fire_suppression'), 'Fire Suppression');
+    assert.equal(label('some_new_section'), 'Some New Section');
+    assert.equal(label('sec_2', 'Option A — Full Kitchen Package'), 'Option A — Full Kitchen Package');
+    assert.equal(label(''), 'Uncategorised');
+    assert.equal(label('constructor'), 'Constructor', 'a prototype name is just a word');
+    b.run(`DB.categories = [{ id: 'prep_washing', label: 'Prep & Wash (from the database)' }];`);
+    assert.equal(label('prep_washing'), 'Prep & Wash (from the database)');
+    for (const id of Object.keys(b.plain('SECTION_FALLBACK_LABELS'))) assert.equal(/_|^[a-z]/.test(b.plain('SECTION_FALLBACK_LABELS')[id]), false, id);
+  });
+
+  it('the rendered table, the subtotal rows and the options ladder all carry the label — a quote rendered before the database loads (a #quote= link) has no raw id in it', () => {
+    const b = builder();
+    b.run(`DB = { products: [], categories: [], laborRoles: [], constants: {} };`);
+    b.run(`items.length = 0; items.push(...${JSON.stringify(sampleItems())}); renderItems();`);
+    const html = b.el('itemsTbody').innerHTML;
+    assert.equal(/prep_washing|cooking_line|exhaust_system|refrigeration"|fire_suppression/.test(html.replace(/data-[a-z-]+="[^"]*"|moveSection\('[^']*'|editCatLabel\('[^']*'/g, '')), false);
+    assert.ok(html.includes('Subtotal — Preparation &amp; Washing:') && html.includes('Subtotal — Fire Suppression:'));
+  });
+
+  it('the photo annex header reads the LIVE quote number (it used to keep the one it was built with): updatePrintHeader() refreshes it, without re-rendering the photos', () => {
+    const b = builder();
+    b.run(`qnoMode = 'manual'`);
+    const meta = { innerHTML: 'OLD' };
+    const real = b.ctx.document.querySelector;
+    b.ctx.document.querySelector = (sel) => (sel === '#photoAnnex .photo-annex-meta' ? meta : real(sel));
+    b.el('quoteNo').value = 'BKLUFB261105-001R1'; b.el('clientName').value = 'Maria <Santos>';
+    b.run('updatePrintHeader()');
+    assert.equal(meta.innerHTML, 'BARRO KITCHENS<br>Quote BKLUFB261105-001R1 • Maria &lt;Santos&gt;');
+    b.el('quoteNo').value = 'BKLUFB261105-001R2';
+    b.run('updatePrintHeader()');
+    assert.match(meta.innerHTML, /Quote BKLUFB261105-001R2/);
+    b.run(`setCompany('BI')`);
+    b.run('updatePrintHeader()');
+    assert.match(meta.innerHTML, /^BARRO INDUSTRIES OPC<br>/);
+    // and renderPhotoAnnex builds its header from the same helper
+    b.run(`quotePhotos.push({ url: 'https://firebasestorage.googleapis.com/x', caption: 'c', itemIndex: null }); renderPhotoAnnex();`);
+    assert.ok(b.el('photoAnnex').innerHTML.includes('<div class="photo-annex-meta">BARRO INDUSTRIES OPC<br>Quote BKLUFB261105-001R2 • Maria &lt;Santos&gt;</div>'));
+  });
+});
+
+describe('SELLING QUOTE — ⚙ configure regenerates the options-driven fields and keeps what the preparer chose; every line creator carries the four fields', () => {
+  it('a re-configure regenerates includes, not-included and lead time from the new options (specs and name too), KEEPS the finish the preparer picked and their extra rows, and fills a missing finish with the family default', () => {
+    const b = builder();
+    const { line } = makeLine(b, sinkState());
+    b.run(`items.length = 0; items.push(${JSON.stringify({ ...line, finish: 'mirror', specLines: [{ label: 'Capacity', value: 'x' }] })}); cfgRefreshAll();`);
+    assert.deepEqual(b.plain('items[0].includes'), ['2 basins with waste fittings and strainers', 'pre-rinse spray faucet', 'adjustable bullet feet']);
+    b.run(`items[0].includes = ['typed by hand']; items[0].leadTime = '30 working days';`);
+    const st = stateFor('sink', { config: { basins: 4, alignment: 'center', undershelf: false, upper: false, faucet: 'gooseneck' }, sizeRaw: { W: '2400', D: '700', H: '900' }, qty: 2, editItem: null });
+    b.run(`globalThis.__st = ${JSON.stringify(st)}; __st.editItem = items[0]; globalThis.__ev = cfgEvaluate(__st); globalThis.__fresh = cfgMakeLine(__ev, __st); cfgApplyEdit(items[0], __fresh, 0);`);
+    const it = b.plain('items[0]');
+    assert.deepEqual(it.includes, ['4 basins with waste fittings and strainers', 'gooseneck faucet', 'adjustable bullet feet'], 'regenerated from the new options — the hand-typed list is replaced (the Help says so)');
+    assert.deepEqual(it.excludes, ['water supply and drain line to the sink', 'angle valves']);
+    assert.equal(it.leadTime, '25 working days');
+    assert.equal(it.finish, 'mirror', 'the finish is the preparer\'s choice and stays');
+    assert.deepEqual(it.specLines, [{ label: 'Capacity', value: 'x' }], 'extra rows are never touched');
+    // a line with no finish takes the family default; a legacy line (no fields at all) gets the whole set
+    b.run(`items[0].finish = ''; globalThis.__ev = cfgEvaluate(__st); globalThis.__fresh = cfgMakeLine(__ev, __st); cfgApplyEdit(items[0], __fresh, 0);`);
+    assert.equal(b.run('items[0].finish'), 'hairline');
+    const legacy = legacyOf([sampleItems()[1]])[0];
+    b.run(`items.length = 0; items.push(${JSON.stringify(legacy)}); __st.editItem = items[0]; globalThis.__ev = cfgEvaluate(__st); globalThis.__fresh = cfgMakeLine(__ev, __st); cfgApplyEdit(items[0], __fresh, 0);`);
+    const re = b.plain('items[0]');
+    assert.deepEqual([re.finish, re.leadTime, re.includes.length, re.excludes.length, re.specLines], ['hairline', '25 working days', 3, 2, []]);
+  });
+
+  it('a newly configured line carries finish "hairline", its includes / not-included and the ruled lead time; cfgCommit() adds it and the price is the one the sheet gave (nothing changes it)', () => {
+    const b = builder();
+    const { ev } = makeLine(b, stateFor('rack', {}));
+    b.run(`openConfigurator('rack', {}); cfgCommit();`);
+    const it = b.plain('items[0]');
+    assert.deepEqual([it.finish, it.includes, it.excludes, it.leadTime, it.specLines], ['hairline', ['shelves as configured', 'wheels'], [], '25 working days', []]);
+    assert.equal(it.priceBasis, 'website');
+    assert.equal(it.unitPrice, ev.basis.unitPrice, 'the line lands at the website price the option sheet gave — the new fields never touch it');
+  });
+
+  it('addItemFromCalc / addFixedItemDirect / addCustomItem / addSection / normalizeImportItem / duplicateItem each carry finish, includes, excludes and specLines (empty = "not stated": a reader never takes them as a claim)', () => {
+    const b = builder();
+    b.run(`items.length = 0; addFixedItemDirect(DB.products.find(p => p.id === 'CE-030')); addCustomItem(); closeBomModal && closeBomModal();`);
+    for (const it of b.plain('items')) assert.deepEqual([it.finish, it.includes, it.excludes, it.specLines], ['', [], [], []], it.name);
+    b.run(`selectedProduct = DB.products.find(p => p.id === 'PW-023'); buildCalcPanel(selectedProduct); addItemFromCalc();`);
+    assert.deepEqual(b.plain('items.at(-1)').specLines, []);
+    assert.equal(b.run(`items.at(-1).finish`), '');
+    b.run(`prompt = () => 'Option A'; addSection();`);
+    assert.deepEqual(b.plain('items.at(-1)').includes, []);
+    const imp = b.plain(`normalizeImportItem({ name: 'Imported gate', dims: 'L2000 mm', qty: 2 }, [], '', 1)`);
+    assert.deepEqual([imp.finish, imp.includes, imp.excludes, imp.specLines], ['', [], [], []]);
+    b.run(`items.length = 0; items.push(${JSON.stringify(sampleItems()[1])}); duplicateItem(0);`);
+    assert.deepEqual(b.plain('items').map((i) => [i.finish, i.includes.length]), [['hairline', 3], ['hairline', 3]]);
+    assert.notEqual(b.run('items[0].includes === items[1].includes'), true, 'the copy is its own list');
+  });
+});
+
+describe('SELLING QUOTE — the tutorial (TUTORIAL_VERSION 49, Help and the demo tell the same story)', () => {
+  it('Help: the Details ▸ bullet, the Terms-tab warranty plan and Our standard sentence, the Verify & File sentence; no "12 months warranty" anywhere in Help or the demo', () => {
+    const help = (HTML.match(/<div class="modal-body" id="helpBody">[\s\S]*?<h4>What's new<\/h4>/) || [''])[0];
+    const li = (HTML.match(/<li><strong>Details ▸ on each line<\/strong>[\s\S]*?<\/li>/) || [''])[0];
+    for (const must of ['spec sheet', 'Details ▸', 'finish', 'hairline is the standard', 'brushed, mirror, satin', 'Includes', 'Not included', 'extra rows', '25 working days minimum, from downpayment and approved drawings', '⚙ configure regenerates its includes, not-included and lead time from the new options (your finish stays)',
+      'no size', 'no specs', 'no finish', 'no photo', 'Quote strength n/10', 'custom wording', '↺ regenerate', 'dimension legend', 'Brilliant Steel quotes are not changed by any of this']) assert.ok(li.includes(must), `Help bullet does not say: ${must}`);
+    assert.match(help, /<strong>Warranty plan<\/strong> is the standard 6-month service warranty, or <em>Full kitchen<\/em> — the 6-month warranty plus 12 months of preventive maintenance service \(PMS\) with KitchenShield™ — and a tick prints the <strong>“Our standard” page<\/strong> after the terms/);
+    assert.match(help, /A made-to-order line with no size blocks filing; lines still missing specs or a finish are only listed \(you can file anyway\)\./);
+    assert.ok(help.indexOf('Details ▸ on each line') > help.indexOf('Configure a product') && help.indexOf('Details ▸ on each line') < help.indexOf('Pricing is automatic'));
+    const steps = makeEnv().plain('TOUR_STEPS');
+    assert.equal(/12 months warranty/i.test(help + JSON.stringify(steps)), false);
+  });
+
+  it('the demo: a "Details ▸" step on .line-details-toggle (Estimator), right after "Items price themselves" and before the miscellaneous costs, and a Terms-tab step on #termsOptionsBox right after "The Terms tab"; both targets exist in the markup', () => {
+    const steps = makeEnv().plain('TOUR_STEPS');
+    const at = (target) => steps.findIndex((s) => s.target === target);
+    assert.ok(at('.line-details-toggle') > 0 && at('#termsOptionsBox') > 0);
+    assert.equal(steps[at('.line-details-toggle')].needsWorkspace, true);
+    assert.equal(steps[at('#termsOptionsBox')].needsTerms, true);
+    assert.equal(steps[at('.line-details-toggle') - 1].target, '#itemsSection');
+    assert.equal(steps[at('.line-details-toggle') + 1].target, '#laborTimelineWrap');
+    assert.equal(steps[at('#termsOptionsBox') - 1].target, '#termsSection');
+    assert.match(steps[at('.line-details-toggle')].title, /Details ▸/);
+    assert.match(steps[at('.line-details-toggle')].body, /hairline is the standard/);
+    assert.match(steps[at('.line-details-toggle')].body, /A made-to-order line with no size cannot be filed\./);
+    assert.match(steps[at('#termsOptionsBox')].body, /Full kitchen — the 6-month warranty plus 12 months of preventive maintenance service \(PMS\) with KitchenShield™/);
+    assert.match(steps[at('#termsOptionsBox')].body, /Brilliant Steel quotes do not get it\./);
+    assert.ok(HTML.includes('class="cfg-link line-details-toggle"') && HTML.includes('id="termsOptionsBox"'));
+    const verify = steps.find((s) => s.target === '#btnVerify').body;
+    assert.match(verify, /lists the lines that still lack specs or a finish \(a warning — you can file anyway\), blocks a made-to-order line that has no size/);
+  });
+
+  it('the demo skips the Details step cleanly on an empty quote (no line, no toggle: the target is missing) and on Brilliant Steel; nothing in it mutates the quote', () => {
+    const b = makeEnv();
+    assert.equal(b.run(`document.querySelector('.line-details-toggle')`), null, 'no rows, no toggle');
+    const src = HTML.slice(HTML.indexOf('const TOUR_STEPS = ['), HTML.indexOf('// ── What\'s New / Help modal'));
+    assert.equal(/toggleLineDetails|editFinish|addSpecLine|saveToStorage/.test(src), false);
+    const bs = sellBuilder(sampleItems(), { co: 'BS' });
+    assert.equal(/line-details-toggle/.test(bs.el('itemsTbody').innerHTML), false);
+  });
+});
+
+// ═══════════════════════════════════════ TIMELINE (owner ruling 2026-11-05, option a) ═══════════════════════════════════════
+// The lead time of a Barro Kitchens / Barro Industries quotation is the LONGER of 25 working days and the earlier formula (12 working days + 3 per ₱20,000 of materials), Sundays never counted. It
+// feeds the Timeline block, the estimated completion date and the "+2% priority order" threshold (cut the timeline by more than a third). Brilliant Steel keeps the earlier formula, and so does a
+// quotation "as issued" (filed before the warranty plan existed, then reopened): reopening an old quotation must not move its price. This money-adjacent change is pinned below the crossover, at
+// it and above it; the priority surcharge before / after; the totals with no shortening (byte-identical); and exactly which totals move. Mutation-tested in a scratch copy (see the phase report):
+// the 25 floor off / 24 / 26 / Math.min; the crossover moved; a Sunday counted; Brilliant Steel or an "as issued" quote on the new rule; the threshold changed; the note not following the rule.
+describe('TIMELINE — lead = max(25, 12 + 3 × ⌊materials ÷ ₱20,000⌋) working days, Sundays never counted; Brilliant Steel and a quotation "as issued" keep the earlier formula', () => {
+  const START = '2026-11-05';                                  // a Thursday
+  // the walk the builder does, written out independently: calendar days from `start` to the Nth non-Sunday after it
+  const calendarDays = (start, workingDays) => { const d = new Date(`${start}T12:00:00`); let left = workingDays, n = 0; while (left > 0) { d.setDate(d.getDate() + 1); n++; if (d.getDay() !== 0) left--; } return n; };
+  const timelineBuilder = (materials, { co = 'BK', plan = 'service6', lead = '' } = {}) => {
+    const b = sellBuilder(sampleItems(), { co, plan });
+    if (materials !== null) b.run(`computeTrueCost = function () { return { materials: ${materials} }; };`);
+    b.el('projStart').value = START; b.el('overallLead').value = String(lead);
+    return b;
+  };
+  const EARLIER = { BS: { co: 'BS' }, 'as issued': { plan: '' }, 'BS as issued': { co: 'BS', plan: '' } };
+
+  it('the working days: 25 up to ₱99,999 of materials, 27 from ₱100,000, then 3 more for every further ₱20,000 — and exactly the earlier 12 + 3 per ₱20,000 on Brilliant Steel and on a quotation "as issued"', () => {
+    const NEW = [[0, 25], [20000, 25], [79999, 25], [80000, 25], [99999, 25], [100000, 27], [119999, 27], [120000, 30], [139999, 30], [140000, 33], [200000, 42], [500000, 87]];
+    const OLD = [[0, 12], [19999, 12], [20000, 15], [79999, 21], [80000, 24], [99999, 24], [100000, 27], [119999, 27], [120000, 30], [139999, 30], [140000, 33], [200000, 42], [500000, 87]];
+    for (const [m, wd] of NEW) assert.equal(timelineBuilder(m).run(`leadWorkingDays(${m})`), wd, `Barro Kitchens, ₱${m} of materials`);
+    for (const [m, wd] of NEW) assert.equal(timelineBuilder(m, { co: 'BI' }).run(`leadWorkingDays(${m})`), wd, `Barro Industries, ₱${m} of materials`);
+    for (const [name, o] of Object.entries(EARLIER)) for (const [m, wd] of OLD) assert.equal(timelineBuilder(m, o).run(`leadWorkingDays(${m})`), wd, `${name}, ₱${m} of materials`);
+    assert.equal(timelineBuilder(0).run('LEAD_MIN_WORKING_DAYS'), 25);
+    assert.equal(timelineBuilder(0).run('leadWorkingDays(undefined) + leadWorkingDays(null) + leadWorkingDays("x")'), 75, 'junk materials read as none');
+    assert.equal(timelineBuilder(0).run('leadRuleIsNew()'), true);
+    for (const o of Object.values(EARLIER)) assert.equal(timelineBuilder(0, o).run('leadRuleIsNew()'), false);
+  });
+
+  it('the calendar days (what #overallLead stores and the document prints) are the Sunday-skipping walk from the start date: 25 working days from Thu 5 Nov 2026 end Fri 4 Dec (29 days, ~4.1 weeks); 27 → 32; 30 → 35; the earlier 12 → 14 (19 Nov)', () => {
+    for (const [m, wd, days] of [[0, 25, 29], [99999, 25, 29], [100000, 27, 32], [120000, 30, 35], [200000, 42, 49]]) {
+      const b = timelineBuilder(m);
+      assert.equal(calendarDays(START, wd), days, 'the independent walk');
+      assert.equal(b.run('autoLeadDays()'), days, `₱${m}`);
+      assert.equal(b.run('getLeadDays()'), days, 'no lead typed: the auto one');
+    }
+    assert.equal(timelineBuilder(0, EARLIER.BS).run('autoLeadDays()'), 14);
+    assert.equal(timelineBuilder(0, EARLIER['as issued']).run('autoLeadDays()'), 14);
+    // a start date that is not a Thursday: Sunday is never counted wherever the walk begins
+    for (const start of ['2026-11-01', '2026-11-02', '2026-11-07', '2026-12-26']) {
+      const b = timelineBuilder(0); b.el('projStart').value = start;
+      assert.equal(b.run('autoLeadDays()'), calendarDays(start, 25), start);
+    }
+  });
+
+  it('the Timeline block says 29 calendar days (~4.1 weeks) and completes on 4 December 2026 — a typed lead time still wins and its weeks are computed from it', () => {
+    const b = timelineBuilder(0);
+    b.run('renderTimeline()');
+    const html = b.el('timelineSummary').innerHTML;
+    assert.ok(html.includes('<tr class="pay-head"><td>Start Date (basis)</td><td>November 5, 2026</td></tr>'), html);
+    assert.ok(html.includes('<tr><td>Overall Lead Time</td><td>29 calendar days (~4.1 weeks)</td></tr>'), html);
+    assert.ok(html.includes('<tr class="pay-head"><td>Estimated Completion</td><td>December 4, 2026</td></tr>'), html);
+    assert.equal(b.el('overallLead').placeholder, 'auto: 29 days');
+    b.el('overallLead').value = '35'; b.run('renderTimeline()');
+    assert.ok(b.el('timelineSummary').innerHTML.includes('35 calendar days (~5.0 weeks)') && b.el('timelineSummary').innerHTML.includes('December 10, 2026'));
+    const old = timelineBuilder(0, EARLIER.BS); old.run('renderTimeline()');
+    assert.ok(old.el('timelineSummary').innerHTML.includes('14 calendar days (~2.0 weeks)') && old.el('timelineSummary').innerHTML.includes('November 19, 2026'));
+    // the payment schedule's "estimated completion" and the filed payload follow it too
+    const c = timelineBuilder(0); c.run('renderTotals()');
+    assert.ok(c.el('paymentSummary').innerHTML.includes('December 4, 2026'), 'the balance falls due on the estimated completion date');
+    assert.deepEqual(c.plain('buildQuotePayload().timeline'), { startDate: START, leadDays: 29, completionDate: '2026-12-04' });
+    assert.deepEqual(old.plain('buildQuotePayload().timeline'), { startDate: START, leadDays: 14, completionDate: '2026-11-19' });
+  });
+
+  it('the printed note under the Timeline states the rule in force: 25 working days minimum, or 12 + 3 per ₱20,000 whichever is longer — never "Minimum two weeks" — and the priority-order sentence stays; Brilliant Steel and "as issued" print the earlier note byte for byte', () => {
+    const NOTE_NEW = 'Lead time begins upon receipt of the down payment and approved design: 25 working days minimum, or 12 working days plus 3 working days per ₱20,000 of materials for larger orders, whichever is longer. Sundays are not counted as working days. You may shorten the timeline; cutting it by more than a third makes the quote a priority order (+2%). Subject to site readiness and unforeseen supply delays.';
+    const NOTE_OLD = 'Lead time begins upon receipt of the down payment and approved design. Minimum two weeks, plus 3 working days per ₱20,000 of materials — Sundays are not counted as working days. You may shorten the timeline; cutting it by more than a third makes the quote a priority order (+2%). Subject to site readiness and unforeseen supply delays.';
+    const note = (b) => { b.run('renderTimeline()'); return (b.el('timelineSummary').innerHTML.match(/<div class="pay-note">([\s\S]*?)<\/div>/) || [, ''])[1]; };
+    assert.equal(note(timelineBuilder(0)), NOTE_NEW);
+    assert.equal(note(timelineBuilder(0, { co: 'BI' })), NOTE_NEW);
+    assert.equal(/Minimum two weeks/.test(NOTE_NEW), false);
+    for (const [name, o] of Object.entries(EARLIER)) assert.equal(note(timelineBuilder(0, o)), NOTE_OLD, name);
+    // consistent with the rest of the document: the strip says "Lead time from 25 working days", every configured line "25 working days min."
+    const b = timelineBuilder(0); b.run('renderTotals()');
+    assert.match(b.el('summaryStrip').textContent, /Lead time from 25 working days/);
+    assert.match(b.el('itemsNotes').innerHTML, /Lead time: 25 working days minimum, from downpayment and approved drawings\./);
+    // an order whose materials make the formula longer than 25 days: the note still reads true (it names both) and the days follow the formula
+    const big = timelineBuilder(200000); big.run('renderTimeline()');
+    assert.ok(big.el('timelineSummary').innerHTML.includes('49 calendar days (~7.0 weeks)'));
+    assert.equal(note(big), NOTE_NEW);
+  });
+
+  it('the Auto button and the calculator say the rule in force (25 working days min. / the earlier 2 weeks + 3d per ₱20k) and ↻ Auto stores the calendar days', () => {
+    const b = timelineBuilder(0); b.run('renderTimeline()');
+    assert.equal(b.el('autoLeadBtn').textContent, '↻ Auto (25 working days min., no Sundays)');
+    assert.match(b.el('autoLeadBtn').title, /^25 working days minimum, or 12 working days \+ 3 working days per ₱20,000 of materials if that is longer/);
+    b.run('autoFillLead()');
+    assert.equal(b.el('overallLead').value, 29);
+    for (const o of Object.values(EARLIER)) {
+      const e = timelineBuilder(0, o); e.run('renderTimeline()');
+      assert.equal(e.el('autoLeadBtn').textContent, '↻ Auto (2 wks + 3d/₱20k, no Sundays)');
+      assert.match(e.el('autoLeadBtn').title, /^Minimum 2 weeks \(12 working days\) \+ 3 working days per ₱20,000 of materials/);
+      e.run('autoFillLead()');
+      assert.equal(e.el('overallLead').value, 14);
+    }
+    // the calculator's own Timeline row (Estimator): ₱0 → 25 working days ≈ 4.2 weeks; ₱120,000 → 30 ≈ 5.0 weeks; the earlier rule on Brilliant Steel
+    const row = (bb, m) => bb.run(`renderTrueCostPanelHtml(Object.assign({}, computeTrueCost(), { materials: ${m} }))`).match(/>Timeline: ([^<]*)</)[1];
+    const k = sellBuilder(sampleItems());
+    assert.equal(row(k, 0), '25 working days (no Sundays) ≈ 4.2 weeks');
+    assert.equal(row(k, 120000), '30 working days (no Sundays) ≈ 5.0 weeks');
+    assert.equal(row(sellBuilder(sampleItems(), { co: 'BS' }), 0), '12 working days (no Sundays) ≈ 2.0 weeks');
+    assert.equal(row(sellBuilder(sampleItems(), { plan: '' }), 0), '12 working days (no Sundays) ≈ 2.0 weeks');
+  });
+
+  it('the "+2% priority order" threshold measures against the timeline of the rule in force: cut it by more than a third of 29 days (below 19.3) on Barro Kitchens, of 14 days (below 9.3) on Brilliant Steel and "as issued"; the 14 days ↻ Auto used to give is a priority order only under the new rule', () => {
+    const rush = (o, entered) => { const b = timelineBuilder(0, { ...o, lead: entered }); b.el('showVat').checked = true; b.run('renderTimeline(); renderTotals();'); return money(b); };
+    assert.equal(rush({}, 19).rushActive, true);
+    assert.equal(rush({}, 20).rushActive, false);
+    assert.equal(rush({}, 29).rushActive, false);
+    assert.equal(rush({}, '').rushActive, false, 'no lead typed: the auto one is never a rush');
+    for (const [name, o] of Object.entries(EARLIER)) { assert.equal(rush(o, 9).rushActive, true, name); assert.equal(rush(o, 10).rushActive, false, name); }
+    // the same stored 14 days, before / after
+    assert.equal(rush({}, 14).rushActive, true, 'new rule: 14 < 29 × ⅔');
+    for (const o of Object.values(EARLIER)) assert.equal(rush(o, 14).rushActive, false);
+    // the banner in the Timeline block names the standard it measures against
+    const b = timelineBuilder(0, { lead: 14 }); b.run('renderTimeline()');
+    assert.ok(b.el('timelineSummary').innerHTML.includes('the timeline is cut by more than a third of the standard (29 days). A +2% Priority Order Charge applies to the grand total.'));
+    const e = timelineBuilder(0, { ...EARLIER.BS, lead: 9 }); e.run('renderTimeline()');
+    assert.ok(e.el('timelineSummary').innerHTML.includes('of the standard (14 days)'));
+  });
+
+  it('EXACTLY which totals move: none while the typed lead is not a shortening (blank, the auto days, longer) — and, when it is, ONLY the priority surcharge (+2% of the net, charged before VAT): ₱433,300 → +₱8,666, grand ₱485,296 → ₱495,001.92', () => {
+    const pack = (b) => JSON.stringify({ totals: money(b), totalsTbl: b.el('totalsTbl').innerHTML, paymentSummary: b.el('paymentSummary').innerHTML.replace(/\([A-Z][a-z]+ \d+, \d{4}\)|estimated [A-Z][a-z]+ \d+, \d{4}/g, ''), prices: priceFields(b) });
+    const run = (o, lead) => { const b = timelineBuilder(0, { ...o, lead }); b.el('showVat').checked = true; b.run('renderItems(); renderTimeline(); renderTotals();'); return b; };
+    // no shortening: the same JSON under the new rule, the earlier rule and "as issued" (only the completion DATE in the payment note differs — it is blanked out above)
+    for (const lead of ['', 29, 30, 60]) {                    // (14 IS a shortening under the new rule: below)
+      assert.equal(pack(run({}, lead)), pack(run({ plan: '' }, lead)), `lead ${lead || 'blank'}`);
+      assert.equal(pack(run({}, lead)), pack(run({ plan: '' }, '')), `lead ${lead || 'blank'} vs blank, as issued`);
+    }
+    const none = money(run({}, '')), rushed = money(run({}, 14)), issued = money(run({ plan: '' }, 14));
+    assert.deepEqual([none.subtotal, none.rushActive, none.rushFee, none.vatAmt, none.grand], [433300, false, 0, 51996, 485296]);
+    assert.deepEqual([rushed.subtotal, rushed.rushActive, rushed.rushFee, rushed.vatAmt, +rushed.grand.toFixed(2)], [433300, true, 8666, +(441966 * 0.12).toFixed(2), 495001.92]);
+    assert.deepEqual([issued.rushActive, issued.grand], [false, 485296], 'the same stored lead on a quotation "as issued": not a rush, nothing moves');
+    // every other field of the totals is identical between the rushed and the unrushed quote
+    for (const k of Object.keys(none)) if (!['rushActive', 'rushFee', 'rushCharged', 'vatAmt', 'grand', 'grandNoDisc'].includes(k)) assert.deepEqual(rushed[k], none[k], `totals.${k} moved`);
+    // …and no line price moved
+    assert.deepEqual(priceFields(run({}, 14)), priceFields(run({}, '')));
+    // the FOC switch still gives the +2% back as a discount (the rule's own behaviour, unchanged)
+    const f = timelineBuilder(0, { lead: 14 }); f.el('showVat').checked = true; f.el('rushFoc').checked = true;
+    const foc = money(f);
+    assert.deepEqual([foc.rushActive, foc.rushFoc, foc.rushCharged, foc.focRush], [true, true, 0, 8666]);
+  });
+
+  it('switching the company repaints the Timeline at once (renderTotals() repaints it): Brilliant Steel gets the earlier days, note and Auto label, Barro Kitchens / Barro Industries the current ones', () => {
+    const b = timelineBuilder(0); b.run('renderTimeline()');
+    const has = (needle) => b.el('timelineSummary').innerHTML.includes(needle);
+    assert.ok(has('29 calendar days') && has('25 working days minimum'));
+    b.run(`setCompany('BS')`);
+    assert.ok(has('14 calendar days') && has('Minimum two weeks') && !has('25 working days minimum'));
+    assert.equal(b.el('autoLeadBtn').textContent, '↻ Auto (2 wks + 3d/₱20k, no Sundays)');
+    for (const co of ['BK', 'BI']) {
+      b.run(`setCompany(${JSON.stringify(co)})`);
+      assert.ok(has('29 calendar days') && has('25 working days minimum') && !has('Minimum two weeks'), co);
+      assert.equal(b.el('autoLeadBtn').textContent, '↻ Auto (25 working days min., no Sundays)', co);
+    }
+  });
+
+  it('the timeline rule lives in the builder only: neither money-core.js nor pricing-core.js carries it, and the earlier text is gone from the live copy (Help and the demo name the rule in force)', () => {
+    for (const f of ['js/money-core.js', 'js/pricing-core.js']) assert.equal(/autoLeadDays|20000|LEAD_MIN_WORKING_DAYS/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), false, f);
+    const help = (HTML.match(/<div class="modal-body" id="helpBody">[\s\S]*?<h4>What's new<\/h4>/) || [''])[0];
+    assert.match(help, /The <strong>project timeline<\/strong> is 25 working days minimum \(or 12 working days \+ 3 per ₱20,000 of materials, if longer; Sundays never counted\) on Barro Kitchens and Barro Industries quotations; Brilliant Steel keeps minimum 2 weeks \+ 3 per ₱20,000\./);
+    const steps = makeEnv().plain('TOUR_STEPS');
+    assert.match(steps.find((s) => s.target === '#diSection').body, /the ↻ Auto button computes the lead: 25 working days minimum, or 12 working days plus 3 per ₱20,000 of materials if that is longer, Sundays excluded \(Brilliant Steel and quotations issued before the warranty plan keep the earlier rule: minimum 2 weeks plus 3 per ₱20,000\)/);
+    assert.equal(/minimum 2 weeks plus 3 working days per ₱20,000 of materials, Sundays excluded\./.test(HTML), false);
+    // the markup's own button starts on the current rule
+    assert.match(HTML, /<button class="btn btn-outline" style="background:var\(--dark-blue\);" id="autoLeadBtn" onclick="autoFillLead\(\)" title="25 working days minimum[^"]*">↻ Auto \(25 working days min\., no Sundays\)<\/button>/);
+  });
+});
+
+// ═══════════════════════════════════════ AS ISSUED (owner ruling 2026-11-05: freeze the legacy warranty) ═══════════════════════════════════════
+// A quotation FILED before the warranty plan existed and now REOPENED (edit a copy / update) or REVISED keeps what it was issued with: the old Warranty and Site Requirements wording, the earlier timeline
+// rule (so its lead time, its completion date and — through the "+2% priority order" threshold — its price cannot move on reopen), no Standard page. The marker is the plan select holding '' ("As issued");
+// it rides PRICING_IDS, so it survives every re-save. A stored termsContent override still wins. A new quote, a draft, a link and a TEMPLATE are the current rules; picking a plan brings an issued quote onto them.
+// A REVISION of an issued quotation stays as issued until staff pick a plan (the owner's recommendation). Mutation-tested in a scratch copy (see the phase report): the reopen flag not set / read; '' not
+// honoured through a re-save; a template or a draft keeping the old rules; the old wording or the earlier rule applied to the current ones (or the reverse); the stored override not winning; the select not
+// repainting the timeline / totals / sheets; the "As issued" option or note not shown; Brilliant Steel changed by the marker.
+describe('AS ISSUED — a quotation filed before the warranty plan existed keeps the wording and the timeline rule it was issued with; a new quote, a draft and a template do not', () => {
+  const OLD_WARRANTY = '12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.';
+  const OLD_SITE = 'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.';
+  const NEW_SITE_BI = 'Client is responsible for ensuring site is ready for installation. Barro Industries OPC is not liable for delays due to unprepared site conditions.';
+  const termText = (b, id) => { const block = b.el('termsGrid').innerHTML.split('<div class="terms-block').find((x) => x.includes(`saveTerm('${id}'`)); return (block.match(/<div class="term-content"[^>]*>([\s\S]*?)<\/div>/) || [, ''])[1]; };
+  // a filed quotation as the app hands it back to the builder (LOAD_QUOTE): the filed editableState plus the lineage stamp; its pricing carries NO plan and NO Standard-page key
+  const filed = (over = {}) => ({ currentCo: 'BK', items: legacyOf(sampleItems()), quoteNo: 'BKLUFB260901-001R1', clientName: 'Maria Santos', quoteDate: '2026-09-01', filedAt: '2026-09-01T03:00:00.000Z', termsContent: {}, termsEnabled: {},
+    pricing: { showVat: true, quoteValidDays: '30', projStart: '2026-09-01', overallLead: '14', dpMode: '50', balMode: 'lump' }, sourceDocId: 'doc-1', sourceCollection: 'bk_quotes', rootQuoteId: 'doc-1', ...over });
+  const load = (state, opts = { asRevision: false }) => { const b = sellBuilder([]); b.run(`computeTrueCost = function () { return { materials: 0 }; }; loadEditableState(${JSON.stringify(state)}, ${JSON.stringify(opts)})`); return b; };
+  const optionStub = (b) => { const opt = { hidden: true }; b.el('warrantyPlan').querySelector = (sel) => (sel === 'option[value=""]' ? opt : null); const note = b.el('legacyDocNote'); return { opt, note }; };
+
+  it('REOPEN: the Warranty and Site Requirements terms print what the quotation was issued with — for Barro Kitchens AND Barro Industries — the select shows "As issued", and nothing states the 6-month warranty, a lead time or a Standard page', () => {
+    for (const co of ['BK', 'BI']) {
+      const b = load(filed({ currentCo: co, items: sampleItems() }));      // (new lines added since carry a ruled lead: a quotation under the earlier rule must not print it)
+      assert.equal(b.el('warrantyPlan').value, '', co);
+      assert.equal(b.run('isLegacyDoc()'), true);
+      assert.equal(termText(b, 'tc_warranty'), OLD_WARRANTY, co);
+      assert.equal(termText(b, 'tc_site'), OLD_SITE, `${co}: the old Site wording names Barro Kitchens whichever company quotes`);
+      assert.equal(b.run('warrantyIsDefault()'), false, 'it does not state the current wording elsewhere');
+      assert.equal(b.el('showStandardPage').checked, false);
+      assert.equal(b.el('standardPage').innerHTML, '');
+      const strip = b.el('summaryStrip').textContent;
+      assert.equal(/warranty|PMS|Lead time/.test(strip), false, `${co}: the strip says "${strip}"`);
+      assert.equal(/Lead time/.test(b.el('itemsNotes').innerHTML), false, `${co}: no lead-time sentence under the table`);
+      assert.match(b.el('itemsNotes').innerHTML, /Dimensions are Length × Width × Height in mm/, 'the legend itself stays');
+      assert.equal(/<td class="ss-l">Lead time<\/td>/.test(b.el('itemsTbody').innerHTML), false, `${co}: no lead-time row on any line`);
+      assert.match(b.el('itemsTbody').innerHTML, /<td class="ss-l">Finish<\/td><td class="ss-v">Hairline finish<\/td>/, 'the rest of the sheet is untouched');
+      assert.equal(/ms-chip[^>]*>no lead|no lead/i.test(b.el('itemsTbody').innerHTML), false);
+    }
+    // the same quotation, current rules: the contrast
+    const fresh = sellBuilder(sampleItems(), { co: 'BI' });
+    fresh.run('renderTerms()');
+    assert.equal(termText(fresh, 'tc_site'), NEW_SITE_BI);
+    assert.match(fresh.el('itemsNotes').innerHTML, /Lead time: 25 working days minimum/);
+  });
+
+  it('REOPEN: a wording STORED with the quotation (termsContent) still wins over the as-issued default; switching the term off still removes it', () => {
+    const b = load(filed({ termsContent: { tc_warranty: 'Our own warranty wording.', tc_site: 'Our own site wording.' } }));
+    assert.equal(termText(b, 'tc_warranty'), 'Our own warranty wording.');
+    assert.equal(termText(b, 'tc_site'), 'Our own site wording.');
+    assert.equal(b.run('termsContent.tc_warranty'), 'Our own warranty wording.');
+    // an unedited block clicked in and out is not stored (it keeps following its default: the old one now, the plan's after a plan is picked)
+    const c = load(filed());
+    c.run(`saveTerm('tc_warranty', { innerHTML: ${JSON.stringify(OLD_WARRANTY)} })`);
+    assert.equal(c.run(`'tc_warranty' in termsContent`), false);
+  });
+
+  it('REOPEN: the timeline rule it was issued with — its stored 14 days is NOT a priority order, its auto timeline is still 14 days and the earlier note prints — so its totals cannot move on reopen', () => {
+    const b = load(filed());
+    assert.equal(b.run('leadRuleIsNew()'), false);
+    assert.equal(b.run('autoLeadDays()'), 14);
+    assert.equal(b.run('getLeadDays()'), 14, 'the stored lead time');
+    const t = money(b);
+    assert.deepEqual([t.rushActive, t.rushFee, t.subtotal, t.grand], [false, 0, 433300, 433300]);
+    b.run('renderTimeline()');
+    assert.ok(b.el('timelineSummary').innerHTML.includes('Minimum two weeks, plus 3 working days per ₱20,000 of materials'));
+    assert.equal(b.el('timelineSummary').innerHTML.includes('SPECIAL RUSH'), false);
+    // the SAME state loaded as a draft (no sourceDocId: nothing was issued) follows the current rule, where the stored 14 days IS a shortening — visible in the Timeline banner and the totals row
+    const d = load(filed({ sourceDocId: undefined, sourceCollection: undefined, rootQuoteId: undefined }));
+    assert.equal(d.el('warrantyPlan').value, 'service6');
+    assert.equal(d.run('autoLeadDays()'), 29);
+    const dt = money(d);
+    assert.deepEqual([dt.rushActive, dt.rushFee, dt.grand], [true, 8666, 441966], '+2% of the ₱433,300 net, before VAT');
+    d.run('renderTimeline()');
+    assert.ok(d.el('timelineSummary').innerHTML.includes('SPECIAL RUSH'));
+  });
+
+  it('RE-SAVE: the marker is saved with the quotation (payload, draft) — a second reopen, or a draft of the reopened quote, stays as issued; a TEMPLATE made from it starts a new quote on the current rules', () => {
+    const b = load(filed());
+    const pl = b.plain('buildQuotePayload()');
+    assert.equal(pl.editableState.pricing.warrantyPlan, '');
+    assert.equal(b.plain('getPricingFields().warrantyPlan'), '');
+    b.run('flushSaveToStorageNow()');
+    assert.equal(JSON.parse(b.store.get('bkqb_pricing')).warrantyPlan, '');
+    // a draft of it (the state, no sourceDocId): still as issued — the explicit '' is the marker
+    const d = load({ ...pl.editableState, sourceDocId: undefined });
+    assert.equal(d.el('warrantyPlan').value, '');
+    assert.equal(termText(d, 'tc_warranty'), OLD_WARRANTY);
+    // …and a second reopen of the re-filed doc
+    const r = load({ ...pl.editableState, sourceDocId: 'doc-2' });
+    assert.equal(r.el('warrantyPlan').value, '');
+    // a template: stripTemplateState turns it into a quote of the current rules (plan, page), and so does a pre-release template that has no plan
+    const tpl = b.plain('stripTemplateState(buildQuotePayload().editableState)');
+    assert.deepEqual([tpl.pricing.warrantyPlan, tpl.pricing.showStandardPage], ['service6', true]);
+    assert.equal(tpl.clientName, '');
+    for (const state of [tpl, { ...filed(), sourceDocId: undefined, clientName: '', quoteNo: '', filedAt: '' }, { ...pl.editableState, clientName: '', quoteNo: '', filedAt: '' }]) {
+      const t = sellBuilder([]);
+      t.run(`loadEditableState(${JSON.stringify(state)}, { asRevision: false, template: true })`);
+      assert.equal(t.el('warrantyPlan').value, 'service6', 'a template is a NEW quote');
+      assert.equal(termText(t, 'tc_warranty'), WARRANTY_SERVICE);
+      assert.equal(t.run('isLegacyDoc()'), false);
+      assert.equal(t.run('leadRuleIsNew()'), true);
+    }
+    // a template that came from an as-issued quote does not carry the missing Standard page into the new quote
+    const t2 = sellBuilder([]);
+    t2.run(`loadEditableState(${JSON.stringify(b.plain('buildQuotePayload().editableState'))}, { asRevision: false, template: true })`);
+    assert.equal(t2.el('showStandardPage').checked, false, 'only through stripTemplateState (saveAsTemplate) is it normalised: an unstripped state keeps its stored tick');
+    b.run('prompt = () => "Old range bundle"; saveAsTemplate();');
+    const posted = b.posted.find((p) => p.msg.type === 'QUOTE_SAVE_TEMPLATE').msg.payload.state;
+    assert.deepEqual([posted.pricing.warrantyPlan, posted.pricing.showStandardPage], ['service6', true], 'a template saved from an as-issued quote is a new-quote template');
+  });
+
+  it('the app\'s messages: LOAD_QUOTE (a reopen, or a new revision) of a filing with no plan is "as issued"; LOAD_TEMPLATE of the very same state starts a NEW quote on the current rules', () => {
+    const send = (b, data) => b.listeners.window.message.forEach((fn) => fn({ origin: 'http://localhost', data }));
+    const state = filed({ clientName: '', quoteNo: '', filedAt: '' });
+    const q = sellBuilder([]); q.run('computeTrueCost = function () { return { materials: 0 }; };');
+    send(q, { type: 'LOAD_QUOTE', payload: { editableState: filed(), asRevision: false } });
+    assert.deepEqual([q.el('warrantyPlan').value, termText(q, 'tc_warranty')], ['', OLD_WARRANTY]);
+    send(q, { type: 'LOAD_QUOTE', payload: { editableState: filed(), asRevision: true } });
+    assert.deepEqual([q.el('warrantyPlan').value, q.el('quoteNo').value], ['', 'BKLUFB260901-001R2'], 'a new revision of an issued quotation is still as issued');
+    send(q, { type: 'LOAD_TEMPLATE', payload: { state } });
+    assert.deepEqual([q.el('warrantyPlan').value, q.el('showStandardPage').checked, termText(q, 'tc_warranty')], ['service6', true, WARRANTY_SERVICE], 'a template is a new quote: the current wording and the Standard page');
+    const t2 = sellBuilder([]);
+    send(t2, { type: 'LOAD_TEMPLATE', payload: { state: { ...state, pricing: { ...state.pricing, warrantyPlan: '' } } } });
+    assert.equal(t2.el('warrantyPlan').value, 'service6', 'even a template that still carries the marker');
+    assert.match(t2.toast(), /Template loaded/);
+  });
+
+  it('REVISION of an issued quotation stays AS ISSUED until staff pick a plan: the old wording, the earlier timeline, no Standard page — then picking a plan brings it onto the current terms (wording, 25-day rule, sheets, totals) and says so', () => {
+    const b = load(filed({ items: sampleItems() }), { asRevision: true });
+    const { opt, note } = optionStub(b);
+    b.run('syncLegacyDocUi()');
+    assert.equal(b.el('warrantyPlan').value, '');
+    assert.equal(opt.hidden, false, 'the "As issued" choice is offered while the quote is as issued');
+    assert.equal(note.style.display, '', 'and the note explains it');
+    assert.equal(termText(b, 'tc_warranty'), OLD_WARRANTY);
+    assert.equal(b.el('quoteNo').value, 'BKLUFB260901-001R2', 'it is a revision (R2)');
+    assert.equal(money(b).rushActive, false);
+    // staff pick the standard plan
+    b.el('warrantyPlan').value = 'service6'; b.run('onWarrantyPlanChange()');
+    assert.equal(b.run('isLegacyDoc()'), false);
+    assert.equal(termText(b, 'tc_warranty'), WARRANTY_SERVICE, 'the plan\'s wording');
+    assert.equal(termText(b, 'tc_site'), 'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.', 'Barro Kitchens quoting: the same words');
+    assert.equal(b.run('autoLeadDays()'), 29, 'the new rule');
+    assert.match(b.el('summaryStrip').textContent, /Lead time from 25 working days · .*6-month service warranty$/);
+    assert.match(b.el('itemsNotes').innerHTML, /Lead time: 25 working days minimum/);
+    assert.match(b.el('itemsTbody').innerHTML, /<td class="ss-l">Lead time<\/td><td class="ss-v">25 working days min\.<\/td>/);
+    assert.ok(b.el('timelineSummary').innerHTML.includes('25 working days minimum, or 12 working days plus 3'), 'the Timeline note repainted');
+    const t = money(b);
+    assert.deepEqual([t.rushActive, t.rushFee], [true, 8666], 'the stored 14 days is now a priority order — the totals row shows it');
+    assert.match(b.toast(), /^This quotation now follows the current terms: the plan’s warranty wording and a lead time of 25 working days minimum\. The lead time stored on it is now a priority order \(\+2%\) — press ↻ Auto to reset it\.$/);
+    assert.equal(opt.hidden, false, 'the choice stays offered, so staff can go back');
+    assert.equal(note.style.display, 'none');
+    assert.equal(b.run('getPricingFields().warrantyPlan'), 'service6', 'saved: it is now a quote of the current rules');
+    // ↻ Auto resets the stored lead and the surcharge goes
+    b.run('autoFillLead()');
+    assert.equal(money(b).rushActive, false);
+    // and back to "As issued": the old wording and the earlier timeline return
+    b.el('warrantyPlan').value = ''; b.run('onWarrantyPlanChange()');
+    assert.equal(termText(b, 'tc_warranty'), OLD_WARRANTY);
+    assert.equal(b.run('leadRuleIsNew()'), false);
+    assert.equal(/Lead time/.test(b.el('itemsNotes').innerHTML), false);
+  });
+
+  it('picking a plan calls every repaint itself — the terms, the line sheets, the strip / legend / Standard page, the Timeline and the totals — and saves; a plan change on a NEW quote says nothing', () => {
+    const b = load(filed());
+    b.run(`var __calls = []; ['renderTerms', 'renderItems', 'renderDocExtras', 'renderTimeline', 'renderTotals', 'saveToStorage'].forEach(function (n) { globalThis[n] = function () { __calls.push(n); }; });`);
+    b.el('warrantyPlan').value = 'service6'; b.run('onWarrantyPlanChange()');
+    assert.deepEqual([...b.plain('__calls')].sort(), ['renderDocExtras', 'renderItems', 'renderTerms', 'renderTimeline', 'renderTotals', 'saveToStorage']);
+    const n = sellBuilder(sampleItems());
+    n.b = null;
+    n.el('warrantyPlan').value = 'kitchenshield12'; n.run('onWarrantyPlanChange()');
+    assert.equal(n.toast(), '', 'a plan change on a quote that was never "as issued" says nothing');
+    n.el('warrantyPlan').value = 'service6'; n.run('onWarrantyPlanChange()');
+    assert.equal(n.toast(), '');
+  });
+
+  it('a line\'s sheet repainted in place (an Includes edit) follows the quotation\'s timeline rule too: no lead-time row on an "as issued" one, the row on a current one — and the strength and the chips of an "as issued" quotation do not count a lead time', () => {
+    const lineSheet = (b) => { const slot = { innerHTML: '' }, chips = { innerHTML: '' }; const row = { querySelector: (sel) => (sel === '.sheet-slot' ? slot : sel === '.ld-chips' ? chips : null) }; b.el('itemsTbody').querySelector = (sel) => (sel === 'tr.item-row[data-idx="1"]' ? row : null); b.run('editIncludes(1, { value: "one\\ntwo" })'); return slot.innerHTML; };
+    const issued = load(filed({ items: sampleItems() }));
+    assert.equal(/Lead time/.test(lineSheet(issued)), false, 'as issued');
+    assert.match(lineSheet(sellBuilder(sampleItems())), /<td class="ss-l">Lead time<\/td><td class="ss-v">25 working days min\.<\/td>/);
+    // a made-to-order line with a size, specs and a finish but no ruled lead time: complete as issued, lacking the lead time on a current quote
+    const custom = { id: 'CUSTOM', category: 'miscellaneous', name: 'Gate', dims: 'L1 mm', specs: [], specEdit: 'Mild steel', finish: 'satin', includes: [], excludes: [], specLines: [], qty: 1, unit: 'pc', unitPrice: 1000, amount: 1000, leadTime: '', formulaType: 'fixed' };
+    const a = load(filed({ items: [custom] })), c = sellBuilder([custom]);
+    assert.deepEqual(a.plain('lineCompleteness(items[0], 0).missing'), ['photo']);
+    assert.deepEqual(c.plain('lineCompleteness(items[0], 0).missing'), ['lead', 'photo']);
+    assert.equal(a.plain('docQuality().counts.lead'), 0);
+    assert.equal(c.plain('docQuality().counts.lead'), 1);
+  });
+
+  it('picking a plan on an issued quotation WITHOUT a stored lead time says nothing about a priority order (nothing moves: the auto timeline just becomes 25 working days)', () => {
+    const b = load(filed({ pricing: { showVat: true, quoteValidDays: '30', projStart: '2026-09-01' } }));
+    assert.equal(b.run('getLeadDays()'), 14);
+    b.el('warrantyPlan').value = 'kitchenshield12'; b.run('onWarrantyPlanChange()');
+    assert.equal(b.toast(), 'This quotation now follows the current terms: the plan’s warranty wording and a lead time of 25 working days minimum.');
+    assert.equal(money(b).rushActive, false);
+    assert.equal(b.run('getLeadDays()'), 29);
+    assert.equal(termText(b, 'tc_warranty'), `${WARRANTY_SERVICE} This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.`);
+  });
+
+  it('NEW QUOTE, DRAFT and LINK read the current rules; a FILED new-schema quotation reopened keeps its plan and its page; the marker never makes Brilliant Steel differ', () => {
+    // 🗑 New
+    const n = sellBuilder(sampleItems(), { plan: '' });
+    n.run('clearForm()');
+    assert.deepEqual([n.el('warrantyPlan').value, n.el('showStandardPage').checked, n.run('isLegacyDoc()'), n.run('leadRuleIsNew()')], ['service6', true, false, true]);
+    // a reopened filing of the NEW schema (it carries a plan): untouched
+    for (const plan of ['service6', 'kitchenshield12']) {
+      const b = load(filed({ pricing: { showVat: true, warrantyPlan: plan, showStandardPage: true } }));
+      assert.deepEqual([b.el('warrantyPlan').value, b.run('isLegacyDoc()'), b.run('leadRuleIsNew()')], [plan, false, true], plan);
+      assert.equal(termText(b, 'tc_warranty').startsWith('6-month service warranty'), true);
+    }
+    // Brilliant Steel: old wording and the earlier timeline whatever the marker, and its output is the same as ever
+    for (const state of [filed({ currentCo: 'BS' }), filed({ currentCo: 'BS', pricing: { warrantyPlan: 'service6', projStart: '2026-09-01', overallLead: '14' } })]) {
+      const b = load(state);
+      assert.equal(termText(b, 'tc_warranty'), OLD_WARRANTY);
+      assert.equal(termText(b, 'tc_site'), OLD_SITE);
+      assert.equal(b.run('leadRuleIsNew()'), false);
+      assert.equal(b.run('autoLeadDays()'), 14);
+      assert.equal(money(b).rushActive, false);
+      assert.equal(b.el('standardPage').innerHTML, '');
+      assert.equal(b.el('summaryStrip').textContent, '');
+    }
+  });
+
+  it('the plan select offers "As issued" only for a quotation that came in that way (a hidden option until then), with the explanatory note; 🗑 New and a new quote hide both again', () => {
+    assert.match(HTML, /<option value="" hidden>As issued — earlier wording and timeline<\/option>/);
+    assert.match(HTML, /<div class="pc-hint" id="legacyDocNote" style="display:none;[^"]*">This quotation was issued before the warranty plan existed, so it keeps the warranty and site-requirements wording and the timeline rule it was issued with\. Pick a plan to bring it onto the current terms \(the plan’s warranty wording and a lead time of 25 working days minimum\)\.<\/div>/);
+    const b = sellBuilder([]); const { opt, note } = optionStub(b);
+    b.run(`loadEditableState(${JSON.stringify(filed())}, { asRevision: false })`);
+    assert.deepEqual([opt.hidden, note.style.display], [false, '']);
+    b.el('warrantyPlan').value = 'service6'; b.run('onWarrantyPlanChange()');
+    assert.deepEqual([opt.hidden, note.style.display], [false, 'none']);
+    b.run('clearForm()');
+    assert.deepEqual([opt.hidden, note.style.display], [true, 'none'], 'a new quote does not offer it');
+    b.run(`loadEditableState(${JSON.stringify(filed({ pricing: { warrantyPlan: 'service6' } }))}, { asRevision: false })`);
+    assert.deepEqual([opt.hidden, note.style.display], [true, 'none']);
+  });
+});
+
+const WARRANTY_SERVICE = '6-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.';

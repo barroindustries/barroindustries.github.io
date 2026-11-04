@@ -21,7 +21,7 @@
 // literal is renamed or moved the extraction throws loudly, rather than the test passing on nothing.
 //
 // Also pinned: js/config.js PAGE_SCRIPTS lists js/qb-configured.js for 'dept:Sales' and 'bk-quotations' (the pages whose quote-request screens hand
-// a request to the builder) and for no partner page. ci-invariants separately demands that the file exists and is in sw.js PRECACHE.
+// a request to the builder) and for no partner page — and, since the selling-quote work (2026-11-05), js/qb-spec-sheet.js right after it, for those two and no Brilliant Steel page. ci-invariants separately demands that the file exists and is in sw.js PRECACHE.
 //
 // Mutation-tested in a scratch copy, never the shared tree (2026-10-28): 23 mutations, 23 killed — each of BK creds / BK addr / BI contact
 // "|" / BRAND.legal address, addressShort and email put back; an e-mail or the QC address given to Brilliant Steel in config.js, sales.js and the
@@ -243,10 +243,19 @@ describe('js/config.js PAGE_SCRIPTS — the configurator module loads on the pag
     });
   }
 
-  it('no Brilliant Steel page loads it (the configurator is not offered on the Brilliant Steel pages)', () => {
+  for (const page of ['dept:Sales', 'bk-quotations']) {
+    it(`${page}: lists js/qb-spec-sheet.js exactly once, right after js/qb-configured.js (the pure spec-sheet helpers the Sales quote preview prints a line with — QB-SELLING-QUOTE-SPEC Phase 1)`, () => {
+      const files = pageScripts()[page];
+      assert.equal(files.filter((f) => f === 'js/qb-spec-sheet.js').length, 1);
+      assert.equal(files.indexOf('js/qb-spec-sheet.js'), files.indexOf('js/qb-configured.js') + 1);
+    });
+  }
+
+  it('no Brilliant Steel page loads it (the configurator is not offered on the Brilliant Steel pages), nor the spec-sheet helpers (a Brilliant Steel quotation is left exactly as it was)', () => {
     for (const page of ['dashboard:bsOnly', 'dept:Brilliant Steel', 'bs-quotations', 'bs-clients', 'bs-files']) {
       assert.ok(Array.isArray(pageScripts()[page]), `${page} is not a PAGE_SCRIPTS key any more`);
       assert.ok(!pageScripts()[page].includes('js/qb-configured.js'), `${page} loads the configurator module`);
+      assert.ok(!pageScripts()[page].includes('js/qb-spec-sheet.js'), `${page} loads the spec-sheet helpers`);
     }
     // the retired external-partner pages are gone from the table altogether (PARTNER-REMOVAL-SPEC)
     for (const page of ['dashboard:partner', 'dept:Partners', 'partner-projects']) assert.ok(!(page in pageScripts()), `${page} is a PAGE_SCRIPTS key again`);

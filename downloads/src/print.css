@@ -170,6 +170,7 @@ p a,li a{border-bottom:.2mm solid var(--gold)}
 
 /* finishes swatches (illustrations) */
 .sw{height:15mm;border-radius:1mm;border:.25mm solid rgba(11,27,63,.18)}
+.sw.hairline{background:repeating-linear-gradient(90deg,#dadde3 0,#d2d6dc .12mm,#e0e3e8 .24mm,#d7dae1 .36mm),linear-gradient(180deg,#e9ebef,#c9ced6)}
 .sw.brushed{background:repeating-linear-gradient(90deg,#d7dae0 0,#cfd3da .35mm,#e2e5ea .7mm,#d3d7de 1.05mm),linear-gradient(180deg,#e9ebef,#c9ced6)}
 .sw.mirror{background:linear-gradient(115deg,#f4f6f9 0%,#aeb6c2 28%,#f7f8fa 46%,#8d97a6 68%,#eef0f4 100%)}
 .sw.satin{background:linear-gradient(180deg,#dde0e6 0%,#cbd0d8 100%)}

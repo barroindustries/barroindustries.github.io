@@ -615,12 +615,14 @@ const FAMILY_ID_RE = /^[a-z][a-z0-9_]{1,30}$/;
 const GROUP_KEY_RE = /^[a-z][a-zA-Z0-9_]{0,30}$/;
 const PREVIEW_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,78}$/;
 const FAMILY_TOP_KEYS = ['_readme', 'version', 'order', 'families', 'fixed'];
-const FAMILY_KEYS = ['label', 'category', 'description', 'title', 'titleAny', 'construction', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
+const FAMILY_KEYS = ['label', 'category', 'description', 'title', 'titleAny', 'construction', 'includes', 'excludes', 'finishDefault', 'leadTime', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
 const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'specRow', 'pricing', 'when', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
-const OPTION_KEYS = ['v', 'l', 'f', 's', 'c', 't', 'hint', 'short', 'w'];
+const OPTION_KEYS = ['v', 'l', 'f', 's', 'c', 't', 'i', 'hint', 'short', 'w'];
+// the finishes a quote line can state (owner rulings 2026-11-05: hairline is the standard; brushed, mirror and satin on request) — the one list `finishDefault` is checked against
+const FINISH_IDS = ['hairline', 'brushed', 'mirror', 'satin'];
 const GROUP_TYPES = ['choice', 'slots', 'multi'];
 // the fields of a family that reach the public/server file js/qr-families.js, in a fixed order (deterministic output)
-const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'title', 'titleAny', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
+const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'title', 'titleAny', 'construction', 'includes', 'excludes', 'finishDefault', 'leadTime', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
 
 const isPlainObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isIntNum = (n) => typeof n === 'number' && Number.isInteger(n);
@@ -684,7 +686,7 @@ function checkFamily(fid, f, add) {
       else seenV.push(o.v);
       if (g.type !== 'choice' && typeof o.v !== 'string') { at(`${ot}: a ${g.type} option value must be a string`); groupsOk = false; }
       if (!nonEmpty(o.l)) { at(`${ot}: "l" must be a non-empty string`); groupsOk = false; }
-      for (const k of ['f', 's', 'c', 't', 'hint', 'short']) if (o[k] !== undefined && !nonEmpty(o[k])) { at(`${ot}: "${k}" must be a non-empty string`); groupsOk = false; }
+      for (const k of ['f', 's', 'c', 't', 'i', 'hint', 'short']) if (o[k] !== undefined && !nonEmpty(o[k])) { at(`${ot}: "${k}" must be a non-empty string`); groupsOk = false; }
       if (o.w !== undefined && !(isIntNum(o.w) && o.w >= 0 && o.w <= 5000)) { at(`${ot}: "w" must be a whole number of mm from 0 to 5000`); groupsOk = false; }
     });
     if (g.type === 'slots') {
@@ -744,6 +746,38 @@ function checkFamily(fid, f, add) {
       else if (!g.options.every((o) => nonEmpty(o.c))) at(`construction: every option of "${t}" needs a "c" phrase (its construction wording)`);
       else if (g.when !== undefined) at(`construction: {${t}} names a conditional option (it has "when"): a construction phrase cannot depend on it`);
     }
+  }
+
+  // selling quote (QB-SELLING-QUOTE-SPEC §3.2, owner rulings 2026-11-05): four OPTIONAL builder-only document fields. They hold no price and print nothing on the website; they ride into
+  // js/qr-families.js like the rest. finishDefault = one of FINISH_IDS; leadTime = a non-empty string ("25 working days"); excludes = plain phrases separated by " · "; includes = phrases
+  // separated by " · " whose {group} tokens name a CHOICE or MULTI group of this family, at least one option of which carries "i" (the wording PF.fillTemplate substitutes — an option without
+  // it, or one that does not apply, drops the phrase). An "i" on an option of a group no includes token names is refused too: it could never print, so it is a typo.
+  if (f.finishDefault !== undefined && !FINISH_IDS.includes(f.finishDefault)) at(`"finishDefault" must be one of ${FINISH_IDS.join(', ')}`);
+  if (f.leadTime !== undefined && !nonEmpty(f.leadTime)) at('"leadTime" must be a non-empty string');
+  const emptyPhrase = (s) => s.split(' · ').some((p) => !p.trim());
+  if (f.excludes !== undefined) {
+    if (!nonEmpty(f.excludes)) at('"excludes" must be a non-empty string');
+    else {
+      if (/[{}]/.test(f.excludes)) at('excludes: a brace — "excludes" is plain text, with no {groupKey} tokens');
+      if (emptyPhrase(f.excludes)) at('excludes: an empty phrase (phrases are separated by " · ")');
+    }
+  }
+  let includeTokens = [];
+  if (f.includes !== undefined) {
+    if (!nonEmpty(f.includes)) at('"includes" must be a non-empty string');
+    else {
+      if (/[{}]/.test(f.includes.replace(/\{[A-Za-z0-9_]+\}/g, ''))) at('includes: a brace that is not a {groupKey} token');
+      if (emptyPhrase(f.includes)) at('includes: an empty phrase (phrases are separated by " · ")');
+      includeTokens = [...new Set([...f.includes.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[1]))];
+      for (const t of includeTokens) {
+        const g = gOf(t);
+        if (!g || (g.type !== 'choice' && g.type !== 'multi')) at(`includes: {${t}} does not name a choice or multi group of this family`);
+        else if (!g.options.some((o) => nonEmpty(o.i))) at(`includes: {${t}} names a group none of whose options carries an "i" wording, so it could never print`);
+      }
+    }
+  }
+  for (const g of fam.groups) {
+    if (g.options.some((o) => o.i !== undefined) && !includeTokens.includes(g.key)) at(`group "${g.key}": an option carries "i" but no includes token names the group (it could never print)`);
   }
 
   // title (owner ruling 2026-10-28): the NAME the Quote Builder gives a configured line ("SS Sink", "SS Range Stove Combination (Griller, Fryer)"); the card and page names (label) are
@@ -1096,12 +1130,12 @@ const LABEL = (text) => `<p class="cat-label">${text}</p>`;
 const SPEC_LIST = (rows) => `<dl class="cat-specs">${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('')}</dl>`;
 
 // The material line of every configurable card. NOT a new claim: it is the owner's own public statement of what is offered — two stainless grades,
-// SS304 food-grade (the standard) and SS316 laboratory-grade, and three finishes, brushed, mirror or satin (owner, 2026-10-21) — the same as the
-// homepage proof bar, hero lead and Fabrication step and the catalogue lede. The WEBSITE configurators and the quote flow offer no grade or finish choice
+// SS304 food-grade (the standard) and SS316 laboratory-grade, and four finishes — hairline as the standard, brushed, mirror or satin on request
+// (owner, 2026-10-21; hairline as the standard finish, owner ruling 2026-11-05) — the same as the homepage proof bar, hero lead and Fabrication step and the catalogue lede. The WEBSITE configurators and the quote flow offer no grade or finish choice
 // (the SS316 grade is a staff-only choice in the Quote Builder, 2026-10-28; website pricing for a grade is undecided): the line only says what Barro can supply;
 // the customer asks for it in the quote's notes. tests/catalogue-layout.test.mjs
 // and tests/site-public-surface.test.mjs pin it to the homepage wording, so a card can never claim a material the homepage does not.
-const FAMILY_MATERIAL = 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish';
+const FAMILY_MATERIAL = 'SS304 food-grade (standard) or SS316 laboratory-grade · hairline finish as standard, brushed, mirror or satin on request';
 
 // The product page of each configurable family (SEO build, 2026-10-22: /products/ and one page per product, written by hand and pinned by
 // tests/seo-products.test.mjs, which also checks that these are the families of scripts/public-families.json). A family card ends with a
@@ -1601,7 +1635,7 @@ module.exports = {
   publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, renderItemListLd, injectIntoHtml, injectIsland, injectItemList, stripJsonComments, esc, webpSize, loadPhotoMap,
   loadPublicCategories, publishedProductIds, PUBLIC_CATEGORIES, EXCLUDED_CATEGORIES,
   loadPublicFamilies, renderFamiliesJs, loadPreviewManifest, renderFamilyCard, FAMILIES_FILE, FAMILIES_JS, FAMILIES_JS_MIRROR, PREVIEWS_FILE,
-  TILE_ICONS, FAMILY_MATERIAL, FAMILY_PAGES, LABEL_NOTES, LABEL_SPECS,
+  TILE_ICONS, FAMILY_MATERIAL, FAMILY_PAGES, LABEL_NOTES, LABEL_SPECS, FINISH_IDS,
   NOTE_OVERRIDES, TEXT_FIXES, MATERIAL_KEYS, MONEY_RE, FORMULA_RE, BRAND_RE, START_MARKER, END_MARKER,
   QR_PLACEHOLDER, QR_START_MARKER, QR_END_MARKER, LD_START_MARKER, LD_END_MARKER, SITE_BRAND_NAME, PUBLISHED_IDS_FILE,
   CatalogueGuardError,

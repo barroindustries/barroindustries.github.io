@@ -54,8 +54,8 @@ does not give volumes (that needs Google Ads Keyword Planner — owner's account
 ## Rules for every page
 - One H1 containing the primary keyword naturally; title ≈ "Primary Keyword — Built to Order | Barro Industries"
   (≤ 60 chars where possible); description 140–160 chars with one secondary keyword + Barro Kitchens once.
-- Real content only: options from the configurators (`scripts/public-families.json`), SS304/SS316, brushed /
-  mirror / satin, sizes from the catalogue, the 6-month warranty, KitchenShield™ PMS, projects (ISPSC, DMMMSU).
+- Real content only: options from the configurators (`scripts/public-families.json`), SS304/SS316, hairline (standard) /
+  brushed / mirror / satin, sizes from the catalogue, the 6-month warranty, KitchenShield™ PMS, projects (ISPSC, DMMMSU).
   A page for a product with no photograph of it (wok range, deck oven, dish table) uses the text hero and says what
   its project photographs really show; the titles of the five 2026-10-28 pages are cut to fit the 72-character cap
   that `tests/seo-products.test.mjs` pins (title + " | Barro Industries").

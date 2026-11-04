@@ -7,7 +7,7 @@ const { CO, img, ic, icb, link } = L;
 const DOC = 'Company profile';
 // The owner's own 2026-10-10 catalogue carried "Narciso Neil Barro, President" with a portrait on its About page; it is carried over here. Set false to leave the card out.
 const SHOW_LEADERSHIP = true;
-// The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, three finishes"
+// The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, four finishes"
 // (and of the catalogue PDF's materials page). tests/content-assets.test.mjs pins them together.
 const CONSTRUCTION_NOTE = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
 // the PDF's document information (scripts/downloads/pdf-meta.js writes it, with the copyright, after Chrome has printed the file)
@@ -50,7 +50,7 @@ function build() {
         <ul class="dots mt1">
           <li><b>23 years in business.</b> A family business that began in Baguio City and La Union.</li>
           <li><b>One team, end to end.</b> We design, fabricate, deliver and install, then commission on site.</li>
-          <li><b>Made to order.</b> Your exact dimensions, SS304 or SS316, brushed, mirror or satin.</li>
+          <li><b>Made to order.</b> Your exact dimensions, SS304 or SS316, with a standard hairline finish (brushed, mirror or satin on request).</li>
           <li><b>Finished with care.</b> Seams welded and ground smooth, surfaces polished to a professional finish.</li>
           <li><b>Here after handover.</b> A 6-month service warranty, and 12 months of preventive maintenance with KitchenShield™ on full-kitchen projects.</li>
         </ul>
@@ -133,15 +133,16 @@ function build() {
   // 7 — materials and finishes
   pages.push(L.page({ doc: DOC, label: 'Materials and finishes', body: `
     <p class="eyebrow">05 · Materials and finishes</p>
-    <h1 class="h1">Two grades, three finishes</h1>
-    <p class="lead">We work in two grades, food-grade SS304 as standard and laboratory-grade SS316 on request, in a brushed, mirror or satin finish.</p>
+    <h1 class="h1">Two grades, four finishes</h1>
+    <p class="lead">We work in two grades, food-grade SS304 as standard and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.</p>
     <div class="cols c2 gap4 mt3 stretch">
       <div class="card"><p class="h4">Standard</p><div class="h3">SS304 food grade</div><p>Food-grade SS304 stainless steel is our standard for kitchens: preparation tables, sinks, cabinets, shelving and racks.</p></div>
       <div class="card"><p class="h4">On request</p><div class="h3">SS316 laboratory grade</div><p>Laboratory-grade SS316 stainless steel is available on request and suits laboratories and school science rooms.</p></div>
     </div>
     <p class="h4 mt4">Finishes</p>
-    <div class="cols c3 gap4 mt1">
-      <div><div class="sw brushed"></div><div class="h3 mt1">Brushed</div><p class="sm muted">A visible straight grain. The usual choice for work surfaces, because it hides everyday scratches.</p></div>
+    <div class="cols c4 gap4 mt1">
+      <div><div class="sw hairline"></div><div class="h3 mt1">Hairline</div><p class="sm muted">Our standard finish. A fine, uniform straight-line grain.</p></div>
+      <div><div class="sw brushed"></div><div class="h3 mt1">Brushed</div><p class="sm muted">A visible straight grain that hides everyday scratches.</p></div>
       <div><div class="sw mirror"></div><div class="h3 mt1">Mirror</div><p class="sm muted">Polished to a high gloss. It suits decorative parts and low-contact areas.</p></div>
       <div><div class="sw satin"></div><div class="h3 mt1">Satin</div><p class="sm muted">A soft, low-sheen finish between brushed and mirror, with a smoother, more even look.</p></div>
     </div>

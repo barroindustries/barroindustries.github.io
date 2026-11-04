@@ -1251,7 +1251,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     const n = (visibleText(homeSite).match(/high-quality/gi) || []).length;
     assert.ok(n >= 3 && n <= 5, `"high-quality" appears ${n} times`);
     const text = visibleText(homeSite);
-    for (const fact of ['food-grade SS304', 'laboratory-grade SS316', 'brushed, mirror or satin', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
+    for (const fact of ['food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline, with brushed, mirror or satin on request', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
       assert.ok(text.includes(fact) || text.includes(fact.replace(/ /g, ' ')), `the specific "${fact}" is missing`);
     }
     assert.match(homeHead, /name="description" content="Premium commercial kitchen equipment[^"]*SS304 or SS316/);

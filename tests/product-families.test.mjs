@@ -1168,7 +1168,7 @@ describe('the generated files and what ships to the public', () => {
     const txt = WITHOUT_PRICING_MODE(raw);
     assert.ok(!B.MONEY_RE.test(txt) && !B.FORMULA_RE.test(txt), 'a money pattern is in the family definitions');
     assert.ok(!/basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|formulaType|unitPrice|lineTotal|exactTotal|listPrice|laborHours/.test(txt));
-    for (const f of ORDER) assert.deepEqual(Object.keys(fam(f)).filter((k) => !['id', 'label', 'category', 'description', 'title', 'titleAny', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'].includes(k)), [], f);
+    for (const f of ORDER) assert.deepEqual(Object.keys(fam(f)).filter((k) => !['id', 'label', 'category', 'description', 'title', 'titleAny', 'construction', 'includes', 'excludes', 'finishDefault', 'leadTime', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'].includes(k)), [], f);   // includes / excludes / finishDefault / leadTime: the builder-only document fields (QB-SELLING-QUOTE-SPEC §3.2), public-safe
     assert.deepEqual(Object.keys(FAMS).sort(), ['families', 'order', 'version']);
   });
   it('the three public scripts carry NO pricing vocabulary, no markup injection and no code evaluation (the same pattern CHECK 9 runs)', () => {
@@ -2060,3 +2060,134 @@ function resolveMaster() {
   }
   return null;
 }
+
+// ═══════════════════════════════════════ SELLING QUOTE — the document fields of a family (QB-SELLING-QUOTE-SPEC §3.2, owner rulings 2026-11-05) ═══════════════════════════════════════
+// finishDefault (hairline is the standard), leadTime ("25 working days"), includes (a template of {group} tokens filled from the options' `i` wording by PF.fillTemplate) and excludes (plain
+// phrases): optional, builder-only, no price, public-safe — the build allows them, validates them hard, and ships them in js/qr-families.js. Mutation-tested in scratch copies (never the shared
+// tree) — each of these must fail here: FINISH_IDS not checked / a fifth finish accepted; leadTime unchecked; excludes with a brace accepted; includes with an unknown / slots / "i"-less token
+// accepted; a stray brace or an empty phrase accepted; an "i" on a group no token names accepted; an empty or numeric "i" accepted; the new keys dropped from the generated file or the allowlists;
+// fillTemplate printing an empty placeholder / not dropping a phrase / ignoring `when` / reading a slots group / mutating its input / reading an inherited key; the functions/ mirror drifting.
+describe('the document fields of a family — what the build accepts and refuses', () => {
+  const bad = (mut) => { const j = JSON.parse(JSON.stringify(SRC)); mut(j); return () => B.loadPublicFamilies({ source: j, published: PUBLISHED }); };
+  it('the shipped file carries them on every family, and the build loads it', () => {
+    assert.doesNotThrow(bad(() => {}));
+    for (const id of ORDER) { assert.equal(SRC.families[id].finishDefault, 'hairline', id); assert.equal(SRC.families[id].leadTime, '25 working days', id); }
+    assert.equal(SRC.version, 5, 'optional unpriced fields: the schema the sheets are approved against does not move');
+    assert.deepEqual([...B.FINISH_IDS], ['hairline', 'brushed', 'mirror', 'satin']);
+  });
+  it('they are optional: a family without them is valid, and each can be given alone', () => {
+    assert.doesNotThrow(bad((j) => { for (const id of ORDER) { delete j.families[id].finishDefault; delete j.families[id].leadTime; delete j.families[id].excludes; } }));
+    assert.doesNotThrow(bad((j) => { delete j.families.sink.includes; for (const g of j.families.sink.groups) for (const o of g.options) delete o.i; }));
+    for (const f of B.FINISH_IDS) assert.doesNotThrow(bad((j) => { j.families.sink.finishDefault = f; }), f);
+    assert.doesNotThrow(bad((j) => { j.families.sink.leadTime = '30 working days'; j.families.sink.excludes = 'a'; }));
+  });
+  it('finishDefault must be one of the four finishes; leadTime a non-empty string', () => {
+    for (const v of ['matte', '', 5, null, true, 'Hairline', 'HAIRLINE', ['hairline'], 'hairline finish']) assert.throws(bad((j) => { j.families.sink.finishDefault = v; }), /"finishDefault" must be one of hairline, brushed, mirror, satin/, String(v));
+    for (const v of ['', '   ', 25, null, ['25 working days']]) assert.throws(bad((j) => { j.families.sink.leadTime = v; }), /"leadTime" must be a non-empty string/, String(v));
+  });
+  it('excludes is plain text: a non-empty string of non-empty phrases, no {token}', () => {
+    for (const v of ['', '  ', 5, null, ['a']]) assert.throws(bad((j) => { j.families.sink.excludes = v; }), /"excludes" must be a non-empty string/, String(v));
+    assert.throws(bad((j) => { j.families.sink.excludes = 'a · {basins}'; }), /excludes: a brace — "excludes" is plain text/);
+    assert.throws(bad((j) => { j.families.sink.excludes = 'a } b'; }), /excludes: a brace/);
+    assert.throws(bad((j) => { j.families.sink.excludes = 'a ·  · b'; }), /excludes: an empty phrase/);
+  });
+  it('includes: {tokens} must name a choice or multi group of the family, at least one option of which carries an "i" wording; no stray brace, no empty phrase', () => {
+    assert.throws(bad((j) => { j.families.sink.includes = '{nope} · feet'; }), /includes: \{nope\} does not name a choice or multi group of this family/);
+    assert.throws(bad((j) => { j.families.stove.includes = '{positions} · feet'; }), /includes: \{positions\} does not name a choice or multi group of this family/, 'a slots group has no words');
+    assert.throws(bad((j) => { j.families.sink.includes = '{upper} · feet'; }), /includes: \{upper\} names a group none of whose options carries an "i" wording, so it could never print/);
+    assert.throws(bad((j) => { j.families.sink.includes = '{basins} {faucet · feet'; }), /includes: a brace that is not a \{groupKey\} token/);
+    assert.throws(bad((j) => { j.families.sink.includes = '{basins} · {faucet} ·  · feet'; }), /includes: an empty phrase/);
+    assert.throws(bad((j) => { j.families.sink.includes = ''; }), /"includes" must be a non-empty string/);
+    assert.throws(bad((j) => { j.families.sink.includes = 5; }), /"includes" must be a non-empty string/);
+    assert.doesNotThrow(bad((j) => { j.families.sink.includes = 'static text only'; for (const g of j.families.sink.groups) for (const o of g.options) delete o.i; }), 'a template with no token needs no "i" at all');
+  });
+  it('an option\'s "i" must be a non-empty string, and only on a group an includes token names (an "i" that could never print is a typo)', () => {
+    assert.throws(bad((j) => { j.families.sink.groups.find((g) => g.key === 'basins').options[0].i = ''; }), /"i" must be a non-empty string/);
+    assert.throws(bad((j) => { j.families.sink.groups.find((g) => g.key === 'basins').options[0].i = 1; }), /"i" must be a non-empty string/);
+    assert.throws(bad((j) => { j.families.sink.groups.find((g) => g.key === 'alignment').options[0].i = 'centred'; }), /group "alignment": an option carries "i" but no includes token names the group/);
+    assert.throws(bad((j) => { j.families.cooking_line.groups.find((g) => g.key === 'type').options[0].i = 'x'; }), /group "type": an option carries "i" but no includes token names the group/, 'a family with no includes at all');
+  });
+  it('the public text guard still bites: a price word or the partner brand in any of the new strings is refused (ids and keys only, never the text)', () => {
+    assert.throws(bad((j) => { j.families.sink.includes = 'free price {basins} · feet'; }), /pricing pattern/);
+    assert.throws(bad((j) => { j.families.sink.excludes = 'installation cost'; }), /pricing pattern/);
+    assert.throws(bad((j) => { j.families.sink.excludes = 'by Brilliant' + ' Steel'; }), /partner-brand/);
+    assert.throws(bad((j) => { j.families.sink.groups.find((g) => g.key === 'basins').options[0].i = 'one basin ₱5'; }), /pricing pattern/);
+    try { bad((j) => { j.families.sink.excludes = 'installation cost'; })(); } catch (e) { assert.ok(!e.message.includes('installation cost'), 'the offending text was echoed'); }
+  });
+  it('an unknown key is still refused (the allowlist grew by exactly these four), and the new keys ride into js/qr-families.js and its byte-identical mirror', () => {
+    assert.throws(bad((j) => { j.families.sink.finishDefaults = 'hairline'; }), /unknown key "finishDefaults"/);
+    assert.throws(bad((j) => { j.families.sink.finish = 'hairline'; }), /unknown key "finish"/);
+    for (const id of ORDER) for (const k of ['finishDefault', 'leadTime']) assert.equal(fam(id)[k], SRC.families[id][k], `${id}.${k}`);
+    for (const id of ORDER) { assert.equal(fam(id).includes, SRC.families[id].includes); assert.equal(fam(id).excludes, SRC.families[id].excludes); }
+    assert.equal(read('functions/qr-families.js'), read('js/qr-families.js'));
+    assert.equal(read('functions/product-families.js'), read('js/product-families.js'), 'CHECK 10: the helper\'s mirror is byte-identical (edit js/, then cp)');
+    assert.match(SRC._readme, /"finishDefault".*"leadTime".*"includes".*"excludes"/s);
+  });
+});
+
+describe('PF.fillTemplate — the phrases of an includes template for one configuration', () => {
+  const G = (key, type, def, opts, extra) => ({ key, label: key, type, default: def, options: opts, ...(extra || {}) });
+  const F = { groups: [
+    G('size', 'choice', 1, [{ v: 1, l: '1', i: 'one' }, { v: 2, l: '2', i: 'two' }, { v: 3, l: '3' }]),
+    G('feet', 'choice', true, [{ v: true, l: 'With', i: 'bullet feet' }, { v: false, l: 'Without' }]),
+    G('adds', 'multi', [], [{ v: 'a', l: 'A', i: 'alpha' }, { v: 'b', l: 'B', i: 'beta' }, { v: 'c', l: 'C' }]),
+    G('slot', 'slots', ['x'], [{ v: 'x', l: 'X', i: 'xx' }], { minSlots: 1, maxSlots: 2 }),
+    G('gate', 'choice', 'n', [{ v: 'n', l: 'N' }, { v: 'y', l: 'Y', i: 'gated' }], { when: { size: [2] } }),
+  ] };
+  const fill = (tpl, cfg) => PF.fillTemplate(F, tpl, cfg);
+  it('a choice token takes the chosen option\'s `i`; a multi token the `i` of each selected option, in the group\'s own order, joined ", "', () => {
+    assert.equal(fill('{size} basins', { size: 2 }), 'two basins');
+    assert.equal(fill('{adds}', { adds: ['b', 'a'] }), 'alpha, beta');
+    assert.equal(fill('{adds}', { adds: ['c', 'a'] }), 'alpha', 'an option with no `i` says nothing');
+    assert.equal(fill('static · {size} · {feet}', { size: 1, feet: true }), 'static · one · bullet feet');
+  });
+  it('an option without `i` (None / Without), a multi with nothing selected, a group that does not apply, an unknown group and a slots group all DROP their phrase — nothing is ever printed empty', () => {
+    assert.equal(fill('{size} basins · {feet}', { size: 3, feet: false }), '', 'both phrases dropped');
+    assert.equal(fill('keep · {feet}', { feet: false }), 'keep');
+    assert.equal(fill('keep · {adds}', { adds: [] }), 'keep');
+    assert.equal(fill('keep · {adds}', { adds: ['c'] }), 'keep');
+    assert.equal(fill('keep · {gate}', { size: 1, gate: 'y' }), 'keep', '"gate" applies only when size is 2: here it does not, so it is at its default');
+    assert.equal(fill('keep · {gate}', { size: 2, gate: 'y' }), 'keep · gated');
+    assert.equal(fill('keep · {nope}', {}), 'keep');
+    assert.equal(fill('keep · {slot}', { slot: ['x'] }), 'keep');
+    assert.equal(fill('{size} and {nope} together · keep', { size: 1 }), 'keep', 'ANY empty token drops the whole phrase');
+    for (const t of ['{size}', '{feet}', '{adds}', '{nope}', 'a {size} b {feet} c']) assert.equal(/\{|\}|undefined|null|^\s|\s$|\s·\s*$|^\s*·/.test(fill(t, { size: 3, feet: false, adds: [] })), false, t);
+  });
+  it('an absent or invalid value reads as the group\'s default (as constructionLine does); a staff-only or conditional group needs no special case', () => {
+    assert.equal(fill('{size}', {}), 'one');
+    assert.equal(fill('{size}', { size: 99 }), 'one');
+    assert.equal(fill('{feet}', { feet: 'yes' }), 'bullet feet');
+    assert.equal(fill('{size}', undefined), 'one');
+  });
+  it('whitespace is normalised, the separator is exactly " · ", and anything but a non-empty string gives ""', () => {
+    assert.equal(fill('  {size}   with   {feet}  ', { size: 1, feet: true }), 'one with bullet feet');
+    assert.equal(fill('a · b', {}), 'a · b');
+    assert.equal(fill('a·b', {}), 'a·b', 'a "·" without its spaces is text, not a separator');
+    for (const t of ['', undefined, null, 5, [], {}, true]) assert.equal(fill(t, {}), '', String(t));
+  });
+  it('pure and total: a frozen family and configuration are not touched, junk configurations never throw, an inherited key is not a value, a family with no groups is fine', () => {
+    const frozenF = JSON.parse(JSON.stringify(F)); (function deep(o) { Object.values(o).forEach((v) => { if (v && typeof v === 'object') deep(v); }); Object.freeze(o); })(frozenF);
+    const cfg = Object.freeze({ size: 2, adds: Object.freeze(['a']) });
+    assert.equal(PF.fillTemplate(frozenF, '{size} · {adds}', cfg), 'two · alpha');
+    for (const junk of [null, undefined, 5, 'x', [], { size: {} }, { adds: 'a' }, { adds: null }, Object.create({ size: 2 })]) assert.doesNotThrow(() => PF.fillTemplate(F, '{size} · {adds} · {feet}', junk), JSON.stringify(junk));
+    assert.equal(PF.fillTemplate(F, '{size}', Object.create({ size: 2 })), 'one', 'an inherited key is not a value');
+    assert.doesNotThrow(() => PF.fillTemplate(null, '{size}', {}));
+    assert.doesNotThrow(() => PF.fillTemplate({}, '{size}', {}));
+    assert.equal(PF.fillTemplate({}, 'plain', {}), 'plain');
+  });
+  it('over the real families: every includes template fills for EVERY valid configuration of its family (a sample of the option space) without an empty or raw placeholder', () => {
+    for (const id of ORDER) {
+      const f = fam(id);
+      if (!f.includes) continue;
+      const base = PF.defaultConfig(f);
+      const tries = [base];
+      for (const g of f.groups) if (g.type === 'choice') for (const o of g.options) tries.push({ ...base, [g.key]: o.v }); else if (g.type === 'multi') tries.push({ ...base, [g.key]: g.options.map((o) => o.v) });
+      for (const cfg of tries) {
+        const v = PF.validateConfiguration(f, cfg, { staff: true });
+        const out = PF.fillTemplate(f, f.includes, v.config);
+        assert.equal(/\{|\}|undefined|null|·\s*·|^\s*·|·\s*$/.test(out), false, `${id} ${JSON.stringify(cfg)} -> "${out}"`);
+        assert.ok(out.length > 0, `${id}: every family with includes prints at least its static phrase`);
+      }
+    }
+  });
+});

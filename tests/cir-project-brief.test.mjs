@@ -209,7 +209,7 @@ describe('FORMS.project_brief_v2 — the definition', () => {
     for (const v of ['lpg', 'natural_gas', 'electricity', 'water', 'drainage', 'exhaust']) assert.ok(optValues(byKey(V2, 'utilities')).includes(v), `utilities: ${v}`);
     assert.deepEqual(optValues(byKey(V2, 'material')), ['ss304', 'ss316', 'not_sure']);
     assert.deepEqual(byKey(V2, 'material').options.map((o) => o.l), ['SS304 food grade (our standard)', 'SS316 laboratory grade', 'Not sure yet']);
-    assert.deepEqual(optValues(byKey(V2, 'finish')), ['brushed', 'mirror', 'satin', 'not_sure']);
+    assert.deepEqual(optValues(byKey(V2, 'finish')), ['hairline', 'brushed', 'mirror', 'satin', 'not_sure']);
     assert.equal(byKey(V2, 'target_date').type, 'date');
     assert.ok(optValues(byKey(V2, 'timeline')).includes('not_sure'), 'timeline: "not sure yet"');
     assert.deepEqual(optValues(byKey(V2, 'buyer_type')), ['private', 'government']);

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.356';
+window.APP_VERSION = '14.0.357';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1518,8 +1518,8 @@ window.PAGE_SCRIPTS = {
   // renderBSQuotationsSummary/renderBKQuotationsSummary (js/screens/sales.js
   // itself) unguarded after the order is created. Same reach applies to
   // 'bk-quotations' below (same renderSales screen). ──
-  'dept:Sales':    ['js/screens/sales.js', 'js/screens/production.js', 'js/screens/tasks.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js', 'js/qb-configured.js'],
-  'bk-quotations': ['js/screens/sales.js', 'js/screens/production.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js', 'js/qb-configured.js'],
+  'dept:Sales':    ['js/screens/sales.js', 'js/screens/production.js', 'js/screens/tasks.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js', 'js/qb-configured.js', 'js/qb-spec-sheet.js'],
+  'bk-quotations': ['js/screens/sales.js', 'js/screens/production.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js', 'js/qb-configured.js', 'js/qb-spec-sheet.js'],
 
   // ── CRM — its "AEC Leads" tab calls window.renderAECDirectory
   // (js/screens/sales.js) unguarded. ──
@@ -2863,6 +2863,26 @@ window.quoteCompanyLabel   = function(company){ return _quoteCo(company).label; 
 // Internal = a Barro-owned identity (BK/BI). Brilliant Steel (BS) is not, and
 // must never be quoted under by internal-only flows.
 window.isInternalQuoteCompany = function(company){ return !!_quoteCo(company).internal; };
+
+// ── The quote builder's "Our standard" page (QB-SELLING-QUOTE-SPEC §3.4 / §4, owner rulings 2026-11-05) ──
+// The frozen text of the page printed after the terms of a Barro Kitchens / Barro Industries quotation. The quote builder is an <iframe> that cannot read this file, so
+// quote-builder-v2.html keeps its OWN identical copy (`const QB_STANDARD_PAGE`) — like CO.* above, a hand-synced mirror: tests/quote-selling-content.test.mjs pins the two
+// deep-equal and bans the words no document may carry. This copy is the app-side source for the public quote mirror (js/screens/sales.js, a later phase). Strings only: no
+// logo, no agency mark; past clients are named (DMMMSU, ISPSC) and nothing else; registrations are text. The standard construction block is NOT here — it is read off the
+// quote's own configured lines.
+window.QB_STANDARD_PAGE = Object.freeze({
+  title: 'Our standard',
+  brand: Object.freeze({ BK: 'Barro Kitchens, by Barro Industries OPC', BI: 'Barro Industries' }),
+  headings: Object.freeze({ materials: 'Materials & finishes', construction: 'Standard construction', warranty: 'Warranty & after-sales', process: 'How we work', references: 'References', registrations: 'Registrations' }),
+  materials: 'Our standard material is SS304 food-grade stainless steel. SS316 laboratory grade is available on request. Standard finish: hairline. Brushed, mirror or satin on request.',
+  warranty: Object.freeze({
+    service6: '6-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.',
+    kitchenshield12: 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.'
+  }),
+  process: Object.freeze(['Site measurement and design', 'Fabrication in our Quezon City shop', 'Delivery', 'Installation and commissioning', 'Turnover and after-sales service']),
+  references: 'Institutional clients include DMMMSU and ISPSC.',
+  registrations: 'Barro Industries OPC is SEC-registered, VAT-registered and PhilGEPS-registered.'
+});
 
 // Convenience: pick the correct legal entity for a document type.
 //   brandEntity('bir')       → DTI trade name + real TIN (payslips, invoices, BIR docs)

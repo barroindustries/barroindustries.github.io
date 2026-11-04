@@ -237,12 +237,12 @@ describe('the configurable cards: featured, with a labelled Specifications list 
     assert.ok(sinkCard.indexOf('<dt>Size</dt>') < sinkCard.indexOf('<dt>Construction</dt>') && sinkCard.indexOf('<dt>Construction</dt>') < sinkCard.indexOf('<dt>Material</dt>') && sinkCard.indexOf('<dt>Material</dt>') < sinkCard.indexOf('cat-learn'));
   });
 
-  it('the Material line is the owner\'s OWN statement of what is offered (SS304 food-grade as standard, SS316 laboratory-grade; brushed, mirror or satin finish) — never a claim the homepage does not make', () => {
-    assert.equal(B.FAMILY_MATERIAL, 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish');
+  it('the Material line is the owner\'s OWN statement of what is offered (SS304 food-grade as standard, SS316 laboratory-grade; hairline finish as standard, brushed, mirror or satin on request) — never a claim the homepage does not make', () => {
+    assert.equal(B.FAMILY_MATERIAL, 'SS304 food-grade (standard) or SS316 laboratory-grade · hairline finish as standard, brushed, mirror or satin on request');
     const proof = stripTags(home.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0]);
     for (const word of ['SS304', 'SS316', 'food-grade', 'laboratory-grade']) assert.ok(proof.includes(word), `the proof bar no longer says "${word}"`);
     const homeText = stripTags(home.slice(home.indexOf('<div id="site"'), home.indexOf('<!-- /#site -->')));
-    for (const word of ['brushed', 'mirror', 'satin']) assert.ok(homeText.includes(word), `the homepage no longer names the ${word} finish`);
+    for (const word of ['hairline', 'brushed', 'mirror', 'satin']) assert.ok(homeText.includes(word), `the homepage no longer names the ${word} finish`);
     assert.match(stripTags(block), /Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316/);
   });
 

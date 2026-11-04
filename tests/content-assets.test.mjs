@@ -204,8 +204,8 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
     assert.equal(new Set(links.map((l) => l.url)).size, links.length, 'a page is linked twice');
   });
 
-  it('states the facts the owner confirmed: the QC address, one phone, one email, the three registrations, the warranty, both grades, three finishes, 23 years, the family origin, the 13 places', () => {
-    for (const f of [ADDRESS, PHONE, EMAIL, 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'food-grade SS304', 'laboratory-grade SS316', 'brushed, mirror or satin', '23 years', 'began as a family business in Baguio City and La Union', 'Barro Kitchens', 'Barro Industries OPC']) assert.ok(txt.includes(f), `llms.txt lacks "${f}"`);
+  it('states the facts the owner confirmed: the QC address, one phone, one email, the three registrations, the warranty, both grades, four finishes (hairline the standard), 23 years, the family origin, the 13 places', () => {
+    for (const f of [ADDRESS, PHONE, EMAIL, 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'food-grade SS304', 'laboratory-grade SS316', 'hairline as standard; brushed, mirror or satin on request', '23 years', 'began as a family business in Baguio City and La Union', 'Barro Kitchens', 'Barro Industries OPC']) assert.ok(txt.includes(f), `llms.txt lacks "${f}"`);
     for (const p of PLACES) assert.ok(txt.includes(p), `llms.txt lacks ${p}`);
     assert.deepEqual([...new Set([...txt.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
     assert.deepEqual([...new Set([...txt.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map((m) => m[0].replace(/\D/g, '').replace(/^63/, '0')))], ['09276836300']);
@@ -786,9 +786,9 @@ describe('guides: the articles — length, structure, and what each one says (an
     for (const u of ['/services/commercial-kitchen-fit-out/', '/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/lpg-gas-line-installation/', '/services/kitchen-fire-suppression/', '/guides/ss304-vs-ss316-stainless-steel/', '/catalogue/', '/sales/clientinformationrequest/', '/products/stainless-steel-racks/', '/products/stainless-steel-shelving/', '/products/stainless-steel-cabinets/', '/products/stainless-steel-work-tables/', '/products/stainless-steel-sinks/', '/products/commercial-gas-stoves/']) assert.ok(hrefs.has(u), `the commissary guide does not link ${u}`);
   });
 
-  it('grade guide: molybdenum, chlorides, 304 as the food-grade standard, 316 for laboratories, coastal and chemical exposure, both grades "look the same", three finishes, care tips — and "generally" more expensive, with no amount', () => {
+  it('grade guide: molybdenum, chlorides, 304 as the food-grade standard, 316 for laboratories, coastal and chemical exposure, both grades "look the same", four finishes (hairline the standard), care tips — and "generally" more expensive, with no amount', () => {
     const t = steel.article;
-    for (const f of ['molybdenum', 'chlorides', 'austenitic', '18/8', 'SS304 is the standard food-grade stainless steel for kitchens', 'laboratories, coastal sites and chemical exposure', 'You cannot tell the grades apart by eye', 'Brushed:', 'Mirror:', 'Satin:', 'Caring for stainless steel', 'soft cloth', 'generally the more expensive', 'Laboratory-grade SS316 is available from us on request', 'food-grade SS304 as standard']) assert.ok(t.includes(f), `the grade guide lacks "${f}"`);
+    for (const f of ['molybdenum', 'chlorides', 'austenitic', '18/8', 'SS304 is the standard food-grade stainless steel for kitchens', 'laboratories, coastal sites and chemical exposure', 'You cannot tell the grades apart by eye', 'Hairline:', 'a fine, uniform straight-line grain', 'Brushed:', 'Mirror:', 'Satin:', 'Caring for stainless steel', 'soft cloth', 'generally the more expensive', 'Laboratory-grade SS316 is available from us on request', 'food-grade SS304 as standard']) assert.ok(t.includes(f), `the grade guide lacks "${f}"`);
     assert.ok(/<table class="pg-table">[\s\S]*SS304[\s\S]*SS316/.test(t), 'a comparison table');
     assert.ok(!/\b(more|less) than \d+ times\b|\btwice\b|\b\d+x\b/i.test(steel.body), 'a multiple');
     const hrefs = new Set(steel.S.attrs.filter((a) => a.tag === 'a' && a.name === 'href').map((a) => a.value));
@@ -816,16 +816,17 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
   const pageText = (rel) => visibleText(read(rel));
   const PRODUCTS = ['stainless-steel-sinks', 'stainless-steel-dish-tables', 'stainless-steel-work-tables', 'commercial-gas-stoves', 'commercial-wok-ranges', 'commercial-griddles-grillers-and-fryers', 'gas-deck-ovens', 'stainless-steel-range-hoods', 'stainless-steel-cabinets', 'stainless-steel-shelving', 'stainless-steel-racks'];
 
-  it('are dated 28 October 2026, listed in sitemap.xml with that lastmod (and the hub with today\'s), linked from the hub card and ItemList after the first two guides, and listed in llms.txt', () => {
+  it('are dated 28 October 2026, listed in sitemap.xml with a lastmod no earlier than that (scripts/sitemap-lastmod.js moves it to the page\'s last change; the hub\'s no earlier than 2026-10-29), linked from the hub card and ItemList after the first two guides, and listed in llms.txt', () => {
     const sm = read('sitemap.xml'), llms = read('llms.txt'), hub = byPath('/guides/');
+    const lastmodOf = (url) => (new RegExp(`<loc>${url}</loc>\\s*<lastmod>(\\d{4}-\\d{2}-\\d{2})</lastmod>`).exec(sm) || [])[1] || '';
     for (const p of NEW) {
       assert.equal(p.published, '2026-10-28');
-      assert.ok(new RegExp(`<loc>${p.url}</loc>\\s*<lastmod>2026-10-28</lastmod>`).test(sm), `${p.path}: its sitemap entry, or its lastmod`);
+      assert.ok(lastmodOf(p.url) >= '2026-10-28', `${p.path}: its sitemap entry, or its lastmod (${lastmodOf(p.url) || 'missing'})`);
       assert.ok(llms.includes(`](${p.url}):`), `${p.path}: llms.txt does not list it`);
       const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
       assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${p.path}: its card on the hub`);
     }
-    assert.ok(new RegExp(`<loc>${BASE}/guides/</loc>\\s*<lastmod>2026-10-29</lastmod>`).test(sm), 'the hub changed on 2026-10-29 (three more guides), so its lastmod is that day');
+    assert.ok(lastmodOf(`${BASE}/guides/`) >= '2026-10-29', `the hub changed on 2026-10-29 (three more guides), so its lastmod is that day or later (${lastmodOf(`${BASE}/guides/`) || 'missing'})`);
     const order = hub.node('CollectionPage')[0].mainEntity.itemListElement.map((i) => i.url.replace(BASE, ''));
     assert.deepEqual(order, ['/guides/commissary-kitchen-requirements-philippines/', '/guides/ss304-vs-ss316-stainless-steel/', layout.path, list.path, '/guides/commercial-kitchen-exhaust-hood-guide/', '/guides/lpg-gas-line-for-restaurants/', '/guides/how-to-clean-and-care-for-stainless-steel/']);
     assert.ok(/layout/i.test(hub.meta('description')) && /equipment/i.test(hub.meta('description')), 'the hub description names the two new guides');
@@ -1007,7 +1008,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       [list, /a soiled table where dirty dishes are loaded and a clean table where washed dishes land, either side of the dishwasher/, P('stainless-steel-dish-tables'), /Side Clean, where washed dishes land, or soiled, where dirty dishes are loaded\./],
       [list, /Our dish tables sit beside it, with the machine on the left or on the right/, P('stainless-steel-dish-tables'), /Dishwasher On the left or on the right, facing the table\./],
       [list, /a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/, 'faq/index.html', /6-month service warranty on our equipment and work\. Full-kitchen projects also include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/],
-      [list, /built to order in food-grade SS304 as standard, or laboratory-grade SS316 on request, in a brushed, mirror or satin finish, with seams welded and ground smooth/, 'faq/index.html', /Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request, in a brushed, mirror or satin finish\. Seams are welded and ground smooth/],
+      [list, /built to order in food-grade SS304 as standard, or laboratory-grade SS316 on request, with seams welded and ground smooth\. Our standard finish is hairline, with brushed, mirror or satin on request\./, 'faq/index.html', /Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request\. Our standard finish is hairline, with brushed, mirror or satin on request\. Seams are welded and ground smooth/],
       [list, /A griller beside a gas range under a stainless steel hood at DMMMSU\./, P('commercial-griddles-grillers-and-fryers'), /A griller beside a gas range under a stainless steel hood at DMMMSU\./],
       [list, /We design, fabricate, deliver and install commercial kitchens, and commission everything on site/, 'faq/index.html', /We design, fabricate, deliver and install, then commission everything on site\./],
       [layout, /We assess your space, your operational flow and your requirements, then plan the layout and prepare drawings/, 'services/commercial-kitchen-fit-out/index.html', /We assess your space, your operational flow and your requirements, then plan the layout and prepare drawings for your kitchen\./],
@@ -1107,11 +1108,12 @@ describe('guides: the exhaust hood, LPG gas line and stainless steel care guides
   const sectionIds = (p) => [...p.article.matchAll(/<section id="([^"]+)" aria-labelledby="[^"]+">/g)].map((m) => m[1]);
   const faqOf = (p) => [...p.html.matchAll(/<div class="faq-item">\s*<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/g)].map((m) => ({ q: visibleText(m[1]), a: visibleText(m[2]) }));
 
-  it('are dated 29 October 2026, in sitemap.xml with that lastmod, on the hub (card and ItemList, after the first four guides) and in llms.txt', () => {
+  it('are dated 29 October 2026, in sitemap.xml with a lastmod no earlier than that (scripts/sitemap-lastmod.js moves it to the page\'s last change), on the hub (card and ItemList, after the first four guides) and in llms.txt', () => {
     const sm = read('sitemap.xml'), llms = read('llms.txt'), hub = byPath('/guides/');
+    const lastmodOf = (url) => (new RegExp(`<loc>${url}</loc>\\s*<lastmod>(\\d{4}-\\d{2}-\\d{2})</lastmod>`).exec(sm) || [])[1] || '';
     for (const p of THREE) {
       assert.equal(p.published, '2026-10-29');
-      assert.ok(new RegExp(`<loc>${p.url}</loc>\\s*<lastmod>2026-10-29</lastmod>`).test(sm), `${p.path}: its sitemap entry, or its lastmod`);
+      assert.ok(lastmodOf(p.url) >= '2026-10-29', `${p.path}: its sitemap entry, or its lastmod (${lastmodOf(p.url) || 'missing'})`);
       assert.ok(llms.includes(`](${p.url}):`), `${p.path}: llms.txt does not list it`);
       const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
       assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${p.path}: its card on the hub`);
@@ -1305,9 +1307,9 @@ describe('the PDF text extractor reads what Chrome writes', () => {
 const MAX_BYTES = 8 * 1024 * 1024;
 const DOCS = [
   { key: 'company profile', file: 'downloads/barro-industries-company-profile.pdf', pages: [10, 14], title: 'Company profile | Barro Industries',
-    must: ['Premium stainless-steel kitchens, built to order in Metro Manila.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens', HUB_CONSTRUCTION] },
+    must: ['Premium stainless-steel kitchens, built to order in Metro Manila.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'hairline', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens', HUB_CONSTRUCTION] },
   { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [22, 25], title: 'Product catalogue | Barro Industries',
-    must: ['Stainless-steel kitchen equipment, made to order.', 'Preparation table', 'Sink', 'Dish table', 'Stove', 'Wok range', 'Griddle, griller or fryer', 'Gas deck oven', 'Range hood', 'Cabinet', 'Wall shelving', 'Rack', 'Layouts at a glance', 'Ventilation', 'Eleven products you set up yourself', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Default sizes are in millimetres', 'food-grade SS304', 'laboratory-grade SS316', HUB_CONSTRUCTION] },
+    must: ['Stainless-steel kitchen equipment, made to order.', 'Preparation table', 'Sink', 'Dish table', 'Stove', 'Wok range', 'Griddle, griller or fryer', 'Gas deck oven', 'Range hood', 'Cabinet', 'Wall shelving', 'Rack', 'Layouts at a glance', 'Ventilation', 'Eleven products you set up yourself', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Default sizes are in millimetres', 'food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline', HUB_CONSTRUCTION] },
   { key: 'portfolio', file: 'downloads/barro-industries-portfolio.pdf', pages: [8, 12], title: 'Portfolio | Barro Industries',
     must: ['Completed kitchens and stainless-steel installations.', 'ISPSC 2026', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026).', 'DMMMSU 2022–2023', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).', 'Restaurant kitchen, Bulacan', 'Shown without the client’s name', 'La Union', 'Bulacan', 'KitchenShield™'] },
 ];
@@ -1413,10 +1415,10 @@ for (const d of DOCS) {
     });
 
     if (d.key !== 'portfolio') {
-      it('says the standard construction on its "Two grades, three finishes" page, word for word as the website\'s /products/ hub does (owner ruling 2026-10-28), scoped to made-to-order pieces', () => {
+      it('says the standard construction on its "Two grades, four finishes" page, word for word as the website\'s /products/ hub does (owner ruling 2026-10-28), scoped to made-to-order pieces', () => {
         assert.ok(visibleText(read('products/index.html')).includes(HUB_CONSTRUCTION), 'the website hub no longer says the sentence this PDF repeats');
-        const page = pages.find((p) => compact(p).includes('twogradesthreefinishes'));
-        assert.ok(page, 'no "Two grades, three finishes" page');
+        const page = pages.find((p) => compact(p).includes('twogradesfourfinishes'));
+        assert.ok(page, 'no "Two grades, four finishes" page');
         assert.ok(compact(page).includes(compact(HUB_CONSTRUCTION)), 'the materials page lacks the construction sentence');
         assert.ok(/^Made-to-order/.test(HUB_CONSTRUCTION));
         assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(flat), 'the lighter top plate is chosen by staff in the Quote Builder only; a PDF says only the standard');

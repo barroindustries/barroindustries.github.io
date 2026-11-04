@@ -138,7 +138,7 @@ const LUZON = [
 const STEPS = [
   ['clipboard', 'Consultation &amp; site visit', 'We listen to your requirements and visit your site to take measurements.'],
   ['pencil', 'Design &amp; layout', 'We plan the layout and prepare drawings for your kitchen.'],
-  ['layers', 'Fabrication', 'Built to order in SS304 or SS316, finished brushed, mirror or satin, with seams welded and ground smooth.'],
+  ['layers', 'Fabrication', 'Built to order in SS304 or SS316, finished hairline as standard, with seams welded and ground smooth.'],
   ['truck', 'Delivery', 'Your finished equipment is delivered to your site.'],
   ['wrench', 'Installation &amp; commissioning', 'We install everything on site and commission it for use.'],
   ['headset', 'After-sales support', 'Service and support continue after handover.'],

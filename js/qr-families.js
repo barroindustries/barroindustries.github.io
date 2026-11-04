@@ -32,6 +32,9 @@
         "description": "Stainless steel worktable. Choose one to three layers and up to two upper shelves, then set your own size.",
         "title": "SS Preparation Table",
         "construction": "{grade} · {top} · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet",
+        "includes": "{layers} · adjustable bullet feet",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "PW-001",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -69,18 +72,21 @@
                 "v": 1,
                 "l": "1",
                 "s": "1 layer",
+                "i": "worktop",
                 "hint": "Top only"
               },
               {
                 "v": 2,
                 "l": "2",
                 "s": "2 layers",
+                "i": "worktop and 1 undershelf",
                 "hint": "Top + 1 undershelf"
               },
               {
                 "v": 3,
                 "l": "3",
                 "s": "3 layers",
+                "i": "worktop and 2 undershelves",
                 "hint": "Top + 2 undershelves"
               }
             ]
@@ -215,6 +221,10 @@
         "description": "Stainless steel sink table. Choose one to four sinks, their position, the shelves and the faucet, then set your own size.",
         "title": "SS Sink",
         "construction": "{grade} · {top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet",
+        "includes": "{basins} with waste fittings and strainers · {faucet} · adjustable bullet feet",
+        "excludes": "water supply and drain line to the sink · angle valves",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "PW-004",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -251,22 +261,26 @@
               {
                 "v": 1,
                 "l": "1",
-                "s": "1 sink"
+                "s": "1 sink",
+                "i": "1 basin"
               },
               {
                 "v": 2,
                 "l": "2",
-                "s": "2 sinks"
+                "s": "2 sinks",
+                "i": "2 basins"
               },
               {
                 "v": 3,
                 "l": "3",
-                "s": "3 sinks"
+                "s": "3 sinks",
+                "i": "3 basins"
               },
               {
                 "v": 4,
                 "l": "4",
-                "s": "4 sinks"
+                "s": "4 sinks",
+                "i": "4 basins"
               }
             ]
           },
@@ -338,12 +352,14 @@
               {
                 "v": "gooseneck",
                 "l": "Gooseneck",
-                "s": "gooseneck faucet"
+                "s": "gooseneck faucet",
+                "i": "gooseneck faucet"
               },
               {
                 "v": "prerinse",
                 "l": "Pre-rinse spray",
-                "s": "pre-rinse faucet"
+                "s": "pre-rinse faucet",
+                "i": "pre-rinse spray faucet"
               }
             ]
           },
@@ -544,6 +560,10 @@
         "description": "Stainless steel dish table for the dishwasher. Choose the clean or the soiled side, which hand it sits on, a pre-rinse sink and an undershelf, then set your own size.",
         "title": "SS Dish Table",
         "construction": "{grade} · {top} · 1.2 mm undershelf and splash · {side} · square-tube posts with adjustable bullet feet",
+        "includes": "{side} as configured · {sink} · adjustable bullet feet",
+        "excludes": "dishwasher · plumbing to the point",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "PW-029",
         "unit": "pc",
         "sizeBasis": "linear",
@@ -582,6 +602,7 @@
                 "l": "Clean",
                 "s": "clean side",
                 "c": "raised back and side splash, clean-dish landing",
+                "i": "clean side",
                 "hint": "Where washed dishes land"
               },
               {
@@ -589,6 +610,7 @@
                 "l": "Soiled",
                 "s": "soiled side",
                 "c": "raised splash, sloped to the dishwasher, soiled-dish loading",
+                "i": "soiled side",
                 "hint": "Where dirty dishes are loaded"
               }
             ]
@@ -632,7 +654,8 @@
               {
                 "v": "prerinse",
                 "l": "With pre-rinse sink and spray faucet",
-                "s": "pre-rinse sink"
+                "s": "pre-rinse sink",
+                "i": "pre-rinse unit"
               }
             ]
           },
@@ -733,6 +756,10 @@
           "template": "SS Range Stove Combination ({addons})"
         },
         "construction": "{grade} · {top} · 1.2 mm body and panels · square-tube posts with adjustable bullet feet",
+        "includes": "burners as configured with gas valves · {addons} · adjustable bullet feet",
+        "excludes": "LPG tanks, regulator and hose beyond the appliance connection (see Gas Line)",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "CE-001",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -836,24 +863,28 @@
                 "v": "griller",
                 "l": "Griller",
                 "s": "griller",
+                "i": "griller",
                 "w": 200
               },
               {
                 "v": "griddle",
                 "l": "Griddle",
                 "s": "griddle",
+                "i": "griddle",
                 "w": 200
               },
               {
                 "v": "oven",
                 "l": "Oven",
                 "s": "oven",
+                "i": "oven",
                 "w": 0
               },
               {
                 "v": "fryer",
                 "l": "Fryer",
                 "s": "fryer",
+                "i": "fryer",
                 "w": 350
               }
             ]
@@ -1086,6 +1117,10 @@
         "description": "Gas wok range with high-pressure burners. Choose one to three wok holes, a rear stock burner and a swan-neck water faucet, then set your own size.",
         "title": "SS Wok Range",
         "construction": "{grade} · {top} · 1.2 mm body and panels · recessed wok rings with high-pressure burners · square-tube posts with adjustable bullet feet",
+        "includes": "wok rings and high-pressure burners as configured · {faucet}",
+        "excludes": "gas line and LPG supply",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "CE-006",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -1164,12 +1199,14 @@
               {
                 "v": "none",
                 "l": "None",
-                "s": "no faucet"
+                "s": "no faucet",
+                "i": "drain trough"
               },
               {
                 "v": "swan",
                 "l": "Swan-neck faucet",
                 "s": "swan-neck faucet",
+                "i": "water tap and drain trough",
                 "hint": "Over the range, for topping up and rinsing"
               }
             ]
@@ -1264,6 +1301,9 @@
         "description": "Gas griddle, lava-rock griller, fryer or a griller-and-griddle combination on its own stand. Choose the type, the burners or baskets and the base, then set your own size.",
         "title": "{type}",
         "construction": "{grade} · 1.2 mm body and panels · {type} · {base}",
+        "excludes": "gas line and LPG supply",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "CE-010",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -1534,6 +1574,10 @@
         "description": "Gas-fired deck oven. Choose one to three decks, three or six trays per deck and a heavy-duty stand.",
         "title": "Gas Deck Oven",
         "construction": "Insulated double-wall decks with a gas burner, gas valve and thermometer per deck · stainless steel outer body · {stand}",
+        "includes": "gas burner, valve and thermometer per deck · {stand}",
+        "excludes": "gas line and LPG supply",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "CE-012",
         "unit": "pc",
         "sizeBasis": "linear",
@@ -1620,7 +1664,8 @@
                 "v": "heavy",
                 "l": "Heavy-duty stand",
                 "s": "with heavy-duty stand",
-                "c": "on a cross-braced box-tube stand"
+                "c": "on a cross-braced box-tube stand",
+                "i": "heavy-duty stand"
               }
             ]
           }
@@ -1689,6 +1734,10 @@
         "description": "Stainless steel kitchen exhaust hood. Choose a wall, island or slim canopy, baffle grease filters and lighting, then set your own length and depth.",
         "title": "SS Range Hood",
         "construction": "{grade} · welded canopy with grease trough and oil cup · {type} · {filters}",
+        "includes": "canopy with grease trough and oil cup · {filters} · {lighting}",
+        "excludes": "ducting, blower and fresh-air supply (quoted separately) · electrical to the switch",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "EX-001",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -1755,7 +1804,8 @@
                 "v": "baffle",
                 "l": "Baffle filters",
                 "s": "baffle filters",
-                "c": "stainless baffle grease filters"
+                "c": "stainless baffle grease filters",
+                "i": "stainless baffle grease filters"
               },
               {
                 "v": "none",
@@ -1775,7 +1825,8 @@
               {
                 "v": true,
                 "l": "With lamp and switch",
-                "s": "with lighting"
+                "s": "with lighting",
+                "i": "lamp and switch"
               },
               {
                 "v": false,
@@ -1882,6 +1933,9 @@
         "description": "Stainless steel storage cabinet, floor-standing or wall-hung. Choose the doors and the shelves inside, then set your own size.",
         "title": "SS Cabinet",
         "construction": "{grade} · 1.2 mm body, doors and shelves · {type}",
+        "includes": "doors and shelves as configured",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "PW-015",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -2046,6 +2100,9 @@
         "description": "Stainless steel shelving fixed to the wall. Choose one to three tiers and a solid or slotted surface, then set your own size.",
         "title": "SS Wall Shelving",
         "construction": "{grade} · 1.2 mm shelves · fixed to the wall",
+        "includes": "wall brackets and anchors",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "PW-023",
         "unit": "pc",
         "sizeBasis": "linear",
@@ -2167,6 +2224,9 @@
         "description": "Stainless steel dish and storage rack. Choose three to six tiers, with or without wheels, then set your own size.",
         "title": "SS Rack",
         "construction": "{grade} · 1.2 mm shelves · square-tube frame · {wheels}",
+        "includes": "shelves as configured · {wheels}",
+        "finishDefault": "hairline",
+        "leadTime": "25 working days",
         "primary": "PW-010",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -2232,13 +2292,15 @@
                 "v": true,
                 "l": "With",
                 "s": "on wheels",
-                "c": "on wheels"
+                "c": "on wheels",
+                "i": "wheels"
               },
               {
                 "v": false,
                 "l": "Without",
                 "s": "without wheels",
-                "c": "adjustable bullet feet"
+                "c": "adjustable bullet feet",
+                "i": "adjustable bullet feet"
               }
             ]
           }

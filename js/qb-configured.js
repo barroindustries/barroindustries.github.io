@@ -72,6 +72,18 @@
     return t || fallback;
   }
 
+  // The DOCUMENT fields of a configured line (QB-SELLING-QUOTE-SPEC §3.1 / §3.2, owner rulings 2026-11-05): the family's finish default ("hairline"), the includes / excludes
+  // phrases and the lead time — all DATA in scripts/public-families.json (no figure, no price). includes = the family's template filled for THIS configuration
+  // (PF.fillTemplate: an option that is None / Without drops its phrase); excludes = the family's plain phrases. Both are split on " · " into short client-facing phrases.
+  // Nothing here is ever invented: a family without the field gets '' / [] / '—', exactly what a line carried before these fields existed.
+  function splitPhrases(text) {
+    return typeof text === 'string' ? text.split(' · ').map(function (p) { return p.trim(); }).filter(Boolean) : [];
+  }
+  function documentFields(deps, fam, config) {
+    var includes = deps && deps.PF && typeof deps.PF.fillTemplate === 'function' && typeof fam.includes === 'string' ? splitPhrases(deps.PF.fillTemplate(fam, fam.includes, config)) : [];
+    return { finish: str(fam.finishDefault), includes: includes, excludes: splitPhrases(fam.excludes), leadTime: str(fam.leadTime) || '—' };
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   //  priceLine — the builder's ONE configured-price path
   // ═══════════════════════════════════════════════════════════════════════
@@ -121,6 +133,8 @@
   //   the family's public category only when no primary product (with a category) was passed in.
   //   `name` is the family's TITLE for this configuration (PF.lineTitle: "SS Sink", "SS Range Stove Combination (Griller, Fryer)"), the family's label only when it has none.
   //   The item carries `_cfg` (RUNTIME ONLY — the builder strips it from every payload and recomputes it on load) and never a sourceRef.
+  //   DOCUMENT FIELDS (QB-SELLING-QUOTE-SPEC §3.1): `finish` (the family's finishDefault, '' when it has none), `includes` / `excludes` (phrase lists from the family's
+  //   templates for THIS configuration), `specLines` ([] — the preparer's extra rows) and `leadTime` (the family's, else '—'): what the printed spec sheet shows.
   function buildLine(deps, args) {
     var d = isObj(deps) ? deps : {};
     var a = isObj(args) ? args : {};
@@ -134,6 +148,7 @@
     var unitPrice = priced ? unit : 0;
     var qty = posInt(a.qty);
     var specs = d.PF.describe(fam, v.config);
+    var doc = documentFields(d, fam, v.config);
     var item = {
       id: fam.primary,
       category: sectionOf(a.primary, fam),
@@ -149,7 +164,11 @@
       unit: str(a.unit) || str(fam.unit) || 'pc',
       unitPrice: unitPrice,
       amount: unitPrice * qty,
-      leadTime: '—',
+      finish: doc.finish,
+      includes: doc.includes,
+      excludes: doc.excludes,
+      specLines: [],
+      leadTime: doc.leadTime,
       laborHours: null,
       formulaType: isObj(a.primary) && a.primary.formulaType ? str(a.primary.formulaType) || 'fixed' : 'fixed',
       notes: str(a.note),

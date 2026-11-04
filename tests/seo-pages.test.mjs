@@ -194,7 +194,7 @@ const ADDRESS ='21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, 
 const PLACES = ['Ilocos Sur', 'La Union', 'Baguio', 'La Trinidad', 'Tarlac', 'Pampanga', 'Bulacan', 'Iba, Zambales', 'Subic', 'Manila', 'Cavite', 'Laguna', 'Batangas'];
 const GROUPS = [['North Luzon', ['ilocos-sur', 'la-union', 'baguio', 'la-trinidad']], ['Central Luzon', ['tarlac', 'pampanga', 'bulacan', 'iba-zambales', 'subic']], ['Metro Manila & South', ['manila', 'cavite', 'laguna', 'batangas']]];
 const BADGES = ['PhilGEPS-registered', 'SEC-registered', 'VAT-registered'];
-const STEP3_NEW = 'Built to order in SS304 or SS316, finished brushed, mirror or satin, with seams welded and ground smooth.';
+const STEP3_NEW = 'Built to order in SS304 or SS316, finished hairline as standard, with seams welded and ground smooth.';
 const REG_ICON = '<svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>';
 
 describe('the 12 pages exist, and nothing else lives in their folders', () => {
@@ -544,7 +544,7 @@ describe('the FAQ: the owner\'s questions, answered only with confirmed facts, a
   const faq = byPath('/faq/');
   const visible = [...faq.html.matchAll(/<div class="faq-item">\s*<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/g)].map((m) => [visibleText(m[1]), visibleText(m[2])]);
   const REQUIRED = [
-    ['What material do you use?', ['Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request, in a brushed, mirror or satin finish.']],
+    ['What material do you use?', ['Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.']],
     ['Can you build to custom sizes?', ['Yes', 'made to order', 'exact dimensions']],
     ['What warranty do you give?', ['6-month service warranty', '12 months', 'preventive maintenance service (PMS)', 'KitchenShield™']],
     ['Do you supply government agencies and schools?', ['PhilGEPS-registered', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Ilocos Sur Polytechnic State College (ISPSC)', 'procurement rules']],
@@ -740,40 +740,40 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
   });
 });
 
-describe('materials and finishes (owner, 2026-10-21): SS304 food grade as standard, SS316 laboratory grade on request, in a brushed, mirror or satin finish', () => {
-  const SENTENCE = 'Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request, in a brushed, mirror or satin finish.';
+describe('materials and finishes (owner, 2026-10-21; hairline made the standard finish 2026-11-05): SS304 food grade as standard, SS316 laboratory grade on request; hairline as standard, with brushed, mirror or satin on request', () => {
+  const SENTENCE = 'Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.';
   const faq = byPath('/faq/');
   const fab = byPath('/services/stainless-steel-fabrication/');
   const inst = byPath('/services/institutional-and-government-supply/');
   const fit = byPath('/services/commercial-kitchen-fit-out/');
 
-  it('answers "What material do you use?" with both grades and all three finishes, and mirrors that answer exactly in the FAQPage JSON-LD', () => {
+  it('answers "What material do you use?" with both grades and all four finishes (hairline as the standard), and mirrors that answer exactly in the FAQPage JSON-LD', () => {
     const q = [...faq.html.matchAll(/<div class="faq-item">\s*<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/g)].map((m) => [visibleText(m[1]), visibleText(m[2])]).find((x) => x[0] === 'What material do you use?');
     assert.ok(q, 'the material question is missing');
     assert.ok(q[1].startsWith(SENTENCE), q[1]);
-    for (const w of ['SS304', 'SS316', 'food-grade', 'laboratory-grade', 'as standard', 'on request', 'brushed', 'mirror', 'satin']) assert.ok(q[1].toLowerCase().includes(w.toLowerCase()), `the answer lacks "${w}"`);
+    for (const w of ['SS304', 'SS316', 'food-grade', 'laboratory-grade', 'as standard', 'on request', 'hairline', 'brushed', 'mirror', 'satin']) assert.ok(q[1].toLowerCase().includes(w.toLowerCase()), `the answer lacks "${w}"`);
     const ld = faq.node('FAQPage')[0].mainEntity.find((x) => x.name === 'What material do you use?');
     assert.equal(ld.acceptedAnswer.text, q[1]);
     assert.ok(ld.acceptedAnswer.text.startsWith(SENTENCE));
   });
 
-  it('shows both grades and all three finishes on the stainless-steel fabrication page: the lead, a "Two grades, three finishes" section with a card per grade and a pill per finish, and the options lead', () => {
+  it('shows both grades and all four finishes on the stainless-steel fabrication page: the lead, a "Two grades, four finishes" section with a card per grade and a pill per finish, and the options lead', () => {
     const t = visibleText(fab.main);
-    for (const w of ['SS304', 'SS316', 'food-grade', 'laboratory-grade', 'brushed', 'mirror', 'satin', 'as standard', 'on request']) assert.ok(new RegExp(w, 'i').test(t), `the fabrication page lacks "${w}"`);
-    assert.ok(t.includes('We work in two grades, food-grade SS304 as standard and laboratory-grade SS316 on request, in a brushed, mirror or satin finish.'));
+    for (const w of ['SS304', 'SS316', 'food-grade', 'laboratory-grade', 'hairline', 'brushed', 'mirror', 'satin', 'as standard', 'on request']) assert.ok(new RegExp(w, 'i').test(t), `the fabrication page lacks "${w}"`);
+    assert.ok(t.includes('We work in two grades, food-grade SS304 as standard and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.'));
     const grades = fab.html.match(/<section id="grades"[\s\S]*?<\/section>/)[0];
-    assert.ok(grades.includes('<h2 id="grades-h">Two grades, three finishes</h2>'));
+    assert.ok(grades.includes('<h2 id="grades-h">Two grades, four finishes</h2>'));
     assert.deepEqual([...grades.matchAll(/<article class="pg-card">[\s\S]*?<p class="pg-card-tag">([^<]+)<\/p>\s*<h3>([^<]+)<\/h3>\s*<p>([^<]+)<\/p>/g)].map((m) => [m[1], m[2]]), [['Standard', 'SS304 food grade'], ['On request', 'SS316 laboratory grade']]);
-    assert.deepEqual([...grades.match(/<ul class="pg-tags"[\s\S]*?<\/ul>/)[0].matchAll(/<li>([^<]+)<\/li>/g)].map((m) => m[1]), ['Brushed', 'Mirror', 'Satin']);
+    assert.deepEqual([...grades.match(/<ul class="pg-tags"[\s\S]*?<\/ul>/)[0].matchAll(/<li>([^<]+)<\/li>/g)].map((m) => m[1]), ['Hairline (standard)', 'Brushed', 'Mirror', 'Satin']);
     const opts = visibleText(fab.html.match(/<section id="options"[\s\S]*?<\/section>/)[0]);
-    assert.ok(opts.includes('food-grade SS304 stainless steel as standard') && opts.includes('laboratory-grade SS316 on request') && opts.includes('brushed, mirror or satin finish'));
+    assert.ok(opts.includes('food-grade SS304 stainless steel as standard') && opts.includes('laboratory-grade SS316 on request') && opts.includes('Our standard finish is hairline, with brushed, mirror or satin on request.'));
     assert.ok(fab.meta('description').includes('SS304') && fab.meta('description').includes('SS316'));
-    assert.ok(/SS316/.test(fab.node('Service')[0].description) && /satin/.test(fab.node('Service')[0].description));
+    assert.ok(/SS316/.test(fab.node('Service')[0].description) && /hairline/.test(fab.node('Service')[0].description) && /satin/.test(fab.node('Service')[0].description));
   });
 
   it('says on the institutional and government supply page that SS304 is the standard and SS316 laboratory grade is on request, for laboratories and school science rooms', () => {
     const t = visibleText(inst.main);
-    assert.ok(t.includes('Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request for laboratories and school science rooms, in a brushed, mirror or satin finish.'));
+    assert.ok(t.includes('Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request for laboratories and school science rooms. Our standard finish is hairline, with brushed, mirror or satin on request.'));
     assert.ok(/SS316/.test(inst.node('Service')[0].description));
   });
 
@@ -781,15 +781,15 @@ describe('materials and finishes (owner, 2026-10-21): SS304 food grade as standa
     assert.ok(visibleText(fit.main).includes('built to order in food-grade SS304 stainless steel as standard'));
   });
 
-  it('never states a grade or a finish for a past project: no SS304, SS316, grade, brushed, mirror or satin anywhere under /work/', () => {
+  it('never states a grade or a finish for a past project: no SS304, SS316, grade, hairline, brushed, mirror or satin anywhere under /work/', () => {
     for (const p of PAGES.filter((x) => x.path.startsWith('/work/'))) {
-      const hit = firstHit(p, /\bSS3(04|16)\b|\bgrades?\b|\bbrushed\b|\bmirror\b|\bsatin\b|\bNo\.4\b/i);
+      const hit = firstHit(p, /\bSS3(04|16)\b|\bgrades?\b|\bhairline\b|\bbrushed\b|\bmirror\b|\bsatin\b|\bNo\.4\b/i);
       assert.equal(hit, null, `${p.path}: ${hit}`);
     }
   });
 
   it('no longer states "No.4 brushed finish" as the only finish: not on any page', () => {
-    noHit(/\bNo\.4\b|\bonly\s+(?:a\s+)?(?:brushed|mirror|satin)\b/i, 'No.4 brushed finish stated as the only finish');
+    noHit(/\bNo\.4\b|\bonly\s+(?:a\s+)?(?:hairline|brushed|mirror|satin)\b/i, 'No.4 brushed finish stated as the only finish');
   });
 
   it('keeps the proof bar the same on every page that has one (hub, six services): 23 years, SS304 / SS316 (food-grade and laboratory-grade), made to order, end-to-end — and none on /work/', () => {
@@ -1208,14 +1208,14 @@ describe('the homepage\'s own words, kept: the projects, the process, the warran
   it('uses the six "How we work" steps and the two warranty cards of the homepage, word for word, and nothing else in those sections', () => {
     const steps = [...home.matchAll(/<li class="step">[\s\S]*?<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>/g)].map((m) => [visibleText(m[1]), visibleText(m[2])]);
     assert.equal(steps.length, 6);
-    assert.equal(steps[2][1], STEP3_NEW, 'the homepage\'s step 3 is the owner\'s two-grades, three-finishes wording');
+    assert.equal(steps[2][1], STEP3_NEW, 'the homepage\'s step 3 is the owner\'s two-grades, hairline-standard wording');
     const cards = [...home.matchAll(/<article class="wcard[^"]*">([\s\S]*?)<\/article>/g)].map((m) => visibleText(m[1]));
     assert.equal(cards.length, 2);
     for (const p of PAGES.filter((x) => x.html.includes('id="process"'))) {
       const section = p.html.match(/<section id="process"[\s\S]*?<\/section>/)[0];
       const mine = [...section.matchAll(/<li class="step">[\s\S]*?<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>/g)].map((m) => [visibleText(m[1]), visibleText(m[2])]);
       assert.deepEqual(mine, steps, `${p.path}: steps`);
-      assert.equal(mine[2][1], STEP3_NEW, `${p.path}: step 3 (two grades, three finishes)`);
+      assert.equal(mine[2][1], STEP3_NEW, `${p.path}: step 3 (two grades, hairline as the standard finish)`);
       const t = visibleText(section);
       assert.ok(!/\b(\d+|one|two|three|four|five|six|seven|ten|few|several)[ -]?(minutes?|hours?|days?|weeks?|months?|years?|working)\b/i.test(t), `${p.path}: a duration in the steps`);
       assert.ok(!/\b(within|same[- ]day|next[- ]day|overnight|turnaround|lead time)\b/i.test(t));
@@ -1255,7 +1255,7 @@ describe('the homepage\'s own words, kept: the projects, the process, the warran
     const cat = visibleText(catalogue);
     for (const phrase of ['one to three layers', 'one to four sinks', 'three to six tiers', 'one to three tiers', 'Floor-standing / Wall-hung', 'Swing / Sliding', 'Gooseneck / Pre-rinse spray', 'Solid / Slotted', 'SS304', 'Made to your length, width and height', 'Made to your length and depth']) assert.ok(cat.includes(phrase), `the catalogue no longer says "${phrase}"`);
     const t = visibleText(byPath('/services/stainless-steel-fabrication/').main);
-    for (const phrase of ['One to three layers', 'One to four sinks', 'gooseneck or pre-rinse spray faucet', 'Floor-standing or wall-hung', 'swing or sliding doors', 'one to three shelves inside', 'One to three tiers', 'solid or slotted surface', 'Three to six tiers', 'with or without wheels', 'Your length, width and height', 'Your length and depth', 'food-grade SS304 stainless steel as standard', 'laboratory-grade SS316 on request', 'brushed, mirror or satin finish']) assert.ok(t.includes(phrase), `the fabrication page lost "${phrase}"`);
+    for (const phrase of ['One to three layers', 'One to four sinks', 'gooseneck or pre-rinse spray faucet', 'Floor-standing or wall-hung', 'swing or sliding doors', 'one to three shelves inside', 'One to three tiers', 'solid or slotted surface', 'Three to six tiers', 'with or without wheels', 'Your length, width and height', 'Your length and depth', 'food-grade SS304 stainless steel as standard', 'laboratory-grade SS316 on request', 'Our standard finish is hairline, with brushed, mirror or satin on request.']) assert.ok(t.includes(phrase), `the fabrication page lost "${phrase}"`);
   });
 
   it('shows the representative catalogue pictures as such, and the systems pages carry the owner\'s own disclaimer about standard examples', () => {

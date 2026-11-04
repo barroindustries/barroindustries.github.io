@@ -21,7 +21,7 @@ const META = {
 const PF = require(path.join(L.ROOT, 'js', 'product-families.js'));
 const QF = require(path.join(L.ROOT, 'js', 'qr-families.js'));
 const CAT_LABEL = { preparation: 'Preparation', washing: 'Washing', cooking: 'Cooking', ventilation: 'Ventilation', storage: 'Storage', refrigeration: 'Refrigeration' };
-// The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, three finishes".
+// The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, four finishes".
 // (Each family's own line — PF.constructionLine — reaches the family pages through the catalogue page's cards.) tests/content-assets.test.mjs pins the two together.
 const CONSTRUCTION_NOTE = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
 
@@ -130,12 +130,15 @@ function familyPage(fam, card, draw) {
   // The rows are the website card's own, in its own order — the options, Size, Construction (the standard build: top plate, body, posts), Material — and each one is
   // shown in full. Only the Size row is the PDF's own, with the size limits; it takes the place of the card's Size row. Each row sits a little tighter than print.css's
   // default: with the Construction row (three lines) a sink page carries eight rows, and it must still end on its own A4 page with the project photograph.
-  const optRow = (label, valueHtml) => `<div><dt style="padding-top:1.5mm">${esc(label)}</dt><dd style="margin:.4mm 0 1.9mm">${valueHtml}</dd></div>`;
+  // A page with eight or more rows (the sink: its Material line now reads "…hairline finish as standard, brushed, mirror or satin on request", two lines in this column) is tighter
+  // still, so it keeps its project photograph at the .fill minimum and ends on its own A4 page (the build stops when a page overflows).
+  const slots = fam.groups.find((g) => g.type === 'slots');
+  const tight = card.specs.length + (slots ? 1 : 0) >= 8;
+  const optRow = (label, valueHtml) => `<div><dt style="padding-top:${tight ? 1.2 : 1.5}mm">${esc(label)}</dt><dd style="margin:.4mm 0 ${tight ? 1.4 : 1.9}mm">${valueHtml}</dd></div>`;
   if (!card.specs.some(([k]) => k === 'Size')) throw new Error(`catalogue/index.html: the ${fam.id} card has no Size row`);
   const optRows = card.specs.map(([k, v]) => (k === 'Size'
     ? optRow('Size', `Made to your ${dimWords(fam)}<br><span class="xs muted" style="font-weight:400">${esc(sizeLine(fam))}</span>`)
     : optRow(k, esc(v))));
-  const slots = fam.groups.find((g) => g.type === 'slots');
   if (slots) optRows.splice(1, 0, optRow('Burner types', slots.options.map((o) => esc(o.l)).join(' · ')));
   const main = photos[0]
     ? `<div class="white-ph" style="height:${photos.length > 1 ? 58 : 92}mm"><img src="${img(photos[0])}" alt="${esc(fam.label)}, representative image"></div><p class="cap">Representative image</p>`
@@ -330,19 +333,20 @@ function build() {
   // materials and finishes, and the size limits of the eleven products
   pages.push(L.page({ doc: DOC, label: 'Materials and finishes', body: `
     <p class="eyebrow">01 · Materials and finishes</p>
-    <h1 class="h1">Two grades, three finishes</h1>
-    <p class="lead">We work in two grades, food-grade SS304 as standard and laboratory-grade SS316 on request, in a brushed, mirror or satin finish. Seams are welded and ground smooth, and surfaces are polished to a professional finish.</p>
+    <h1 class="h1">Two grades, four finishes</h1>
+    <p class="lead">We work in two grades, food-grade SS304 as standard and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request. Seams are welded and ground smooth, and surfaces are polished to a professional finish.</p>
     <div class="cols c2 gap4 mt3 stretch">
       <div class="card"><p class="h4">Standard</p><div class="h3">SS304 food grade</div><p>Food-grade SS304 stainless steel is our standard for kitchens: preparation tables, sinks, cabinets, shelving and racks.</p></div>
       <div class="card"><p class="h4">On request</p><div class="h3">SS316 laboratory grade</div><p>Laboratory-grade SS316 stainless steel is available on request and suits laboratories and school science rooms.</p></div>
     </div>
-    <div class="cols c3 gap4 mt3">
-      <div><div class="sw brushed"></div><div class="h3 mt1">Brushed</div><p class="sm muted">A visible straight grain, the usual choice for work surfaces.</p></div>
+    <div class="cols c4 gap4 mt3">
+      <div><div class="sw hairline"></div><div class="h3 mt1">Hairline</div><p class="sm muted">Our standard finish. A fine, uniform straight-line grain.</p></div>
+      <div><div class="sw brushed"></div><div class="h3 mt1">Brushed</div><p class="sm muted">A visible straight grain that hides everyday scratches.</p></div>
       <div><div class="sw mirror"></div><div class="h3 mt1">Mirror</div><p class="sm muted">Polished to a high gloss, for decorative parts and low-contact areas.</p></div>
       <div><div class="sw satin"></div><div class="h3 mt1">Satin</div><p class="sm muted">A soft, low-sheen finish between brushed and mirror.</p></div>
     </div>
     <p class="xs muted mt1">The swatches are illustrations. Ask to see a sample before you decide.</p>
-    <p class="xs muted mt3">Every configurable product is built to order in SS304 or SS316, in a brushed, mirror or satin finish. ${esc(CONSTRUCTION_NOTE)}</p>
+    <p class="xs muted mt3">Every configurable product is built to order in SS304 or SS316, with a hairline finish as standard. ${esc(CONSTRUCTION_NOTE)}</p>
     <div class="fill"><figure class="fig"><div class="ph-box"><img src="${img('ispsc-04.jpg')}" alt="${esc(L.PROJ_ALT['ispsc-04'])}"></div><figcaption>${esc(L.projCap('ispsc-04'))}</figcaption></figure></div>` }));
 
   // the eleven configurable products at a glance: what you choose and the size range online, one row each
@@ -355,7 +359,7 @@ function build() {
       <thead><tr><th>Product</th><th>You choose</th><th>Online size range (mm)</th></tr></thead>
       <tbody>${fams.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(data.families[f.id].specs.filter(([k]) => k !== 'Size' && k !== 'Construction' && k !== 'Material').map(([k, v]) => k.toLowerCase()).join(', '))}</td><td>${esc(LOCKED_SIZE[f.id] || Object.keys(f.dims).map((k) => `${f.dims[k].label} ${f.dims[k].min}–${f.dims[k].max}`).join(' · '))}</td></tr>`).join('')}</tbody>
     </table>
-    <p class="xs muted mt1">Every configurable product is built to order in SS304 or SS316, in a brushed, mirror or satin finish. Need a different size? Ask us for a quotation built to your specifications.</p>
+    <p class="xs muted mt1">Every configurable product is built to order in SS304 or SS316. Our standard finish is hairline, with brushed, mirror or satin on request. Need a different size? Ask us for a quotation built to your specifications.</p>
     <div class="fill"><figure class="fig"><div class="ph-box"><img src="${img('dmmmsu-01.jpg')}" alt="${esc(L.PROJ_ALT['dmmmsu-01'])}" style="object-position:50% 55%"></div><figcaption>${esc(L.projCap('dmmmsu-01'))}</figcaption></figure></div>` }));
 
   for (const f of fams) pages.push(familyPage(f, data.families[f.id], draw));

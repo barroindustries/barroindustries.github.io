@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Quote Builder — Barro Industries</title>
+<script>try{ if(typeof CSSMarginRule==='function') document.documentElement.classList.add('mb-footer'); }catch(e){}</script>
 <style>
 :root {
   --dark-blue:#1E3A5F; --mid-blue:#2E5F8A; --light-blue:#D6E4F0;
@@ -393,6 +394,54 @@ tr:hover td{background:#fafbff;}
   background:var(--light-blue);padding:1px 5px;border-radius:3px;flex-shrink:0;margin-top:1px;}
 .spec-edit{font-size:11px;color:var(--text);flex:1;line-height:1.4;}
 .dims-edit{font-size:11px;color:var(--text);flex:1;line-height:1.4;}
+/* ── SPEC SHEET + LINE DETAILS (specs/QB-SELLING-QUOTE-SPEC.md §3.1 / §4, owner rulings 2026-11-05) ──────────────────────────────────────
+   The Estimator keeps the editable Specs / Dims / Notes lines (.no-print) and adds a "Details ▸" row with completeness chips and an editor for the finish,
+   includes, not-included and extra rows. What the CLIENT reads is the two-column spec sheet in a .print-only wrapper: on paper and in the Client preview, never in
+   the Estimator. Brilliant Steel never gets any of it (body.co-bs prints the old lines: owner ruling 2026-11-05 #6). */
+.spec-sheet{width:100%;border-collapse:collapse;table-layout:fixed;margin:2px 0 1px;}
+.spec-sheet td{border:none;padding:1px 6px 1px 0;font-size:8.5pt;line-height:1.35;vertical-align:top;color:#222;background:transparent;}
+.spec-sheet tr:hover td{background:transparent;}
+.spec-sheet td.ss-l{width:24mm;color:#555;font-weight:600;}
+.spec-sheet .ss-size td.ss-v{font-weight:800;color:#1E3A5F;}
+.spec-sheet .ss-construction td{background:#F5F8FC!important;padding-top:2px;padding-bottom:2px;}
+.spec-sheet .ss-construction td.ss-l{border-left:2.5px solid #1E3A5F;padding-left:6px;color:#1E3A5F;}
+.spec-sheet .ss-finish td.ss-v,.spec-sheet .ss-lead td.ss-v{font-weight:600;}
+.spec-sheet .ss-note td{font-style:italic;color:#555;}
+.line-details-row{align-items:center;flex-wrap:wrap;gap:6px;}
+.line-details-row .ms-chip{font-size:10px;padding:2px 8px;}
+.line-details{margin:4px 0 2px;padding:8px 10px;border:1.5px dashed var(--mid-blue);border-radius:8px;background:#fbfcfe;font-size:12px;}
+.ld-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin-bottom:8px;}
+.ld-lbl{flex:0 0 84px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);padding-top:7px;}
+.ld-body{flex:1 1 220px;min-width:0;}
+.ld-pills{display:flex;flex-wrap:wrap;gap:5px;}
+.ld-pill{padding:4px 11px;border-radius:16px;border:1.5px solid var(--gray-mid);background:#fff;font-family:inherit;font-size:11.5px;font-weight:600;color:var(--text);cursor:pointer;}
+.ld-pill:hover{border-color:var(--mid-blue);}
+.ld-pill[aria-pressed="true"]{border-color:var(--mid-blue);background:var(--light-blue);color:var(--dark-blue);}
+.ld-body textarea{font-size:12px;min-height:54px;resize:vertical;}
+.ld-extra{display:grid;grid-template-columns:minmax(70px,.8fr) minmax(110px,1.6fr) auto;gap:5px;margin-bottom:5px;}
+.ld-extra input{font-size:12px;padding:5px 7px;}
+.ld-hint{font-size:10.5px;color:var(--gray-dark);font-style:italic;margin-top:3px;line-height:1.4;}
+.sec-title #qualityChip{font-size:10.5px;text-transform:none;letter-spacing:0;margin-left:8px;vertical-align:middle;}
+@media(max-width:700px){
+  .ld-pill{min-height:40px;padding:6px 13px;}
+  .ld-lbl{flex-basis:100%;padding-top:0;}
+  .ld-extra{grid-template-columns:1fr 1fr auto;}
+  .line-details-row .cfg-link{min-height:40px;display:inline-flex;align-items:center;padding:0 10px;}
+}
+/* the once-per-document text under the items table, the one-line summary under the grand total, and the "Our standard" page */
+.doc-notes{margin-top:5px;font-size:7.5pt;color:#555;line-height:1.4;}
+.doc-notes p{margin:1px 0;}
+.summary-strip{margin-top:6px;padding:5px 9px;border:1px solid #D6E4F0;background:#F5F8FC;border-radius:5px;font-size:8.5pt;font-weight:600;color:#1E3A5F;text-align:center;line-height:1.4;}
+.doc-notes:empty,.summary-strip:empty{display:none!important;}
+#standardPage{display:none;}
+.std-hdr{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;padding-bottom:7px;border-bottom:2.5px solid #1E3A5F;}
+.std-title{font-size:15px;font-weight:800;color:#1E3A5F;letter-spacing:.5px;text-transform:uppercase;}
+.std-meta{font-size:10px;color:#555;text-align:right;}
+.std-block{margin:0 0 9px;page-break-inside:avoid;break-inside:avoid;}
+.std-block h4{font-size:9pt;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1E3A5F;border-bottom:1px solid #D6E4F0;padding-bottom:2px;margin-bottom:3px;}
+.std-block p,.std-block li{font-size:9pt;line-height:1.45;color:#222;}
+.std-block ul,.std-block ol{margin:0 0 0 17px;}
+.std-block li{margin-bottom:2px;}
 .price-print{display:none;}
 .lead-in{width:90px!important;text-align:center;}
 /* PRICING-TIERS-SPEC.md §3.2 — per-line quantity-break note under Amount.
@@ -554,6 +603,8 @@ input.term-cb{cursor:pointer;accent-color:var(--mid-blue);flex-shrink:0;}
       no BOM, no commission — BS prices by its own model ── */
 body.co-bs #costMarginWrap{display:none!important;}
 body.co-bs #commissionRow{display:none!important;}
+/* the warranty plan and the "Our standard" page are Barro Kitchens / Barro Industries only (owner ruling 2026-11-05 #6) */
+body.co-bs #termsOptionsBox{display:none!important;}
 
 /* ── PRICELIST PICKER (read-only) ── */
 .pl-cat{position:sticky;top:0;background:var(--light-blue);color:var(--dark-blue);font-weight:700;font-size:12px;padding:6px 10px;border-radius:6px;margin:10px 0 4px;z-index:1;}
@@ -797,6 +848,17 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   .items-table th:nth-child(5){width:14%!important;}
   .items-table th:nth-child(6){width:18%!important;}
   .items-table th:nth-child(7){width:0!important;}
+  /* Barro Kitchens / Barro Industries: a line prints as a spec sheet and needs the room — description 54%, qty / unit 7%, money 12% + 16% (4+54+7+7+12+16=100; AMOUNT
+     still ends flush at the table edge). Brilliant Steel keeps the widths above (owner ruling 2026-11-05 #6). A section heading never sits alone at the foot of a page. */
+  body:not(.co-bs) .items-table th:nth-child(2){width:54%!important;}
+  body:not(.co-bs) .items-table th:nth-child(3),
+  body:not(.co-bs) .items-table th:nth-child(4){width:7%!important;}
+  body:not(.co-bs) .items-table th:nth-child(5){width:12%!important;}
+  body:not(.co-bs) .items-table th:nth-child(6){width:16%!important;}
+  body:not(.co-bs) .cat-row{page-break-after:avoid;break-after:avoid;}
+  /* the "td:nth-child(2) = 46%" rule above also matches the SECOND cell of every nested spec-sheet row: the sheet sets its own two columns */
+  .items-table .spec-sheet td.ss-l{width:24mm!important;}
+  .items-table .spec-sheet td.ss-v{width:auto!important;}
   /* repeat column headers on every printed page; keep rows + category groups intact */
   thead{display:table-header-group;}
   tr,.cat-row,.subtotal-row,.opt-sub-row,.opt-grand-row{page-break-inside:avoid;break-inside:avoid;}
@@ -811,8 +873,9 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   .price-print{display:inline!important;font-size:8.5pt;}
   .spec-tag{display:none!important;}
   .spec-line{display:block;margin-top:1px;}
-  .spec-edit{font-size:8pt;color:#333;}
-  .dims-edit{font-size:8pt;color:#333;}
+  /* block, like .name-cell/.notes-cell: an inline span's padding only indents its first line */
+  .spec-edit{display:block;font-size:8pt;color:#333;}
+  .dims-edit{display:block;font-size:8pt;color:#333;}
   .notes-cell{font-size:8pt;color:#333;}
   .vol-note{font-size:7.5pt;color:#333;margin-top:1px;}
   .totals-tbl{min-width:0;width:48%;margin-left:auto;page-break-inside:avoid;break-inside:avoid;}
@@ -846,6 +909,9 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
      header-footer"). Chrome's print engine doesn't reliably support GCPM
      total-page counters, so a position:fixed footer (a well-supported trick)
      repeats this identifier on every physical printed page instead. */
+  /* the "Our standard" page prints as its own page, only when it has content (the same guard #photoAnnex uses: an empty block must never force a blank page) */
+  #standardPage{display:none!important;}
+  #standardPage.has-std{display:block!important;page-break-before:always;break-before:page;}
   .print-run-footer{display:block!important;position:fixed;bottom:2mm;left:10mm;right:10mm;
     font-size:7pt;color:#888;text-align:center;border-top:.5px solid #ddd;padding-top:1.5mm;}
   @page{size:A4 portrait;margin:11mm 10mm 7mm;}
@@ -853,6 +919,16 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 .print-header{display:none;}
 .print-run-footer{display:none;}
 @media print{.no-print{display:none!important;}}
+/* Barro Kitchens / Barro Industries on a browser that draws page-margin boxes (Chrome / Edge 131+; a tiny inline script in the head adds html.mb-footer when CSSMarginRule exists): the running
+   identifier is the bottom MARGIN BOX of a named page, so it can no longer be painted over the last line of a page — the fixed footer was, whenever the content reached the page bottom,
+   and a fixed box cannot be moved into the margin (Chrome pushes it onto the next page). Their bottom margin is 12 mm instead of 7 mm. Brilliant Steel keeps the fixed footer and the 7 mm
+   margin exactly as they were (owner ruling 2026-11-05 #6), and so does a browser without margin boxes. updatePrintRunFooter() writes the text into --run-id. */
+@page bkdoc{size:A4 portrait;margin:11mm 10mm 12mm;
+  @bottom-center{content:var(--run-id,"");font-family:var(--font);font-size:7pt;color:#888;vertical-align:top;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:.5px solid #ddd;padding-top:1.5mm;}}
+@media print{
+  html.mb-footer body:not(.co-bs){page:bkdoc;}
+  html.mb-footer body:not(.co-bs) .print-run-footer{display:none!important;}
+}
 
 /* ── WORKFORCE COPY (owner 2026-09-21) — body.body-workforce is set
    transiently by doPrintWorkforce(): a crew print with NO prices. Hides the
@@ -874,6 +950,10 @@ body.body-workforce .items-table th:nth-child(2){width:66%!important;}
 body.body-workforce .items-table th:nth-child(3){width:15%!important;}
 body.body-workforce .items-table th:nth-child(4){width:15%!important;}
 body.body-workforce .wf-note{display:block!important;}
+/* the crew copy carries no sales text: no "Our standard" page, no summary strip, no dimension / lead-time notes (its own ±5mm note above stays) */
+body.body-workforce #standardPage,
+body.body-workforce #summaryStrip,
+body.body-workforce #itemsNotes{display:none!important;}
 /* Owner 2026-09-21: the internal cost machinery goes too — the pass-through
    ticks (gate row + BS tick row), the Cost chips/BOM button, and the
    calculator. All are .no-print already, so real print output never carried
@@ -1093,6 +1173,12 @@ body.body-workforce #costMarginWrap{display:none!important;}
 .qb-doc-sheet .items-table th:nth-child(5){width:14%!important;}
 .qb-doc-sheet .items-table th:nth-child(6){width:18%!important;}
 .qb-doc-sheet .items-table th:nth-child(7){width:0!important;}
+/* …and the same room for the spec sheet in the Client preview (Brilliant Steel keeps its widths) */
+body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(2){width:54%!important;}
+body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(3),
+body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(4){width:7%!important;}
+body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(5){width:12%!important;}
+body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;}
 .qb-doc-sheet .term-off{display:none!important;}
 .qb-doc-sheet .term-cb{display:none!important;}
 .qb-doc-sheet .agent-only{display:none!important;}
@@ -1114,6 +1200,14 @@ body.body-workforce #costMarginWrap{display:none!important;}
 .qb-doc-sheet .section:last-child{border-bottom:none;}
 .qb-doc-sheet .sec-title{font-size:12.5px;}
 .qb-doc-sheet .totals-tbl{margin-left:auto;}
+.qb-doc-sheet #standardPage:not(.has-std){display:none!important;}
+.qb-doc-sheet #standardPage.has-std{margin-top:22px;padding-top:18px;border-top:2px dashed #c9d3e2;}
+.qb-doc-sheet #photoAnnex.has-photos{margin-top:22px;padding-top:18px;border-top:2px dashed #c9d3e2;}   /* a page of its own on paper: a rule between it and the thank-you block above it on screen */
+@media(max-width:700px){
+  /* the mobile "td{font-size:11px!important}" rule would otherwise reach the spec sheet's own cells inside the preview */
+  .qb-doc-sheet .spec-sheet td{padding:1px 4px 1px 0!important;font-size:10.5px!important;}
+  .qb-doc-sheet .spec-sheet td.ss-l{width:82px!important;}
+}
 
 /* ── HELP & TUTORIAL (QB-TUTORIAL-SPEC-2026-08-31 · .claude/skills/quote-builder-tutorial) ── */
 #btnHelp{position:relative;}
@@ -1552,7 +1646,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
 <!-- ── QUOTE ITEMS TABLE ── -->
 <div class="section" id="itemsSection">
   <div class="sec-title">
-    <span>Quote Items</span>
+    <span>Quote Items<span class="ms-chip shadow no-print" id="qualityChip" style="display:none;"></span></span>
     <span id="itemSavedTag" class="no-print" style="display:none;font-size:11px;font-weight:700;color:var(--green);text-transform:none;letter-spacing:normal;">✓ Saved</span>
   </div>
 
@@ -1630,6 +1724,8 @@ body.body-workforce #costMarginWrap{display:none!important;}
     <div class="pc-row" id="optionsBasisWrap" style="display:none;"></div>
   </div>
 
+  <!-- Once per document (QB-SELLING-QUOTE-SPEC D3): the dimension legend and the ruled lead time, printed only when a line states them. Rendered by renderDocExtras(). -->
+  <div class="print-only doc-notes" id="itemsNotes"></div>
   <!-- Workforce copy only (body-workforce, see doPrintWorkforce): the crew
        still needs the fabrication tolerance even though the terms section —
        where the clause normally prints — is hidden with the money. -->
@@ -1638,6 +1734,8 @@ body.body-workforce #costMarginWrap{display:none!important;}
   <div class="totals-box">
     <table class="totals-tbl" id="totalsTbl"></table>
   </div>
+  <!-- P2: validity · payment · lead time · delivery · warranty on ONE line, right under the grand total. Rendered by renderDocExtras(); never on a Brilliant Steel quote. -->
+  <div class="print-only summary-strip" id="summaryStrip"></div>
 </div>
 
 <!-- ── PHOTOS (see specs/quote-builder-photos-spec.md) ── -->
@@ -1696,7 +1794,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
     <div class="fg"><label>Overall Lead Time (calendar days)</label>
       <input type="number" id="overallLead" min="0" step="1" placeholder="auto from items" oninput="renderTimeline();renderTotals();"></div>
     <div class="fg"><label>&nbsp;</label>
-      <button class="btn btn-outline" style="background:var(--dark-blue);" onclick="autoFillLead()" title="Minimum 2 weeks (12 working days) + 3 working days per ₱20,000 of materials — Sundays not counted.">↻ Auto (2 wks + 3d/₱20k, no Sundays)</button></div>
+      <button class="btn btn-outline" style="background:var(--dark-blue);" id="autoLeadBtn" onclick="autoFillLead()" title="25 working days minimum, or 12 working days + 3 working days per ₱20,000 of materials if that is longer — Sundays not counted.">↻ Auto (25 working days min., no Sundays)</button></div>
   </div>
   <div id="timelineSummary" class="payment-summary"></div>
 </div>
@@ -1785,6 +1883,28 @@ body.body-workforce #costMarginWrap{display:none!important;}
 <!-- ── TERMS & CONDITIONS ── -->
 <div class="section terms-section doc-details" id="termsSection">
   <div class="sec-title">Terms &amp; Conditions</div>
+  <!-- Per-quote document options (QB-SELLING-QUOTE-SPEC §7, owner rulings 2026-11-05): the WARRANTY PLAN drives the Warranty term, the summary strip and the
+       "Our standard" page; the tick prints that page after the signatures. unifyPaymentIntoTerms() puts the payment sections above this box. Hidden for Brilliant
+       Steel (body.co-bs), whose quotations are left exactly as they were. -->
+  <div class="no-print" id="termsOptionsBox" style="margin:0 0 10px;">
+    <div class="fg-grid">
+      <div class="fg" style="grid-column:span 2;">
+        <label for="warrantyPlan">Warranty plan</label>
+        <select id="warrantyPlan" onchange="onWarrantyPlanChange()">
+          <option value="service6">6-month service warranty (standard)</option>
+          <option value="kitchenshield12">Full kitchen — 6-month service warranty + 12 months PMS with KitchenShield™</option>
+          <option value="" hidden>As issued — earlier wording and timeline</option>
+        </select>
+        <div class="pc-hint" id="legacyDocNote" style="display:none;margin-top:4px;font-size:11px;color:var(--gray-dark);">This quotation was issued before the warranty plan existed, so it keeps the warranty and site-requirements wording and the timeline rule it was issued with. Pick a plan to bring it onto the current terms (the plan’s warranty wording and a lead time of 25 working days minimum).</div>
+      </div>
+      <div class="fg full">
+        <label class="pc-check" style="padding-top:0;">
+          <input type="checkbox" id="showStandardPage" checked onchange="onShowStandardPageChange()">
+          Print the “Our standard” page after the terms (materials &amp; finishes, standard construction, warranty, how we work, references, registrations)
+        </label>
+      </div>
+    </div>
+  </div>
   <div class="terms-grid" id="termsGrid"></div>
   <div class="sig-row">
     <div class="sig-box">
@@ -1802,6 +1922,16 @@ body.body-workforce #costMarginWrap{display:none!important;}
     </div>
   </div>
 </div>
+
+<!-- ── FOOTER (print only) ── the thank-you and company details sit right after the signatures, ahead of the "Our standard" page and the photo annex
+     (QB-SELLING-QUOTE-SPEC D4). layoutDocTail() puts this block back in its old place, after the annex, for Brilliant Steel (left exactly as it was). -->
+<div class="print-only print-footer" id="printFooter">
+  <div class="pf-thanks" id="pfThanks"></div>
+  <div class="pf-creds" id="pfCreds"></div>
+</div>
+
+<!-- ── OUR STANDARD (print only) — its own page after the terms, closed by the thank-you block (layoutDocTail() puts the footer behind it); rendered by renderStandardPage(); empty (and never printed) when off or on Brilliant Steel ── -->
+<div class="print-only" id="standardPage"></div>
 
 <!-- ── INTERNAL PANEL (Labor & Timeline + Cost & Margin) ── moved below Terms &
      Conditions (COSTING-QB-UX-SPEC-2026-08-26 §2: the cost/OH panel,
@@ -1885,12 +2015,6 @@ body.body-workforce #costMarginWrap{display:none!important;}
 <!-- ── AGENT COMMISSION BOX (agent copy print only) ── -->
 <div class="print-only agent-box" id="agentBox"></div>
 
-<!-- ── FOOTER (print only) ── -->
-<div class="print-only print-footer" id="printFooter">
-  <div class="pf-thanks" id="pfThanks"></div>
-  <div class="pf-creds" id="pfCreds"></div>
-</div>
-
 </div><!-- /internalWorkspace -->
 
 <!-- ── CLIENT DOCUMENT PREVIEW (COSTING-QB-UX-SPEC-2026-08-26 §1) — populated
@@ -1947,10 +2071,11 @@ body.body-workforce #costMarginWrap{display:none!important;}
         <li><strong>Client information</strong> <em>(Client Data)</em> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself; tick <em>no costing</em> beside it for a line that genuinely has none. ＋ Section for Option A / Option B quotes. 📥 Import brings in a whole list at once — hand Claude any list and the 📋 button inside copies the exact format brief to give it.</li>
         <li><strong>Configure a product</strong> <em>(Estimator)</em> — the ⚙ chips above the search box (Preparation table, Sink, Dish table, Stove, Wok range, Griddle / griller / fryer, Gas deck oven, Range hood, Cabinet, Wall shelving, Rack) open the configurator: pick the options, set the size in mm, and the price shown is the <strong>website price</strong> — the catalogue base at that size plus the option amounts Finance approved, the same figure the website estimate is built from. An option nobody has priced yet shows <em>Priced after review</em> and asks for your price; a line left without one cannot be filed. Some choices only show when they apply — fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table — and a size an option does not allow is flagged under the box with a <em>Use N mm</em> shortcut (a slim hood is at most 500 mm deep; a deck oven's width follows its trays per deck). Tables, sinks, dish tables, stoves and wok ranges are built with a 1.5 mm (16 ga) top as standard and the quote prints their construction; the <em>Top plate</em> option (marked <em>staff</em> — it is never offered on the website) switches it to a lighter 1.2 mm top, which reads <em>Priced after review</em> until Finance has entered its amount. Every product opens with a <em>Material</em> option — Stainless Steel 304 Food Grade as standard, or the <em>staff</em> choice Stainless Steel 316 Laboratory Grade (the website never offers it), which reads <em>Priced after review</em> until Finance has entered the 316 percentage for that product in Inventory › Family pricing — and each configured line is named for what it is on the quote (<em>SS Sink</em>, <em>SS Range Stove Combination (Griller, Fryer)</em>, <em>Gas Deck Oven</em>…). <em>⚙ configure</em> on a line changes it later, and <em>⚙ convert to configured</em> turns an older sink, table, stove… line into one without touching its price. A quote that starts from a website request or project brief opens with the client's details filled in and a bar showing what they told us.</li>
+        <li><strong>Details ▸ on each line</strong> <em>(Estimator)</em> — every line prints on the quotation as a <strong>spec sheet</strong> (not a run-on sentence): the size first, then the material and options, the construction, the finish, what is included and not included, and the lead time. Under each line, <em>Details ▸</em> opens its editor: the <em>finish</em> (hairline is the standard — or brushed, mirror, satin, or not stated), <em>Includes</em> and <em>Not included</em> (one per line) and your own <em>extra rows</em>. A configured line starts with the standard finish, includes and a lead time of 25 working days minimum, from downpayment and approved drawings; ⚙ configure regenerates its includes, not-included and lead time from the new options (your finish stays). Small chips on a line — <em>no size</em>, <em>no specs</em>, <em>no finish</em>, <em>no photo</em> — show what the sheet still lacks, and <em>Quote strength n/10</em> beside the Quote Items title scores the whole quote. A line whose specs you typed yourself shows <em>custom wording</em> with a <em>↺ regenerate</em> link. A dimension legend prints under the items table, and a one-line summary (validity, payment, lead time, delivery, warranty) under the grand total. Brilliant Steel quotes are not changed by any of this.</li>
         <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. A configured line (and a line from a website request) keeps the <strong>website price</strong> instead — the calculator shows the cost-based price beside it, and <em>Use cost-based</em> / <em>Use website</em> / <em>Apply cost-based to all</em> switch it. A line ticked <strong>pass-through</strong> skips all of it: the supplier price is the client price (no OH, no MK), counted at cost in the calculator — and discounts never touch it. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
-        <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
-        <li><strong>Verify &amp; File</strong> — completeness checklist (it also warns when the total is outside the estimate the client saw online, and waits for any line marked <em>needs a price</em>); filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
+        <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms. In the <em>Terms</em> tab, the <strong>Warranty plan</strong> is the standard 6-month service warranty, or <em>Full kitchen</em> — the 6-month warranty plus 12 months of preventive maintenance service (PMS) with KitchenShield™ — and a tick prints the <strong>“Our standard” page</strong> after the terms (materials &amp; finishes, the standard construction of the products on this quote, warranty, how we work, references, registrations). A quotation filed before the plan existed shows <em>As issued</em>: reopened or revised, it keeps the warranty and site wording and the timeline it was issued with until you pick a plan. The <strong>project timeline</strong> is 25 working days minimum (or 12 working days + 3 per ₱20,000 of materials, if longer; Sundays never counted) on Barro Kitchens and Barro Industries quotations; Brilliant Steel keeps minimum 2 weeks + 3 per ₱20,000.</li>
+        <li><strong>Verify &amp; File</strong> — completeness checklist (it also warns when the total is outside the estimate the client saw online, and waits for any line marked <em>needs a price</em>); filing makes the quote official. A made-to-order line with no size blocks filing; lines still missing specs or a finish are only listed (you can file anyway). 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
         <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately, and 🛠 Workforce Copy prints the crew version with no prices — item details, qty and unit only. A quotation is always shared as the PDF.</li>
       </ol>
 
@@ -2079,9 +2204,10 @@ body.body-workforce #costMarginWrap{display:none!important;}
      line reads "Priced after review"). Order matters: qb-configured.js is handed the other three at run time, never at load time. -->
 <!-- Local scripts carry the app's ?v= CACHE-BUST (2026-10-29): GitHub Pages sends max-age=600, so a bare src could price with the
      previous release's js/pricing-core.js for 10 minutes after a deploy. js/app.js opens this iframe as quote-builder-v2.html?v=APP_VERSION;
-     this loader writes the six local scripts (firebase-config, then the three above, in that order) with that version, as the same
+     this loader writes the seven local scripts (firebase-config, letterhead, the three above, qb-configured, then js/qb-spec-sheet.js — the pure
+     spec-sheet helpers, specs/QB-SELLING-QUOTE-SPEC.md) with that version, as the same
      parser-inserted defer scripts the app-kit in index.html uses. Opened without ?v= (standalone, file://) they load bare, as before. -->
-<script>(function(){var v=new URLSearchParams(location.search).get('v'),q=(v&&/^[0-9][0-9.]*$/.test(v))?'?v='+v:'';['js/firebase-config.js','js/letterhead.js','js/pricing-core.js','js/qr-families.js','js/product-families.js','js/qb-configured.js'].forEach(function(f){document.write('<script defer src="'+f+q+'"><\/script>');});})();</script>
+<script>(function(){var v=new URLSearchParams(location.search).get('v'),q=(v&&/^[0-9][0-9.]*$/.test(v))?'?v='+v:'';['js/firebase-config.js','js/letterhead.js','js/pricing-core.js','js/qr-families.js','js/product-families.js','js/qb-configured.js','js/qb-spec-sheet.js'].forEach(function(f){document.write('<script defer src="'+f+q+'"><\/script>');});})();</script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
@@ -2139,6 +2265,64 @@ const CO = {
     thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
     creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
 };
+
+// ═══════════════════════════════════════════════════════════════════
+//  OUR STANDARD PAGE + WARRANTY WORDING (specs/QB-SELLING-QUOTE-SPEC.md §3.4 / §4 / §7, owner rulings 2026-11-05)
+//  The frozen text of the page printed after the terms of a Barro Kitchens / Barro Industries quotation, and the warranty sentences the Warranty term, the
+//  summary strip and that page all read. ‼️ MIRROR of window.QB_STANDARD_PAGE in js/config.js (this page is an <iframe> and cannot see it) — keep the two
+//  IDENTICAL by hand; tests/quote-selling-content.test.mjs pins them deep-equal and bans the words no document may carry. Strings only: no logo, no agency mark,
+//  past clients named (DMMMSU, ISPSC) and nothing else, registrations as text. The "standard construction" block is not here: it is read off the quote's own lines.
+// ═══════════════════════════════════════════════════════════════════
+const QB_STANDARD_PAGE = Object.freeze({
+  title: 'Our standard',
+  brand: Object.freeze({ BK: 'Barro Kitchens, by Barro Industries OPC', BI: 'Barro Industries' }),
+  headings: Object.freeze({ materials: 'Materials & finishes', construction: 'Standard construction', warranty: 'Warranty & after-sales', process: 'How we work', references: 'References', registrations: 'Registrations' }),
+  materials: 'Our standard material is SS304 food-grade stainless steel. SS316 laboratory grade is available on request. Standard finish: hairline. Brushed, mirror or satin on request.',
+  warranty: Object.freeze({
+    service6: '6-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.',
+    kitchenshield12: 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.'
+  }),
+  process: Object.freeze(['Site measurement and design', 'Fabrication in our Quezon City shop', 'Delivery', 'Installation and commissioning', 'Turnover and after-sales service']),
+  references: 'Institutional clients include DMMMSU and ISPSC.',
+  registrations: 'Barro Industries OPC is SEC-registered, VAT-registered and PhilGEPS-registered.'
+});
+// The wording every quotation printed BEFORE the warranty plan existed. It is still what two kinds of quotation print: Brilliant Steel's (owner ruling 2026-11-05 #6: BS is LEFT
+// EXACTLY AS IT WAS — the new warranty plan and the company-named site term are Barro Kitchens / Barro Industries only) and a Barro Kitchens / Barro Industries quotation that was FILED
+// before the plan existed and is now reopened or revised (owner ruling 2026-11-05: legacy quotes keep the wording they were issued with — see isLegacyDoc()). (The Site Requirements
+// sentence naming another company is that old text, kept as it was; the owner has not ruled on it for Brilliant Steel.) Pinned byte-for-byte by tests/quote-selling-content.test.mjs.
+const TERMS_LEGACY = Object.freeze({
+  tc_warranty: '12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.',
+  tc_site: 'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.'
+});
+// "BARRO KITCHENS" -> "Barro Kitchens", "BARRO INDUSTRIES OPC" -> "Barro Industries OPC" (OPC stays upper case): the company name inside a sentence
+function titleCaseCo(name){
+  return String(name||'').toLowerCase().split(/\s+/).filter(Boolean).map(w=>w==='opc'?'OPC':w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+}
+// the warranty plan of THIS quote: 'service6' (default) or 'kitchenshield12'; anything else reads as the default
+function getWarrantyPlan(){
+  return document.getElementById('warrantyPlan')?.value==='kitchenshield12' ? 'kitchenshield12' : 'service6';
+}
+// "As issued": a quotation FILED before the warranty plan existed, reopened or revised, keeps the warranty and site-requirements wording AND the timeline rule it was issued with —
+// a reopened old quotation must not change what it promises, nor (through the lead time and the "+2% priority order" threshold) what it costs. The marker is the plan select itself,
+// holding '' : it rides PRICING_IDS, so it survives every re-save (draft, payload, revision). A new quote, a draft, a link and a template read the CURRENT rules; picking a plan in the
+// Terms tab brings an issued quote onto them (see onWarrantyPlanChange()). Brilliant Steel never reads this: it keeps the old rules whatever the marker says.
+function isLegacyDoc(){ return document.getElementById('warrantyPlan')?.value===''; }
+// the Warranty term's default wording: the 6-month sentence, plus the KitchenShield sentence on the full-kitchen plan; Brilliant Steel and an "as issued" quote keep the old text
+function warrantyTermText(){
+  if(currentCo==='BS' || isLegacyDoc()) return TERMS_LEGACY.tc_warranty;
+  const w=QB_STANDARD_PAGE.warranty;
+  return getWarrantyPlan()==='kitchenshield12' ? w.service6+' '+w.kitchenshield12 : w.service6;
+}
+// Does the Warranty term print the CURRENT 6-month wording right now? Only then may the summary strip and the "Our standard" page say "6-month service warranty": a quotation whose
+// Warranty term is switched off, or carries wording stored with the quote (one the preparer rewrote), or is "as issued" under the old wording, must not state a different warranty elsewhere.
+function warrantyIsDefault(){ return termsEnabled.tc_warranty!==false && !termsContent.tc_warranty && !isLegacyDoc(); }
+// the Site Requirements term's default wording names the company that is quoting (Brilliant Steel and an "as issued" quote: the old text)
+function siteTermText(){
+  if(currentCo==='BS' || isLegacyDoc()) return TERMS_LEGACY.tc_site;
+  return 'Client is responsible for ensuring site is ready for installation. '+titleCaseCo((CO[currentCo]||CO.BK).name)+' is not liable for delays due to unprepared site conditions.';
+}
+// the spec sheet / completeness / summary / Our standard page are for Barro Kitchens and Barro Industries only, and need the helper file (offline copies degrade to the old lines)
+function docSheetOn(){ return currentCo!=='BS' && !!window.QBSpecSheet; }
 
 // ── QUOTE COLLECTION ROUTING ────────────────────────────────────────
 // Which Firestore collection a company's quotes are filed in.
@@ -2796,17 +2980,21 @@ function setCompany(co){
   buildQuoteNo();
   applyLetterheadHeader();
   renderPaymentDetails();   // re-gate on the new company — only the Barro-owned CO.BK/CO.BI carry a `pay` config
+  layoutDocTail();          // the footer / "Our standard" page order is per company (Brilliant Steel keeps its old one)
+  renderTerms();            // the default wording of the Warranty and Site Requirements terms follows the company
   mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
+  // Repaint the items table so the per-line 🧮 BOM gates appear/disappear
+  // with the company — and, since the selling-quote work, so a line prints as a spec sheet on Barro Kitchens / Barro Industries and as the old Specs / Dims / Notes
+  // lines on Brilliant Steel — and re-run the commission auto-rule (never on BS).
+  if (typeof renderItems==='function' && document.getElementById('itemsTbody')) renderItems();
   // COSTING-QB-UX-SPEC-2026-08-26 §1 — the company pills stay reachable from
   // whichever view is active (they're in the topbar, not gated by
   // currentView), so a company switch made WHILE Client view is showing must
   // refresh the preview too, not just wait for the next setView('client').
   // Guarded on qbDocSheet existing since setCompany() also runs pre-boot,
-  // before the DOM below it has necessarily settled.
+  // before the DOM below it has necessarily settled. AFTER renderItems(): the
+  // preview clones the items table, whose markup now depends on the company.
   if (typeof renderClientPreview==='function' && document.getElementById('qbDocSheet')) renderClientPreview();
-  // Repaint the items table so the per-line 🧮 BOM gates appear/disappear
-  // with the company, and re-run the commission auto-rule (never on BS).
-  if (typeof renderItems==='function' && document.getElementById('itemsTbody')) renderItems();
   if (typeof autoCommissionSync==='function') autoCommissionSync();
 }
 
@@ -2893,9 +3081,39 @@ function setView(v){
 // Deliberately excludes #costMarginWrap/#internalPanel — the cost/OH panel
 // is Internal-view only; it was never part of the printed/client-facing
 // document before this spec and stays that way.
+// (paymentSection and paymentDetailsSection are NOT listed: unifyPaymentIntoTerms() moves both INSIDE #termsSection, so cloning the terms clones them — listing them as well
+// showed "Payment Terms & Schedule" and "Payment Details" twice in the Client preview while the printed PDF, which reads the live DOM, had them once.)
 const QB_DOC_SOURCE_IDS=['lhPrintHeader','phSubject','billStrip','itemsSection',
-  'diSection','timelineSection','paymentSection','paymentDetailsSection',
+  'diSection','timelineSection',
+  'remarksSection','termsSection','printFooter','standardPage','photoAnnex'];
+// Brilliant Steel: the order it always had (the footer after the annex, no Standard page) — owner ruling 2026-11-05 #6
+const QB_DOC_SOURCE_IDS_BS=['lhPrintHeader','phSubject','billStrip','itemsSection',
+  'diSection','timelineSection',
   'remarksSection','termsSection','photoAnnex','printFooter'];
+function qbDocSourceIds(){
+  if(currentCo==='BS') return QB_DOC_SOURCE_IDS_BS;
+  // the preview follows the printed order: with a Standard page, the thank-you closes it (see layoutDocTail())
+  const std=document.getElementById('standardPage');
+  if(std && std.classList && std.classList.contains('has-std')) return QB_DOC_SOURCE_IDS.map(id=>id==='printFooter'?'standardPage':(id==='standardPage'?'printFooter':id));
+  return QB_DOC_SOURCE_IDS;
+}
+// The printed order is the DOM order. Barro Kitchens / Barro Industries: terms → "Our standard" page → the thank-you and company details → annex. The thank-you CLOSES the Standard page: left
+// right after the signatures it landed alone on a page of its own whenever the signatures ended the page above (the Standard page starts a page of its own). With no Standard page
+// (unticked, or a quote with no lines) it follows the terms directly: terms → thank-you → annex. Brilliant Steel: the order it always had — the footer after the annex and the agent box.
+function layoutDocTail(){
+  const terms=document.getElementById('termsSection'), foot=document.getElementById('printFooter'), std=document.getElementById('standardPage');
+  if(!terms||!foot||!terms.parentNode||!foot.parentNode) return;
+  if(currentCo==='BS'){
+    const agent=document.getElementById('agentBox');
+    if(agent && agent.parentNode && agent.nextSibling!==foot) agent.parentNode.insertBefore(foot,agent.nextSibling);
+  } else if(std && std.parentNode && std.classList && std.classList.contains('has-std')){
+    if(terms.nextSibling!==std) terms.parentNode.insertBefore(std,terms.nextSibling);
+    if(std.nextSibling!==foot) std.parentNode.insertBefore(foot,std.nextSibling);
+  } else {
+    if(terms.nextSibling!==foot) terms.parentNode.insertBefore(foot,terms.nextSibling);
+    if(std && std.parentNode && foot.nextSibling!==std) foot.parentNode.insertBefore(std,foot.nextSibling);
+  }
+}
 
 // Strips everything that could make a cloned node collide with, or behave
 // like, the live form: every id (so nothing in the preview can ever collide
@@ -2934,12 +3152,12 @@ function renderClientPreview(){
   applyLetterheadHeader();
   updatePrintHeader();
   renderBillStrip();
-  renderTotals();          // also refreshes diPrint/paymentSummary/timelineSummary
+  renderTotals();          // also refreshes diPrint/paymentSummary/timelineSummary and the spec-sheet extras (renderDocExtras)
   updateRemarksPrint();
   renderPaymentDetails();
   updatePrintRunFooter();
   const frag=document.createDocumentFragment();
-  QB_DOC_SOURCE_IDS.forEach(id=>{
+  qbDocSourceIds().forEach(id=>{
     const src=document.getElementById(id);
     if(!src) return;
     frag.appendChild(sanitizeForPreview(src.cloneNode(true)));
@@ -3351,6 +3569,8 @@ function updatePrintHeader(){
   document.getElementById('sigClientName').textContent=cn||'CLIENT NAME';
   renderBillStrip();
   updateFiledSig();
+  refreshAnnexMeta();   // the photo annex header must read the LIVE quote number (it used to keep the one it was last built with)
+  renderDocExtras();    // the summary strip's "Valid N days" follows the validity field
 }
 
 function renderBillStrip(){
@@ -3565,7 +3785,7 @@ function addFixedItemDirect(p){
   const price=computePrice(p);
   items.push({
     id:p.id, category:p.category, name:p.name, dims:fixedItemDimString(p),
-    specs:[], specStr:'', qty:1, unit:p.unit||'pc', unitPrice:price, amount:price,
+    specs:[], specStr:'', finish:'', includes:[], excludes:[], specLines:[], qty:1, unit:p.unit||'pc', unitPrice:price, amount:price,
     leadTime:p.leadTime||'—', laborHours:p.laborHours||null,
     capitalMaterials:p.capitalMaterials||0, capitalLabor:p.capitalLabor||0,
     formulaType:p.formulaType,
@@ -3846,6 +4066,7 @@ function addItemFromCalc(){
     dims:dimStr,
     specs:specSnapshot,
     specStr,
+    finish:'', includes:[], excludes:[], specLines:[],
     qty,
     unit,
     unitPrice:price,
@@ -3873,6 +4094,7 @@ function addCustomItem(){
     dims:'',
     specs:[],
     specEdit:'',
+    finish:'', includes:[], excludes:[], specLines:[],
     qty:1,
     unit:'pc',
     unitPrice:0,
@@ -4075,6 +4297,11 @@ function cfgApplyEdit(old, fresh, typed){
   ['id', 'name', 'familyId', 'familyVersion', 'config', 'size', 'dims', 'specs', 'specStr', 'formulaType', 'qty', 'unit', 'notes', 'basisUnitPrice'].forEach(k => { old[k] = fresh[k]; });
   old._cfg = fresh._cfg;
   delete old.specEdit;                                    // the printed wording is regenerated from the options
+  // SELLING QUOTE: what the line includes / does not include and its lead time are regenerated from the new options like the specs; the FINISH is the preparer's choice (it has
+  // nothing to do with the options), so one already set stays, and a line with none takes the family's default; the extra rows the preparer typed are never touched
+  ['includes', 'excludes', 'leadTime'].forEach(k => { if (fresh[k] !== undefined) old[k] = fresh[k]; });
+  if (!(typeof old.finish === 'string' && old.finish) && typeof fresh.finish === 'string') old.finish = fresh.finish;
+  if (!Array.isArray(old.specLines)) old.specLines = [];
   if (was === 'website') {
     if (priced) { old.priceBasis = 'website'; old.unitPrice = fresh.unitPrice; delete old.priceManual; delete old.needsPrice; }
     else {                                                // the new options have no website price: a typed price, or flagged
@@ -4846,7 +5073,7 @@ function normalizeImportItem(raw, warnings, secLabel, rowNum){
 
   const item = {
     id:'CUSTOM', category:null,   // category set by applyImport()'s section mapping (Part 2.5)
-    name, dims, specs:[], specEdit,
+    name, dims, specs:[], specEdit, finish:'', includes:[], excludes:[], specLines:[],
     qty, unit, unitPrice, amount: unitPrice*qty,
     leadTime, notes, laborHours:null, formulaType:'fixed',
     bom:[],   // always present, empty if none — matches addCustomItem()'s shape
@@ -5472,11 +5699,23 @@ function isCustomSection(k){ return /^sec_\d+$/.test(String(k||'')); }
 function nextSectionId(){ let n=1; while(items.some(i=>i.category==='sec_'+n)) n++; return 'sec_'+n; }
 function dbCategory(catId){ return (DB.categories||[]).find(c=>c.id===catId)||null; }
 function sectionItems(catId){ return items.filter(i=>i.category===catId); }
+// The labels of the built-in sections, for a quote rendered before the product database has loaded (a #quote= link, an offline open): the heading reads the section's own name,
+// never the raw id ("prep_washing" printed as PREP_WASHING). An id nobody knows is spelled out in words ("exhaust_system" -> "Exhaust System").
+const SECTION_FALLBACK_LABELS={
+  cooking_line:'Cooking Line', prep_washing:'Preparation & Washing', refrigeration:'Refrigeration', baking:'Baking', ventilation:'Ventilation',
+  exhaust_system:'Exhaust System', fresh_air_system:'Fresh Air System', gas_line:'Gas Line', fire_suppression:'Fire Suppression', miscellaneous:'Miscellaneous'
+};
+function humanSectionLabel(catId){
+  const id=String(catId==null?'':catId);
+  if(!id) return 'Uncategorised';
+  if(Object.prototype.hasOwnProperty.call(SECTION_FALLBACK_LABELS,id)) return SECTION_FALLBACK_LABELS[id];
+  return id.split(/[_\s]+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ')||'Uncategorised';
+}
 function sectionLabel(catId){
   const named=items.find(i=>i.category===catId&&i.catLabel);
   if(named) return named.catLabel;
   const c=dbCategory(catId);
-  return c?c.label:String(catId||'Uncategorised');
+  return c?c.label:humanSectionLabel(catId);
 }
 // Owner ruling 2026-09-01 — auto-generated Subject:
 // "Supply, Fabrication[, Delivery][ & Installation] of <categories>".
@@ -5543,7 +5782,7 @@ function addSection(){
   const label=raw.trim();
   if(!label){ showToast('Section name is required.','error'); return; }
   items.push({id:'CUSTOM',category:nextSectionId(),catLabel:label,name:'New item',dims:'',
-    specs:[],specEdit:'',qty:1,unit:'pc',unitPrice:0,amount:0,leadTime:'',laborHours:null,formulaType:'fixed'});
+    specs:[],specEdit:'',finish:'',includes:[],excludes:[],specLines:[],qty:1,unit:'pc',unitPrice:0,amount:0,leadTime:'',laborHours:null,formulaType:'fixed'});
   saveToStorage(); renderItems();
   showToast('➕ Section added: '+label);
   setTimeout(()=>{
@@ -5615,9 +5854,10 @@ function unifyPaymentIntoTerms(){
   const terms=document.getElementById('termsSection');
   const grid=document.getElementById('termsGrid');
   if(!terms || !grid) return;
+  const anchor=document.getElementById('termsOptionsBox') || grid;   // payment sections first, then the warranty plan / "Our standard" options, then the terms text
   ['paymentSection','paymentDetailsSection'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el && el.parentElement!==terms) terms.insertBefore(el, grid);
+    if(el && el.parentElement!==terms) terms.insertBefore(el, anchor);
   });
 }
 function unifyMiscIntoItems(){
@@ -5637,6 +5877,200 @@ function unifyMiscIntoItems(){
     sec.appendChild(calc);
   }
 }
+// ═══════════════════════════════════════════════════════════════════
+//  SPEC SHEET, LINE DETAILS, COMPLETENESS, SUMMARY AND "OUR STANDARD" (specs/QB-SELLING-QUOTE-SPEC.md Phase 1, owner rulings 2026-11-05)
+//  What a client reads under every line is the spec sheet (js/qb-spec-sheet.js, pure); the Estimator gets a "Details ▸" row with completeness chips and an editor for
+//  the finish, includes, not-included and extra rows. NOTHING here reads or writes a price (R6): every handler saves the line, repaints and flashes "Saved" — never more.
+//  Barro Kitchens and Barro Industries only (docSheetOn): a Brilliant Steel quotation is left exactly as it was (owner ruling #6).
+// ═══════════════════════════════════════════════════════════════════
+const _detailsOpen=new WeakSet();   // the lines whose "Details ▸" editor is open — screen state only, never saved or filed
+function lineHasPhoto(item,idx){ return !!(item && (item.photoUrl || quotePhotos.some(p=>p && p.itemIndex===idx))); }
+function lineCompleteness(item,idx){ return window.QBSpecSheet.completeness(item,{hasPhoto:lineHasPhoto(item,idx),leadOn:!isLegacyDoc()}); }
+// the quote-level view (null on Brilliant Steel / without the helper file)
+function docQuality(){
+  return docSheetOn() ? window.QBSpecSheet.quality(items,{hasPhoto:(it,i)=>lineHasPhoto(it,i),leadOn:!isLegacyDoc()}) : null;
+}
+// the chips of one line: what the printed sheet still lacks, and the "custom wording" mark on a line whose specs are the preparer's own text
+function lineChipsHtml(item,idx){
+  if(!docSheetOn() || !item || item.id==='MISCFEE') return '';
+  const c=lineCompleteness(item,idx);
+  const chip=(cls,txt,tip)=>`<span class="ms-chip ${cls}" title="${attrEsc(tip)}">${txt}</span>`;
+  let h='';
+  if(c.missing.indexOf('size')>=0)   h+=chip('bad','no size','A made-to-order line states its size (L × W × H, in mm) — Verify & File will not file it without one. Type it in the Dims line.');
+  if(c.missing.indexOf('specs')>=0)  h+=chip('warn','no specs','Nothing is printed about what this line is made of — add it in the Specs line, or as an extra row under Details.');
+  if(c.missing.indexOf('finish')>=0) h+=chip('warn','no finish','Pick a finish under Details (hairline is the standard).');
+  if(c.missing.indexOf('photo')>=0)  h+=chip('shadow','no photo','No photo is linked to this line (Photos → Link to item).');
+  if(item.specEdit!==undefined && (item.familyId || (Array.isArray(item.specs)&&item.specs.length))){
+    h+=chip('warn','custom wording','The specs printed for this line are your own wording, not the generated rows.')
+      +`<button type="button" class="cfg-link" onclick="regenerateSpecs(${idx})" title="Throw the custom wording away and print the generated specs again">↺ regenerate</button>`;
+  }
+  return h;
+}
+// the open editor under a line: finish pills, includes / not included (one per line), extra rows
+function lineDetailsEditorHtml(item,idx){
+  const QS=window.QBSpecSheet;
+  const fin=typeof item.finish==='string' ? item.finish : '';
+  const pills=QS.FINISH_ORDER.map(f=>`<button type="button" class="ld-pill" aria-pressed="${fin===f}"${f==='hairline'?' title="The standard finish"':''} onclick="editFinish(${idx},'${f}')">${txtEsc(QS.FINISH_LABELS[f].replace(/ finish$/,''))}</button>`).join('')
+    +`<button type="button" class="ld-pill" aria-pressed="${fin===''}" title="Print no finish on this line" onclick="editFinish(${idx},'')">not stated</button>`;
+  const extra=(Array.isArray(item.specLines)?item.specLines:[]).map((r,i)=>`<div class="ld-extra">`
+    +`<input type="text" maxlength="60" value="${txtEsc((r&&r.label)||'')}" placeholder="Label (e.g. Capacity)" aria-label="Extra row ${i+1} label" onchange="editSpecLine(${idx},${i},'label',this)">`
+    +`<input type="text" maxlength="300" value="${txtEsc((r&&r.value)||'')}" placeholder="Value" aria-label="Extra row ${i+1} value" onchange="editSpecLine(${idx},${i},'value',this)">`
+    +`<button type="button" class="move-btn" title="Remove this row" onclick="removeSpecLine(${idx},${i})">✕</button></div>`).join('');
+  const lines=a=>txtEsc((Array.isArray(a)?a:[]).join('\n'));
+  return `<div class="line-details no-print" data-ld="${idx}">
+    <div class="ld-row"><span class="ld-lbl">Finish</span><div class="ld-body"><div class="ld-pills" role="group" aria-label="Finish">${pills}</div></div></div>
+    <div class="ld-row"><span class="ld-lbl">Includes</span><div class="ld-body"><textarea rows="3" placeholder="One item per line" aria-label="Includes" onchange="editIncludes(${idx},this)">${lines(item.includes)}</textarea></div></div>
+    <div class="ld-row"><span class="ld-lbl">Not included</span><div class="ld-body"><textarea rows="2" placeholder="One item per line" aria-label="Not included" onchange="editExcludes(${idx},this)">${lines(item.excludes)}</textarea></div></div>
+    <div class="ld-row"><span class="ld-lbl">Extra rows</span><div class="ld-body">${extra}<button type="button" class="cfg-link" onclick="addSpecLine(${idx})">＋ Add a row</button></div></div>
+    <div class="ld-hint">These print on the quotation under the spec rows (up to 12 includes / not-included lines, 12 extra rows). ⚙ configure regenerates a configured line's includes, not-included and lead time from its options — the finish you picked stays.</div>
+  </div>`;
+}
+// the "Details ▸" row: the toggle, the chips and (when open) the editor
+function lineDetailsHtml(item,idx){
+  if(!docSheetOn() || !item || item.id==='MISCFEE') return '';
+  const open=_detailsOpen.has(item);
+  return `<div class="spec-line line-details-row no-print"><button type="button" class="cfg-link line-details-toggle" aria-expanded="${open}" onclick="toggleLineDetails(${idx})">${open?'Details ▾':'Details ▸'}</button><span class="ld-chips" data-chips="${idx}" style="display:contents;">${lineChipsHtml(item,idx)}</span></div>${open?lineDetailsEditorHtml(item,idx):''}`;
+}
+function toggleLineDetails(idx){
+  const it=items[idx]; if(!it) return;
+  if(_detailsOpen.has(it)) _detailsOpen.delete(it); else _detailsOpen.add(it);
+  renderItems();
+}
+// one phrase per line, blank lines dropped, at most 12 phrases of 160 characters
+const _phraseLines=el=>String((el&&el.value)||'').split('\n').map(x=>x.trim().slice(0,160)).filter(Boolean).slice(0,12);
+function editFinish(idx,v){
+  const it=items[idx]; if(!it || !window.QBSpecSheet) return;
+  if(v!=='' && !Object.prototype.hasOwnProperty.call(window.QBSpecSheet.FINISH_LABELS,v)) return;
+  it.finish=v; saveToStorage(); renderItems(); flashItemSaved();
+}
+function editIncludes(idx,el){ const it=items[idx]; if(!it) return; it.includes=_phraseLines(el); saveToStorage(); refreshLineDocParts(idx); flashItemSaved(); }
+function editExcludes(idx,el){ const it=items[idx]; if(!it) return; it.excludes=_phraseLines(el); saveToStorage(); refreshLineDocParts(idx); flashItemSaved(); }
+function addSpecLine(idx){
+  const it=items[idx]; if(!it) return;
+  if(!Array.isArray(it.specLines)) it.specLines=[];
+  if(it.specLines.length>=12){ showToast('Twelve extra rows is the most a line can carry.','error'); return; }
+  it.specLines.push({label:'',value:''});
+  _detailsOpen.add(it);
+  saveToStorage(); renderItems();
+  setTimeout(()=>{ const f=document.querySelector(`[data-ld="${idx}"] .ld-extra:last-of-type input`); if(f&&f.focus) f.focus(); },30);
+}
+function editSpecLine(idx,i,field,el){
+  const it=items[idx];
+  if(!it || !Array.isArray(it.specLines) || !it.specLines[i] || (field!=='label'&&field!=='value')) return;
+  it.specLines[i][field]=String((el&&el.value)||'').trim().slice(0,field==='label'?60:300);
+  saveToStorage(); refreshLineDocParts(idx); flashItemSaved();
+}
+function removeSpecLine(idx,i){
+  const it=items[idx]; if(!it || !Array.isArray(it.specLines) || !it.specLines[i]) return;
+  it.specLines.splice(i,1); saveToStorage(); renderItems(); flashItemSaved();
+}
+// the preparer's own wording is thrown away: the generated rows (a configured line's options, a catalogue line's specs) print again
+function regenerateSpecs(idx){
+  const it=items[idx]; if(!it) return;
+  delete it.specEdit; saveToStorage(); renderItems(); flashItemSaved();
+}
+// repaint ONE line's sheet and chips in place (an editor field the preparer is tabbing through must keep its focus), else the whole table
+function refreshLineDocParts(idx){
+  const it=items[idx];
+  const tbody=document.getElementById('itemsTbody');
+  const row=(tbody && tbody.querySelector) ? tbody.querySelector(`tr.item-row[data-idx="${idx}"]`) : null;
+  if(!it || !row || !docSheetOn()){ renderItems(); return; }
+  const slot=row.querySelector('.sheet-slot'); if(slot) slot.innerHTML=window.QBSpecSheet.html(it,{view:currentView,bac:false,leadOn:!isLegacyDoc()},txtEsc);
+  const chips=row.querySelector('.ld-chips'); if(chips) chips.innerHTML=lineChipsHtml(it,idx);
+  renderDocExtras();
+}
+// every line's chips + the quote strength (a photo was linked or removed)
+function refreshLineChips(){
+  const tbody=document.getElementById('itemsTbody');
+  if(tbody && tbody.querySelector && docSheetOn()){
+    items.forEach((it,i)=>{ const c=tbody.querySelector(`tr.item-row[data-idx="${i}"] .ld-chips`); if(c) c.innerHTML=lineChipsHtml(it,i); });
+  }
+  renderQualityChip();
+}
+// "Quote strength 7/10" beside the Quote Items title (visible on a phone too; the floating pill is desktop only)
+function renderQualityChip(){
+  const el=document.getElementById('qualityChip'); if(!el) return;
+  const q=docQuality();
+  if(!q || !q.count){ el.style.display='none'; el.textContent=''; return; }
+  el.className='ms-chip '+(q.outOf10>=8?'ok':(q.outOf10>=5?'warn':'bad'))+' no-print';
+  el.textContent='Quote strength '+q.outOf10+'/10';
+  el.title='How complete the document is: every line scored on its size, specs, finish, lead time and a linked photo (a bought-in line needs specs and a photo). Open Details ▸ on a line to fill the gaps.';
+  el.style.display='';
+}
+// The number a line shows in the table's first column: renderItems() numbers the lines in SECTION order (an options quote restarts at 1 in every section, so no number there).
+function lineNoOf(idx){
+  if(optionsOn()) return null;
+  let n=0;
+  for(const k of sectionKeys()){
+    for(let i=0;i<items.length;i++){
+      const x=items[i];
+      if(!x || x.id==='MISCFEE' || x.category!==k) continue;
+      n++;
+      if(i===idx) return n;
+    }
+  }
+  return null;
+}
+// "#5 Wash Sink" (or just the name on an options quote / an unnamed line)
+function lineRef(idx){
+  const it=items[idx]||{}, n=lineNoOf(idx), name=String(it.name||'').trim();
+  return (n?'#'+n+' ':'')+(name||'(no name)');
+}
+// the made-to-order lines that state no size: the HARD block of Verify & File (owner ruling 2026-11-05 #5). Everything else the chips show is a warning only.
+function fabricatedLinesWithoutSize(){
+  return docSheetOn() ? window.QBSpecSheet.fabricatedWithoutSize(items) : [];
+}
+function sizeBlockReason(){
+  const bad=fabricatedLinesWithoutSize();
+  if(!bad.length) return '';
+  const names=bad.slice(0,4).map(b=>lineRef(b.idx)).join(', ')+(bad.length>4?' …':'');
+  return `${bad.length} made-to-order line(s) have no size — add the dimensions (e.g. L1200 × W600 × H850 mm) in the Dims line (${names}).`;
+}
+// the one-line summary's inputs, read from the fields already on the quote
+function summaryState(){
+  const n=window.QBSpecSheet.docNotes(items,{leadOn:!isLegacyDoc()});
+  const dpMode=document.getElementById('dpMode')?.value||'50';
+  return {
+    validDays:getValidDays(), milestones:Array.isArray(payMilestones)?payMilestones.length:0,
+    downPct:dpMode==='custom'?'':dpMode, downCustom:dpMode==='custom', balanceMode:document.getElementById('balMode')?.value||'lump',
+    leadMin:n.leadMin, deliveryMethod:document.getElementById('diMethod')?.value||'',
+    warrantyOn:warrantyIsDefault(), warrantyPlan:getWarrantyPlan()
+  };
+}
+// The "Our standard" page: materials & finishes, the standard construction of the configured lines on THIS quote, warranty, how we work, references, registrations. A page of its own after the
+// terms and signatures, closed by the thank-you + company details block (layoutDocTail()); printed only when ticked (and never on Brilliant Steel). A heading is always its human label, never an id.
+function renderStandardPage(){
+  const box=document.getElementById('standardPage'); if(!box) return;
+  const on=docSheetOn() && items.some(i=>i && i.id!=='MISCFEE') && document.getElementById('showStandardPage')?.checked!==false;
+  if(!on){ box.innerHTML=''; box.classList.remove('has-std'); layoutDocTail(); return; }
+  const P=QB_STANDARD_PAGE, co=(currentCo==='BI')?'BI':'BK', plan=getWarrantyPlan(), warrantyOn=warrantyIsDefault();
+  let bullets=[];
+  try{ bullets=window.QBSpecSheet.constructionBullets(items,it=>{ const f=cfgFamily(it.familyId); return f?f.label:''; }); }catch(e){}
+  const block=(key,inner)=>`<section class="std-block"><h4>${txtEsc(P.headings[key])}</h4>${inner}</section>`;
+  let h=`<div class="std-hdr"><div class="std-title">${txtEsc(P.title)}</div><div class="std-meta">${txtEsc(P.brand[co])}</div></div>`;
+  h+=block('materials',`<p>${txtEsc(P.materials)}</p>`);
+  if(bullets.length) h+=block('construction','<ul>'+bullets.map(b=>`<li><strong>${txtEsc(b.title)}</strong> — ${txtEsc(b.text)}</li>`).join('')+'</ul>');
+  if(warrantyOn) h+=block('warranty',`<p>${txtEsc(P.warranty.service6)}</p>`+(plan==='kitchenshield12'?`<p>${txtEsc(P.warranty.kitchenshield12)}</p>`:''));
+  h+=block('process','<ol>'+P.process.map(x=>`<li>${txtEsc(x)}</li>`).join('')+'</ol>');
+  h+=block('references',`<p>${txtEsc(P.references)}</p>`);
+  h+=block('registrations',`<p>${txtEsc(P.registrations)}</p>`);
+  box.innerHTML=h; box.classList.add('has-std');
+  layoutDocTail();   // the thank-you + company details (the contact line) follow the page, closing it
+}
+// everything the document prints ONCE: the dimension legend + ruled lead time under the items table, the one-line summary under the grand total, the Standard page
+function renderDocExtras(){
+  const on=docSheetOn() && items.some(i=>i && i.id!=='MISCFEE');
+  const notes=document.getElementById('itemsNotes');
+  if(notes){
+    const n=on ? window.QBSpecSheet.docNotes(items,{toleranceOn:termsEnabled.tc_tolerance!==false,leadOn:!isLegacyDoc()}) : null;
+    notes.innerHTML = n ? ((n.dims?`<p class="dims-legend">${txtEsc(n.dims)}</p>`:'')+(n.lead?`<p class="lead-legend">${txtEsc(n.lead)}</p>`:'')) : '';
+  }
+  const strip=document.getElementById('summaryStrip');
+  if(strip) strip.textContent = on ? window.QBSpecSheet.summaryStrip(summaryState()) : '';
+  renderStandardPage();
+  renderQualityChip();
+}
+
 function renderItems(){
   unifyMiscIntoItems();
   unifyPaymentIntoTerms();
@@ -5651,6 +6085,7 @@ function renderItems(){
     tbody.innerHTML='<tr><td colspan="7" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
     renderTotals(); renderQuotePhotos(); return;
   }
+  const sheetOn=docSheetOn();   // Barro Kitchens / Barro Industries: the printed line is a spec sheet; Brilliant Steel keeps the old Specs / Dims / Notes lines
 
   // Group by category. MISCFEE lines are NOT table rows any more (owner
   // 2026-09-01) — they present as ladder rows after the Subtotal instead
@@ -5711,10 +6146,11 @@ function renderItems(){
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
           <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${txtEsc(item.name)}</div>
-          <div class="spec-line ${specText?'':'pe-empty'}"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
-          <div class="spec-line ${(item.dims||'')?'':'pe-empty'}"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
-          <div class="notes-cell cell-edit ${(item.notes||'')?'':'pe-empty'}" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
-          ${costGateHtml}${bsPtRowHtml}${cfgLineRowHtml(item,idx)}
+          ${sheetOn?`<div class="print-only sheet-slot">${window.QBSpecSheet.html(item,{view:currentView,bac:false,leadOn:!isLegacyDoc()},txtEsc)}</div>`:''}
+          <div class="spec-line ${specText?'':'pe-empty'}${sheetOn?' no-print':''}"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
+          <div class="spec-line ${(item.dims||'')?'':'pe-empty'}${sheetOn?' no-print':''}"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
+          <div class="notes-cell cell-edit ${(item.notes||'')?'':'pe-empty'}${sheetOn?' no-print':''}" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
+          ${costGateHtml}${bsPtRowHtml}${cfgLineRowHtml(item,idx)}${lineDetailsHtml(item,idx)}
         </td>
         <td style="text-align:center;">
           <div class="qty-stepper compact" style="justify-content:center;">
@@ -6008,6 +6444,7 @@ function renderTotals(){
   // an <input>, so a caret mid-edit survives it.
   syncMilestoneEditorAmounts(t.grand);
   updateDiPrint();
+  renderDocExtras();   // spec-sheet legend + lead time, the summary strip, "Our standard", quote strength (no price is read or written there)
   if(currentView==='internal') computeMarginSummary();
   updateRunningTotalPill(t);
   saveToStorage();
@@ -6023,12 +6460,14 @@ function updateRunningTotalPill(t){
   if(!items.length){ pill.style.display='none'; return; }
   t=t||basisTotals();
   const _q=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
+  const _dq=docQuality();
+  const _str=(_dq&&_dq.count)?` · Strength ${_dq.outOf10}/10`:'';
   if(optionsOn()){
     const opts=computeOptions(), b=basisOption();
-    pill.textContent=`🧺 ${items.length} item(s) · ${opts.length} option(s) · ${b?b.label+': ':''}${formatPeso(b?b.totals.grand:0)}`;
+    pill.textContent=`🧺 ${items.length} item(s) · ${opts.length} option(s) · ${b?b.label+': ':''}${formatPeso(b?b.totals.grand:0)}${_str}`;
     return;
   }
-  pill.textContent=`🧺 ${items.length} item(s) · ${_q} unit(s) · ${formatPeso(t.grand)}`;
+  pill.textContent=`🧺 ${items.length} item(s) · ${_q} unit(s) · ${formatPeso(t.grand)}${_str}`;
   pill.style.display='block';
 }
 
@@ -6473,6 +6912,7 @@ function updateDiPrint(){
   const sec=document.getElementById('diSection');
   const box=document.getElementById('diPrint');
   if(!box) return;
+  renderDocExtras();   // the summary strip names the delivery method
   if(!method&&!notes&&!amount&&!free){ if(sec) sec.classList.add('di-empty'); box.innerHTML=''; saveToStorage(); return; }
   if(sec) sec.classList.remove('di-empty');
   let html='';
@@ -6533,14 +6973,23 @@ function renderPaymentDetails(){
 }
 
 // ── Project timeline / completion ──
+// Owner ruling 2026-11-05 (timeline option a; QB-SELLING-QUOTE-SPEC §7 #4: the minimum is always 25 working days): on a Barro Kitchens / Barro Industries quotation the lead time is the
+// LONGER of 25 working days and the earlier formula — 12 working days (two six-day weeks) + 3 per ₱20,000 of materials, Sundays never counted. So it is 25 working days up to ₱99,999 of
+// materials, 27 from ₱100,000, and 3 more for every further ₱20,000. The "+2% priority order" threshold below measures against THIS timeline.
+// Brilliant Steel keeps the earlier formula (its quotations are left exactly as they were), and so does a quotation "as issued" (isLegacyDoc()): reopening an old quotation must not move its
+// timeline or completion date — nor, through that threshold, its price.
+const LEAD_MIN_WORKING_DAYS=25;
+function leadRuleIsNew(){ return currentCo!=='BS' && !isLegacyDoc(); }
+function leadWorkingDays(materials){
+  const earlier=12+3*Math.floor((Number(materials)||0)/20000);
+  return leadRuleIsNew() ? Math.max(LEAD_MIN_WORKING_DAYS,earlier) : earlier;
+}
 function autoLeadDays(){
-  // Owner ruling 2026-09-01: minimum 2 six-day weeks (12 working days),
-  // +3 working days per ₱20,000 of materials, Sundays never counted.
   // Returns CALENDAR days (the Sunday-skipping walk from the start date),
   // which is what #overallLead stores and the document prints.
   const c=(typeof computeTrueCost==='function')?computeTrueCost():null;
   const materials=c?c.materials:0;
-  const workingDays=12 + 3*Math.floor(materials/20000);
+  const workingDays=leadWorkingDays(materials);
   const startStr=getStartDate();
   const start=new Date(startStr+'T12:00:00');
   let d=new Date(start), left=workingDays;
@@ -6561,10 +7010,22 @@ function autoFillLead(){
   if(el){ el.value=autoLeadDays()||0; }
   renderTimeline(); renderTotals();
 }
+// The note under the Timeline block: it states the rule the timeline really follows (the current one, or the earlier one on Brilliant Steel / an "as issued" quotation).
+function leadNoteText(){
+  const tail='You may shorten the timeline; cutting it by more than a third makes the quote a priority order (+2%). Subject to site readiness and unforeseen supply delays.';
+  return leadRuleIsNew()
+    ? 'Lead time begins upon receipt of the down payment and approved design: 25 working days minimum, or 12 working days plus 3 working days per ₱20,000 of materials for larger orders, whichever is longer. Sundays are not counted as working days. '+tail
+    : 'Lead time begins upon receipt of the down payment and approved design. Minimum two weeks, plus 3 working days per ₱20,000 of materials — Sundays are not counted as working days. '+tail;
+}
 function renderTimeline(){
   const box=document.getElementById('timelineSummary'); if(!box) return;
   const el=document.getElementById('overallLead');
   if(el){ const a=autoLeadDays(); el.placeholder=a?('auto: '+a+' days'):'auto from items'; }
+  const ab=document.getElementById('autoLeadBtn');
+  if(ab){
+    ab.textContent=leadRuleIsNew()?'↻ Auto (25 working days min., no Sundays)':'↻ Auto (2 wks + 3d/₱20k, no Sundays)';
+    ab.title=leadRuleIsNew()?'25 working days minimum, or 12 working days + 3 working days per ₱20,000 of materials if that is longer — Sundays not counted.':'Minimum 2 weeks (12 working days) + 3 working days per ₱20,000 of materials — Sundays not counted.';
+  }
   const lead=getLeadDays();
   if(!lead){ box.innerHTML='<div class="pay-note">Enter or auto-estimate the overall lead time to compute the completion date.</div>'; return; }
   const start=getStartDate();
@@ -6579,7 +7040,7 @@ function renderTimeline(){
     const _rushFocOn=!!document.getElementById('rushFoc')?.checked;
     html+='<div style="margin:6px 0;padding:7px 10px;background:#fdecea;border:1px solid #f3b8b1;border-radius:6px;font-size:12px;font-weight:700;color:#b03024;">⚡ SPECIAL RUSH — PRIORITY ORDER: the timeline is cut by more than a third of the standard ('+_auto+' days). '+(_rushFocOn?'The +2% Priority Order Charge is FOC — shown on the quote and given back as a discount.':'A +2% Priority Order Charge applies to the grand total.')+'</div>';
   }
-  html+='<div class="pay-note">Lead time begins upon receipt of the down payment and approved design. Minimum two weeks, plus 3 working days per ₱20,000 of materials — Sundays are not counted as working days. You may shorten the timeline; cutting it by more than a third makes the quote a priority order (+2%). Subject to site readiness and unforeseen supply delays.</div>';
+  html+='<div class="pay-note">'+leadNoteText()+'</div>';
   box.innerHTML=html;
 }
 
@@ -7288,7 +7749,7 @@ function renderTrueCostPanelHtml(cost){
       return _sd.tier>0
         ? `<div class="calc-row sub" style="border-bottom:none;color:var(--orange);"><span title="Month behind pace — markup flexes as a visible discount; list prices never move. ${_lad}.">📉 Month pace: offer up to ${_sd.tier}% discount${_cur>0?` (this quote: ${_cur}%)`:''}</span><span></span></div>`
         : `<div class="calc-row sub" style="border-bottom:none;color:var(--green);"><span title="Month on pace — hold the full ×2.50 price. ${_lad}.">📈 Month on pace — no discount suggested${_cur>0?` (this quote carries ${_cur}%)`:''}</span><span></span></div>`; })()}
-    <div class="calc-row sub" style="border-bottom:none;"><span title="Minimum 2 six-day weeks + 3 working days per ₱20,000 of materials; Sundays never counted.">Timeline: ${12+3*Math.floor(cost.materials/20000)} working days (no Sundays) ≈ ${((12+3*Math.floor(cost.materials/20000))/6).toFixed(1)} weeks</span><span></span></div>
+    <div class="calc-row sub" style="border-bottom:none;"><span title="${leadRuleIsNew()?'25 working days minimum, or 12 working days + 3 working days per ₱20,000 of materials if that is longer; Sundays never counted.':'Minimum 2 six-day weeks + 3 working days per ₱20,000 of materials; Sundays never counted.'}">Timeline: ${leadWorkingDays(cost.materials)} working days (no Sundays) ≈ ${(leadWorkingDays(cost.materials)/6).toFixed(1)} weeks</span><span></span></div>
     ${marginLine}
     ${belowFloorNote}
   </div>`;
@@ -7601,7 +8062,9 @@ function computeTimeline(){
 const TERMS_DEF=[
   {id:'tc_completion',title:'Completion',content:'Work will be completed within the agreed timeline from date of down payment receipt. Delays due to client-side changes or site issues are not included.'},
   {id:'tc_payment',title:'Payment Terms',content:'Down payment due upon confirmation; balance settled per the Payment Schedule above. All payments are non-refundable once fabrication has commenced.'},
-  {id:'tc_warranty',title:'Warranty',content:'12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.'},
+  // Owner rulings 2026-11-05 #1: the 6-month SERVICE warranty on our equipment and work, plus — on the "full kitchen" warranty plan only — the 12 months of preventive
+  // maintenance service (PMS) with KitchenShield™. A function of the quote like tc_validity (warrantyTermText); Brilliant Steel keeps its old wording.
+  {id:'tc_warranty',title:'Warranty',content:()=>warrantyTermText()},
   {id:'tc_scope',title:'Scope of Work',content:'Price covers fabrication, delivery, and installation as specified. Electrical works, gas connections, and civil works are excluded unless stated.'},
   // Owner ruling 2026-09-01 — standard fabrication tolerance clause.
   {id:'tc_tolerance',title:'Measurement Tolerance',content:'All fabricated dimensions are subject to a measurement tolerance of ±5mm, standard for stainless steel fabrication. Variations within this tolerance are not grounds for rework or rejection.'},
@@ -7611,7 +8074,8 @@ const TERMS_DEF=[
   // this to get the default whenever the rep hasn't manually overridden the
   // term's content (termsContent[t.id] still wins once they do).
   {id:'tc_validity',title:'Quotation Validity',content:d=>`This quotation is valid for ${d} days from date of issuance. Prices are subject to change after validity.`},
-  {id:'tc_site',title:'Site Requirements',content:'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.'},
+  // names the company that is quoting (siteTermText) — it used to say "Barro Kitchens" on a Barro Industries quote too
+  {id:'tc_site',title:'Site Requirements',content:()=>siteTermText()},
   {id:'tc_acceptance',title:'Acceptance',content:'By signing this quotation, the client accepts all terms and conditions stated herein.'},
 ];
 
@@ -7637,8 +8101,38 @@ function renderTerms(){
   grid.innerHTML=html;
 }
 
-function toggleTerm(id,cb){termsEnabled[id]=cb.checked;renderTerms();saveToStorage();}
-function saveTerm(id,el){termsContent[id]=el.innerHTML;saveToStorage();}
+function toggleTerm(id,cb){termsEnabled[id]=cb.checked;renderTerms();renderDocExtras();saveToStorage();}
+// The default wording of a term, as renderTerms() would print it right now ('' for an unknown id)
+function termDefaultText(id){
+  const t=TERMS_DEF.find(x=>x.id===id);
+  if(!t) return '';
+  try{ return typeof t.content==='function' ? String(t.content(getValidDays())) : String(t.content); }catch(e){ return ''; }
+}
+// A term is stored only when the preparer CHANGED it: a block they merely clicked into (and out of) keeps following its default, so a later change of the warranty plan,
+// the validity days or the company still reaches it. A stored wording — every quote filed before this rule — still wins, exactly as before.
+function saveTerm(id,el){
+  const norm=h=>{ const d=document.createElement('div'); d.innerHTML=String(h); return d.innerHTML; };
+  const def=termDefaultText(id);
+  if(def && norm(el.innerHTML)===norm(def)) delete termsContent[id];
+  else termsContent[id]=el.innerHTML;
+  renderDocExtras();   // a rewritten Warranty term is no longer stated as "6-month service warranty" by the summary strip / Our standard page
+  saveToStorage();
+}
+// ── the document options of the Terms tab (owner rulings 2026-11-05 #1) ──
+// The plan select changed. Leaving "as issued" brings the quote onto the CURRENT rules (the plan's warranty wording, a lead time of 25 working days minimum): the terms, every line sheet, the
+// timeline and the totals (the "+2% priority order" threshold moves with the timeline rule) are repainted, and the preparer is told when a lead time stored on the quote is now a priority order.
+function onWarrantyPlanChange(){
+  const legacy=isLegacyDoc(), left=_docWasLegacy && !legacy;
+  _docWasLegacy=legacy;
+  syncLegacyDocUi();
+  renderTerms(); renderItems(); renderDocExtras(); renderTimeline(); renderTotals(); saveToStorage();
+  if(left){
+    let msg='This quotation now follows the current terms: the plan’s warranty wording and a lead time of 25 working days minimum.';
+    try{ if(computeTotals().rushActive) msg+=' The lead time stored on it is now a priority order (+2%) — press ↻ Auto to reset it.'; }catch(e){}
+    showToast(msg);
+  }
+}
+function onShowStandardPageChange(){ renderDocExtras(); saveToStorage(); }
 
 // Share-link CREATION removed 2026-09-01 (owner: "it must always be printed
 // to share") — the #quote= hash LOADER further below is kept so links that
@@ -7718,6 +8212,7 @@ function deletePhoto(idx){
   quotePhotos.splice(idx,1);
   renderQuotePhotos();
   saveToStorage();
+  refreshLineChips();
 }
 function updatePhotoCaption(idx,val){
   if(!quotePhotos[idx]) return;
@@ -7730,6 +8225,7 @@ function updatePhotoLink(idx,val){
   quotePhotos[idx].itemIndex = val===''?null:parseInt(val,10);
   saveToStorage();
   renderPhotoAnnex();
+  refreshLineChips();   // the "no photo" chip and the quote strength follow the link
 }
 // Renders BOTH the on-screen editor grid (#photoGrid) and the printed annex
 // (#photoAnnex) — called from renderItems() whenever items change (so the
@@ -7797,6 +8293,18 @@ function movePhotoDown(i){
   [quotePhotos[i],quotePhotos[i+1]]=[quotePhotos[i+1],quotePhotos[i]];
   saveToStorage(); renderQuotePhotos();
 }
+// the annex header's right-hand text: company, the CURRENT quote number, the client
+function annexMetaHtml(){
+  const co=CO[currentCo]||CO.BK;
+  const quoteNo=document.getElementById('quoteNo')?.value||'';
+  const clientName=document.getElementById('clientName')?.value||'';
+  return `${txtEsc(co.name)}<br>Quote ${txtEsc(quoteNo)}${clientName?' • '+txtEsc(clientName):''}`;
+}
+// updatePrintHeader() runs on every keystroke of the header fields: refresh ONLY the annex's header text there (never re-render its photos)
+function refreshAnnexMeta(){
+  const m=document.querySelector('#photoAnnex .photo-annex-meta');
+  if(m) m.innerHTML=annexMetaHtml();
+}
 function renderPhotoAnnex(){
   const annex=document.getElementById('photoAnnex');
   if(!annex) return;
@@ -7806,9 +8314,6 @@ function renderPhotoAnnex(){
     return;
   }
   annex.classList.add('has-photos');
-  const co=CO[currentCo]||CO.BK;
-  const quoteNo=document.getElementById('quoteNo')?.value||'';
-  const clientName=document.getElementById('clientName')?.value||'';
   const cards=quotePhotos.map((p,i)=>{
     const src=p.url||p.dataUrl||'';
     const linkedItem=(p.itemIndex!=null && items[p.itemIndex])?items[p.itemIndex]:null;
@@ -7821,7 +8326,7 @@ function renderPhotoAnnex(){
   }).join('');
   annex.innerHTML=`<div class="photo-annex-hdr">
       <div class="photo-annex-title">PHOTO REFERENCE — Annex</div>
-      <div class="photo-annex-meta">${txtEsc(co.name)}<br>Quote ${txtEsc(quoteNo)}${clientName?' • '+txtEsc(clientName):''}</div>
+      <div class="photo-annex-meta">${annexMetaHtml()}</div>
     </div>
     <div class="photo-annex-grid">${cards}</div>`;
 }
@@ -7889,7 +8394,11 @@ window.addEventListener('pagehide', flushSaveToStorageNow);
 
 // Pricing / payment / delivery fields — single source for save, load, payload
 const PRICING_IDS=['showVat','rushFoc','discountMode','discountPct','discountAmtCustom','commissionMode','commissionPct','commissionAmtCustom','diMethod','diFree','diNotes','diAmount','diInclude',
-  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails','quoteValidDays','optionsMode'];
+  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails','quoteValidDays','optionsMode',
+  // QB-SELLING-QUOTE-SPEC (owner rulings 2026-11-05): the warranty plan ('service6' default | 'kitchenshield12' | '' = "as issued", see isLegacyDoc()) and whether the "Our standard" page prints.
+  // A quote FILED before they existed has neither key: applyDocOptions() reads a reopened / revised one as "as issued" (its old wording and timeline rule, NO Standard page); a new
+  // quote, a draft, a link or a template with neither key is a quote of the current rules.
+  'warrantyPlan','showStandardPage'];
 // Quote validity period (audit: "hardcoded to 30 days in two places, not
 // configurable") — a display-only helper, riding PRICING_IDS so it round-trips
 // through save/load/payload exactly like every other field in that list.
@@ -7916,6 +8425,32 @@ function getPricingFields(){
   o.optionsBasis = optionsBasisKey || '';
   return o;
 }
+// The two document options of this phase for a loaded state. WHICH rules does the loaded quote follow? 'service6' / 'kitchenshield12' = the current ones. '' = "as issued" (isLegacyDoc()):
+//  - a state with NO plan that is a REOPEN or REVISION of a filing (the app stamps sourceDocId on exactly those) was filed before the plan existed: it keeps the old warranty / site wording
+//    and the old timeline rule, and gains no Standard page — reopening an old quotation must not change what it says or what it costs;
+//  - a state that already carries '' stays "as issued" through every re-save (draft, payload, revision) — except a TEMPLATE, which starts a NEW quote;
+//  - everything else (a new quote, a draft saved before the plan existed, a #quote= link, a template) is the current rules, with the Standard page ticked unless the state says otherwise.
+let _loadIsReopen=false, _loadIsTemplate=false;   // set by loadEditableState() around applyPricingFields()
+let _docWasLegacy=false, _docLegacyOffered=false;  // the quote is / was loaded "as issued": the select keeps offering that choice so staff can go back to it
+function applyDocOptions(o){
+  const given=o ? o.warrantyPlan : undefined;
+  let plan='service6';
+  if(given==='service6'||given==='kitchenshield12') plan=given;
+  else if(!_loadIsTemplate && (given==='' || (given===undefined && _loadIsReopen))) plan='';
+  const legacy=plan==='';
+  const wp=document.getElementById('warrantyPlan'); if(wp) wp.value=plan;
+  const sp=document.getElementById('showStandardPage'); if(sp) sp.checked = (o && o.showStandardPage!==undefined) ? !!o.showStandardPage : !legacy;
+  _docWasLegacy=legacy; _docLegacyOffered=legacy;
+  syncLegacyDocUi();
+}
+// the "As issued" choice of the plan select (shown only while the quote came in that way) and the note under it
+function syncLegacyDocUi(){
+  const legacy=isLegacyDoc();
+  const wp=document.getElementById('warrantyPlan');
+  const opt=(wp && typeof wp.querySelector==='function') ? wp.querySelector('option[value=""]') : null;
+  if(opt) opt.hidden=!(legacy||_docLegacyOffered);
+  const note=document.getElementById('legacyDocNote'); if(note) note.style.display=legacy?'':'none';
+}
 function applyPricingFields(o){
   // _msStash holds the rows a user set aside by UNTICKING the milestone toggle,
   // so an accidental toggle-off does not destroy their work. It must NOT survive
@@ -7931,12 +8466,13 @@ function applyPricingFields(o){
   // Cleared BEFORE the early return, not after: `!o` still means "a whole state
   // is being loaded", so bailing out early must not leave the previous quote's
   // milestones in place either.
-  if(!o){ payMilestones = null; renderMilestoneEditor(); return; }
+  if(!o){ payMilestones = null; applyDocOptions(null); renderMilestoneEditor(); return; }
   PRICING_IDS.forEach(id=>{
     const el=document.getElementById(id);
     if(!el||o[id]===undefined) return;
     if(el.type==='checkbox') el.checked=!!o[id]; else el.value=o[id];
   });
+  applyDocOptions(o);
   // ALWAYS assigned, never conditional on the key being present: every caller
   // (hash load, draft resume, reopen, template, clearForm) is loading a WHOLE
   // state, so a quote filed before this feature existed (no `milestones` key)
@@ -8147,7 +8683,7 @@ function clearForm(){
     commissionMode:'pct',commissionPct:'0',commissionAmtCustom:'',diMethod:'',diFree:false,diNotes:'',
     diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
     interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true,quoteValidDays:'30',
-    optionsMode:false,optionsBasis:'',
+    optionsMode:false,optionsBasis:'',warrantyPlan:'service6',showStandardPage:true,
     milestones:null});   // back to LEGACY dpMode/balMode mode on a brand-new quote
   // Owner ruling 2026-09-01: a weak month reflects as a DISCOUNT on new
   // quotes — default the ladder select to the live pace suggestion (sales
@@ -8324,6 +8860,7 @@ function canFile(){
   if(milestoneBlockReason()) return false;
   if(uncostedCustomLinesReason()) return false;
   if(needsPriceReason()) return false;       // CONFIGURATOR R5 — every flagged line has a price
+  if(sizeBlockReason()) return false;        // SELLING QUOTE (owner ruling 2026-11-05 #5) — a made-to-order line states its size
   if(estimateReasonBlock()) return false;    // CONFIGURATOR §7, ESTIMATE_RANGE_MODE 'reason' only
   return VERIFY_CHECKS.every(c=>!!c.get()||waiveFlags[c.id]);
 }
@@ -8440,6 +8977,19 @@ function buildVerifyModal(){
       </div>
     </div>`;
   }
+  // SELLING QUOTE (owner ruling 2026-11-05 #5): a made-to-order line with no size is a HARD block (red, like the price block above); canFile() already returns false.
+  const sizeReason=sizeBlockReason();
+  if(sizeReason){
+    html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+      <div class="verify-icon">⚠️</div>
+      <div class="verify-info">
+        <div class="verify-label" style="font-size:13px;font-weight:700">Made-to-order Lines Without a Size</div>
+        <div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600">${txtEsc(sizeReason)}</div>
+      </div>
+    </div>`;
+  }
+  // …and the rest of the document check is a WARNING: the weak lines are listed, filing is never refused for them.
+  html += docCompletenessVerifyHtml();
   // Grand total summary (audit: "Verify & File modal never shows the grand
   // total before submission") — display-only, pulled straight from the same
   // computeTotals() every other total on screen already uses.
@@ -8523,6 +9073,23 @@ function toggleWaive(id,cb){
   waiveFlags[id]=cb.checked;
   buildVerifyModal();
 }
+// "Document completeness" in the Verify & File modal: the quote strength and the lines whose sheet lacks specs or a finish (a missing size is the red block above). Warn only.
+function docCompletenessVerifyHtml(){
+  const q=docQuality();
+  if(!q || !q.count) return '';
+  const weak=q.weak.map(w=>({idx:w.idx,missing:w.missing.filter(m=>m==='specs'||m==='finish')})).filter(w=>w.missing.length);
+  const nSpecs=weak.filter(w=>w.missing.indexOf('specs')>=0).length, nFinish=weak.filter(w=>w.missing.indexOf('finish')>=0).length;
+  const bits=[]; if(nSpecs) bits.push(`${nSpecs} line${nSpecs===1?' has':'s have'} no specs`); if(nFinish) bits.push(`${nFinish} ${nFinish===1?'has':'have'} no finish`);
+  const list=weak.slice(0,8).map(w=>`<div>${txtEsc(lineRef(w.idx))} — ${w.missing.map(m=>'no '+m).join(', ')}</div>`).join('')+(weak.length>8?`<div>…and ${weak.length-8} more</div>`:'');
+  return `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+    <div class="verify-icon">${weak.length?'📄':'✅'}</div>
+    <div class="verify-info">
+      <div class="verify-label" style="font-size:13px;font-weight:700">Document completeness — Quote strength ${q.outOf10}/10</div>
+      ${weak.length?`<div class="verify-val" style="margin-top:4px">${bits.join(', ')} — you can still file. Open Details ▸ on a line in the Estimator to complete its sheet.</div><div class="verify-val" style="margin-top:4px">${list}</div>`
+        :`<div class="verify-val" style="margin-top:4px">Every line has its specs and a finish.</div>`}
+    </div>
+  </div>`;
+}
 
 function setFileMode(m){ fileMode=m; } // Wave 3 Q4 — 'revision' | 'update'
 
@@ -8575,6 +9142,9 @@ async function fileQuotation(){
   // CONFIGURATOR R5 — the same second gate for a programmatic call: a line flagged "needs a price" never reaches Firestore unpriced.
   const priceBlock=needsPriceReason();
   if(priceBlock){ showToast(priceBlock,'error'); return; }
+  // SELLING QUOTE — the same second gate for the hard size block
+  const sizeBlock=sizeBlockReason();
+  if(sizeBlock){ showToast(sizeBlock,'error'); return; }
   if(!canFile()) return;
   _isFiling=true;
   flushSaveToStorageNow(); // ensure the local draft is consistent before this quote is filed
@@ -8853,6 +9423,14 @@ function stripTemplateState(rawEditableState){
   TEMPLATE_LINEAGE_DROP_FIELDS.forEach(f=>{ delete state[f]; });
   // …and no line of a template points back at the request it came from
   if(Array.isArray(state.items)) state.items=state.items.map(it=>{ if(!it||typeof it!=='object'||!('sourceRef' in it)) return it; const {sourceRef:_s,...rest}=it; return rest; });
+  // …and a template starts a NEW quote: one made from a quotation that was "as issued" (warrantyPlan '') takes the current plan and the Standard page, never the old rules
+  if(state.pricing && typeof state.pricing==='object'){
+    const pr={...state.pricing};
+    if(pr.warrantyPlan==='') pr.showStandardPage=true;      // an "as issued" quotation carried no page by default: the new quote does
+    if(pr.warrantyPlan!=='service6' && pr.warrantyPlan!=='kitchenshield12') pr.warrantyPlan='service6';
+    if(pr.showStandardPage===undefined) pr.showStandardPage=true;
+    state.pricing=pr;
+  }
   return state;
 }
 
@@ -8928,7 +9506,9 @@ function loadEditableState(state, opts){
       const el=document.getElementById(id), v=state[id];
       if(el && typeof v==='string' && v && Array.from(el.options||[]).some(o=>o.value===v)) el.value=v;
     });
-    applyPricingFields(state.pricing);
+    // Which rules does this quote follow? A reopen / revision of a filing carries sourceDocId (the app stamps it); a template load says so (see applyDocOptions()).
+    _loadIsReopen=!!state.sourceDocId; _loadIsTemplate=!!opts.template;
+    try{ applyPricingFields(state.pricing); } finally { _loadIsReopen=false; _loadIsTemplate=false; }
     if(!state.quoteNo) buildQuoteNo();
     // NEW REVISION: same client/items, but bump the -Rn suffix, reset to a fresh
     // draft, and set today's date so the user just reviews & re-files.
@@ -8984,7 +9564,7 @@ window.addEventListener('message',ev=>{
   // block entirely, so there's no -Rn bump, no quoteStatus/filedAt reset, and
   // (since state.quoteNo is '') the existing #quoteNo field/mode is left alone.
   if(d.type==='LOAD_TEMPLATE' && d.payload && d.payload.state){
-    loadEditableState(d.payload.state, { asRevision:false });
+    loadEditableState(d.payload.state, { asRevision:false, template:true });
     hideDraftResumeBanner();
     showToast('📋 Template loaded — fill in the client details, then Verify & File.');
   }
@@ -9085,7 +9665,10 @@ function updatePrintRunFooter(){
   const f=document.getElementById('printRunFooter'); if(!f) return;
   const no=document.getElementById('quoteNo')?.value?.trim()||'';
   const cn=document.getElementById('clientName')?.value?.trim()||'';
-  f.textContent=[no,cn].filter(Boolean).join(' — ');
+  const text=[no,cn].filter(Boolean).join(' — ');
+  f.textContent=text;
+  // the same text for the page-margin box (a CSS string: control characters out, backslash and quote escaped)
+  try{ document.documentElement.style.setProperty('--run-id','"'+text.replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"'); }catch(e){}
 }
 
 function doPrint(){
@@ -9244,12 +9827,25 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 47;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 49;   // integer; bump on every user-visible quote-builder change
 // CONFIGURATOR §7 — what the Verify & File modal does when the quote's total sits outside the estimate range the client saw online.
 // 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
 // them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
 const ESTIMATE_RANGE_MODE = 'warn';
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:49, date:'2026-11-05', items:[
+    'Lead time is now at least 25 working days (Sundays not counted) on Barro Kitchens and Barro Industries quotations — or 12 working days plus 3 for every ₱20,000 of materials, if that is longer. The Project Timeline, the estimated completion date and the ⚡ priority-order threshold (cut the timeline by more than a third and +2% applies) all follow it, and the printed timeline note says so. Brilliant Steel is unchanged.',
+    'A quotation filed before the warranty plan existed keeps the warranty and site-requirements wording and the timeline it was issued with when you reopen or revise it — the Terms tab shows “As issued”. Pick a Warranty plan there to bring it onto the current terms.',
+    'Printing: the quote number and client name now sit in the bottom margin of every page (Chrome / Edge) so they never cover the last line, and the thank-you and company details close the “Our standard” page instead of landing alone on a page of their own.',
+  ]},
+  { ver:48, date:'2026-11-05', items:[
+    'Every line on the printed quotation is now a spec sheet — the size first, then the material and options, the construction, the finish, what is included and not included, and the lead time — instead of one long sentence. A dimension legend prints under the items table and a one-line summary (validity, payment, lead time, delivery, warranty) under the grand total.',
+    'Details ▸ under each line (Estimator) sets the finish — hairline is the standard, or brushed, mirror, satin — and lets you add Includes, Not included and extra spec rows. Configured lines start with the standard finish, includes and a lead time of 25 working days minimum, from downpayment and approved drawings; re-configuring a line regenerates its includes and lead time (your finish stays).',
+    'A new “Our standard” page follows the terms: materials and finishes, the standard construction of the products on your quote, warranty, how we work, references and registrations. Tick or untick it in the Terms tab. The thank-you and company details now sit right after the signatures.',
+    'Terms tab: pick the Warranty plan — the 6-month service warranty (standard), or Full kitchen, which adds 12 months of preventive maintenance service (PMS) with KitchenShield™. The Warranty term now states the 6-month service warranty, and the Site Requirements term names the company that is quoting.',
+    'Chips on each line show what is missing (no size, no specs, no finish, no photo) and Quote strength n/10 scores the whole quote. Verify & File lists the lines that lack specs or a finish — and will not file a made-to-order line that has no size.',
+    'Section headings always print their proper names (never an id like PREP_WASHING) and the photo annex shows the current quote number. Brilliant Steel quotes are unchanged.',
+  ]},
   { ver:47, date:'2026-10-29', items:[
     'The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.',
   ]},
@@ -9449,9 +10045,11 @@ const TOUR_STEPS = [
  { target:'#clientInfoSection', needsForm:true, title:'Who is this quote for',
    body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
  { target:'#diSection', needsForm:true, title:'Delivery, timeline & payments',
-   body:'Delivery & installation notes and the project timeline — the ↻ Auto button computes the lead: minimum 2 weeks plus 3 working days per ₱20,000 of materials, Sundays excluded. Payment schedule and bank details now live in the Terms tab.' },
+   body:'Delivery & installation notes and the project timeline — the ↻ Auto button computes the lead: 25 working days minimum, or 12 working days plus 3 per ₱20,000 of materials if that is longer, Sundays excluded (Brilliant Steel and quotations issued before the warranty plan keep the earlier rule: minimum 2 weeks plus 3 per ₱20,000). Payment schedule and bank details now live in the Terms tab.' },
  { target:'#termsSection', needsTerms:true, title:'The Terms tab',
    body:'Terms & conditions get their own tab — together with the payment terms & schedule and the bank / e-wallet payment details, which print just ahead of the terms text. Standard terms are pre-loaded per company, including the ±5mm measurement tolerance; toggle or adjust per quote. The conforme signature blocks close the document.' },
+ { target:'#termsOptionsBox', needsTerms:true, title:'Warranty plan & “Our standard” page',
+   body:'The Warranty plan drives the Warranty term, the summary line under the grand total and the “Our standard” page: the standard 6-month service warranty, or Full kitchen — the 6-month warranty plus 12 months of preventive maintenance service (PMS) with KitchenShield™. The tick prints the “Our standard” page after the signatures: materials and finishes, the standard construction of the products on this quote, warranty, how we work, references and registrations. Brilliant Steel quotes do not get it. A quotation filed before the plan existed shows “As issued” — it keeps its earlier warranty wording and timeline until you pick a plan.' },
  { target:'#docDetailsBar', needsWorkspace:true, title:'Estimator = the numbers',
    body:'The Estimator keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
@@ -9460,12 +10058,14 @@ const TOUR_STEPS = [
    body:'The ⚙ chips open this panel. Pick the options and set the size in mm — it tells you when a size is too short for the options. The price is the website price: the catalogue base at that size plus the option amounts Finance approved; an option nobody has priced yet shows "Priced after review" and asks you for a price instead of guessing. Some choices only appear when they apply (fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table). On a table, sink, dish table, stove or wok range the staff-only Top plate option switches the standard 1.5 mm top to a lighter 1.2 mm one. Every product opens with the staff-only Material option — Stainless Steel 304 Food Grade as standard, or 316 Laboratory Grade, which adds a percentage of the whole line price — and each line is named for what it is on the quote (SS Sink, SS Griddle…). ➕ Add to Quote puts the line on the quote, and ⚙ configure on a configured line reopens it. (The demo opens it on a standard product and adds nothing.)' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. A configured line (or one from a website request) keeps the website price instead — the calculator shows the cost-based price beside it. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
+ { target:'.line-details-toggle', needsWorkspace:true, title:'Details ▸ — the spec sheet of a line',
+   body:'Every line prints as a spec sheet: size first, then material and options, construction, finish, includes and not included, lead time. Details ▸ opens the editor under a line — pick the finish (hairline is the standard), type what is included and not included, add your own rows. The chips beside it — no size, no specs, no finish, no photo — show what is still missing, and Quote strength scores the whole quote. A made-to-order line with no size cannot be filed. (Opens nothing and changes nothing in the demo.)' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
    body:'Right under the quote items — one layout. Pick a type per entry: Delivery, Installation and Other are pass-throughs at cost + 25% OH; Additional labor carries the full × 2.50 like item labor. Delivery and Installation present as one combined line on the quotation. Ticked "On quote?" puts an entry on the document; unticked, its price is quietly distributed into the item prices you choose.' },
  { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Estimator only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
-   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price".' },
+   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price".' },
  { target:'#btnPrint', title:'Save PDF, Agent & Workforce copies',
    body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: item details, qty and unit only — no prices anywhere.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',

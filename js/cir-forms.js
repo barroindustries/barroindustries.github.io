@@ -500,7 +500,8 @@
           { v: 'ss316',    l: 'SS316 laboratory grade' },
           { v: 'not_sure', l: 'Not sure yet' }
         ]},
-        { key: 'finish', label: 'Preferred finish', type: 'select', ui: 'choice', w: 'full', options: [
+        { key: 'finish', label: 'Preferred finish', type: 'select', ui: 'choice', w: 'full', hint: 'Hairline is our standard finish.', options: [
+          { v: 'hairline', l: 'Hairline (our standard)' },
           { v: 'brushed',  l: 'Brushed' },
           { v: 'mirror',   l: 'Mirror' },
           { v: 'satin',    l: 'Satin' },

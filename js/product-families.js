@@ -29,6 +29,9 @@
 // configured line in the Quote Builder from the family's `title` / `titleAny` templates and the options' `t` title words; the card and page names (`label`) are untouched,
 // and a title never mentions the grade (the Material row does).
 //
+// SELLING QUOTE (QB-SELLING-QUOTE-SPEC §3.2, owner rulings 2026-11-05): a family may also carry the builder-only document fields `finishDefault`, `leadTime`, `includes` (a template of
+// {group} tokens filled by fillTemplate() from the options' `i` wording) and `excludes` (plain text). They are public-safe (no price) and never change a figure.
+//
 // CONDITIONAL OPTIONS (CONFIGURATOR-FAMILIES-2-SPEC §4): a group may carry `when: { <earlier choice group>: [values] }` — it applies only while the choices made before it
 // are in those lists (fry baskets only for a fryer, a pre-rinse sink only on the soiled side of a dish table). An option that does not apply is ALWAYS at its default in
 // a validated configuration, so a stored configuration is canonical and the pricing code (which adds nothing for a default) needs no knowledge of it. A family may also
@@ -324,6 +327,38 @@
     });
   }
 
+  // fillTemplate(family, tpl, config) -> string   the phrases of an INCLUDES template for one configuration, joined by " · " (QB-SELLING-QUOTE-SPEC §3.2, owner rulings
+  // 2026-11-05). `tpl` = phrases separated by " · ", each of which may hold {group} tokens. A CHOICE token is replaced by the chosen option's `i` (its "includes" wording; an
+  // absent or invalid value reads as the group's default), a MULTI token by the `i` of each SELECTED option, in the family's option order, joined ", ". An option with no
+  // `i` says nothing, and a phrase in which ANY token came out empty — an option that is None / Without, a group that does not apply to this configuration (see groupApplies),
+  // an unknown group, a slots group — is DROPPED: it is never printed empty. Plain text in, plain text out (no escaping here). Pure; never throws; '' for anything but a string.
+  function fillTemplate(family, tpl, config) {
+    if (typeof tpl !== 'string' || !tpl) return '';
+    var cfg = isPlain(config) ? config : {};
+    var out = [];
+    tpl.split(' · ').forEach(function (phrase) {
+      var empty = false;
+      var text = phrase.replace(/\{([A-Za-z0-9_]+)\}/g, function (m, key) {
+        var g = groupOf(family, key);
+        var words = '';
+        if (g && groupApplies(family, g, cfg)) {
+          if (g.type === 'choice') {
+            var o = has(cfg, key) ? optionOf(g, cfg[key]) : null;
+            if (!o) o = optionOf(g, g.default);
+            words = o && typeof o.i === 'string' ? o.i : '';
+          } else if (g.type === 'multi') {
+            words = pickedOptions(g, cfg).map(function (x) { return typeof x.i === 'string' ? x.i : ''; }).filter(Boolean).join(', ');
+          }
+        }
+        if (!words) empty = true;
+        return words;
+      });
+      text = text.replace(/\s+/g, ' ').trim();
+      if (!empty && text) out.push(text);
+    });
+    return out.join(' · ');
+  }
+
   // describe(family, config) -> [{ label, value }]  one row per option group that APPLIES to this configuration, in the family's order, then the Construction
   // row (the staff view, the receipt and the printed quote). A staff-only group has no row of its own unless it is marked `specRow`: the Construction row already says
   // which top plate it is, while the grade row is first because its group is first. An option that does not apply (fry baskets on a griddle) has no row.
@@ -614,6 +649,7 @@
     describe: describe,
     lineTitle: lineTitle,
     constructionLine: constructionLine,
+    fillTemplate: fillTemplate,
     summaryParts: summaryParts,
     summaryLine: summaryLine,
     canonicalConfig: canonicalConfig,
