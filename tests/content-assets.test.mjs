@@ -1538,7 +1538,7 @@ describe('the PDF text extractor reads what Chrome writes', () => {
 const MAX_BYTES = 8 * 1024 * 1024;
 const DOCS = [
   { key: 'company profile', file: 'downloads/barro-industries-company-profile.pdf', pages: [10, 14], title: 'Company profile | Barro Industries',
-    must: ['Stainless-steel kitchens, built to order by our own team.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'hairline', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens', HUB_CONSTRUCTION] },
+    must: ['Stainless-steel kitchens, built to order by our own team.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'hairline', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens'] },
   { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [10, 14], title: 'Product catalogue | Barro Industries',
     must: ['Stainless-steel kitchen equipment, built to your sizes.', '32 products in 8 groups', 'Featured', 'Standard size', 'Options', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Sizes are in millimetres', 'We serve Luzon', 'food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', '23 years', 'Built by our own team', 'SS304 food grade'] },
   { key: 'portfolio', file: 'downloads/barro-industries-portfolio.pdf', pages: [8, 12], title: 'Portfolio | Barro Industries',
@@ -1646,14 +1646,11 @@ for (const d of DOCS) {
     });
 
     if (d.key === 'company profile') {
-      it('says the standard construction on its "Two grades, four finishes" page, as the website\'s FAQ does (owner ruling 2026-10-28; the /products/ hub that said it verbatim is retired), scoped to made-to-order pieces', () => {
-        const faq = visibleText(read('faq/index.html'));   // the /products/ hub that said it word for word is retired (owner 2026-11-19): the FAQ says the same facts
-        for (const fact of ['1.5 mm (16 gauge) top plate', '1.2 mm bodies and shelving', 'square-tube posts with adjustable bullet feet']) assert.ok(faq.includes(fact), `the website FAQ no longer says what this PDF repeats: ${fact}`);
+      it('says no panel gauge, plate thickness or part list (owner 2026-11-20): the "Two grades, four finishes" page keeps the grades, the finishes and the SS316 note only', () => {
         const page = pages.find((p) => compact(p).includes('twogradesfourfinishes'));
         assert.ok(page, 'no "Two grades, four finishes" page');
-        assert.ok(compact(page).includes(compact(HUB_CONSTRUCTION)), 'the materials page lacks the construction sentence');
-        assert.ok(/^Made-to-order/.test(HUB_CONSTRUCTION));
-        assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(flat), 'the lighter top plate is chosen by staff in the Quote Builder only; a PDF says only the standard');
+        assert.ok(!/gauge|top plate|\d(?:\.\d)? mm|square-tube|bullet feet/i.test(flat), 'a gauge, a plate thickness or a part');
+        assert.ok(!compact(flat).includes(compact(HUB_CONSTRUCTION)));
       });
     }
   });
@@ -1740,10 +1737,7 @@ describe('catalogue PDF: the website\'s products in the website\'s groups and or
   });
 
   it('has no deck oven product (the Pugon pandesal oven is the only bakery oven), no gas deck oven, no panel gauge or part list', () => {
-    assert.ok(!/gas deck oven/i.test(flat), 'the retired gas deck oven');
-    assert.ok(!/deck_oven|\bdeck oven\b[^.]*\b(?:3|three|six|6) trays per deck/i.test(flat));
-    // the only "deck oven" words are the website card\'s own sentence for the Pugon pandesal oven ("Steel deck oven built for pandesal")
-    for (const m of flat.matchAll(/deck oven/gi)) assert.ok(/Steel deck oven built for pandesal/.test(flat.slice(Math.max(0, m.index - 8), m.index + 40)), 'a deck oven outside the Pugon card');
+    assert.ok(!/deck\s*oven|deck_oven/i.test(flat) && !/deck\s*oven/i.test(read('downloads/src/catalogue.html')), 'the words "deck oven" appear in the catalogue PDF or its source (owner 2026-11-20)');
     assert.ok(!/\d+ gauge|1\.5 mm|1\.2 mm|top plate/i.test(flat), 'a panel gauge or construction line');
   });
 

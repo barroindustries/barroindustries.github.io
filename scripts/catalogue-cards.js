@@ -120,7 +120,7 @@ const PROJECT_CARDS = Object.freeze([
   // the three featured hero products come FIRST in the Chef Mode group
   {
     id: 'pugon', group: 'cooking', first: true, code: 'BK-PG-1', name: 'Pugon pandesal oven', tag: 'Featured',
-    desc: 'Steel deck oven built for pandesal and everyday bread.',
+    desc: 'Steel oven built for pandesal and everyday bread.',
     size: '4 trays of 40 × 60 cm per deck',
     specs: ['SS304 interior, insulated body', 'H-type burner with needle valve and gauge', 'Counterweighted door that stays where you put it'],
     options: '1 deck (4 trays) or 2 decks (8 trays)',
