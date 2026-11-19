@@ -7,6 +7,17 @@
 
 _Last updated: **2026-11-19**_
 
+> **2026-11-19 — Sales flow spec written (owner Q71); owner then said "build it now".** File: `specs/SALES-FLOW-SPEC-2026-11-19.md` (git-ignored; the copy is in worktree `lucid-volhard-f4a0f1`), also Google Doc "Barro Ops – Sales Flow Spec (Nov 19, 2026)" in the owner-answers Drive folder. Covers:
+> - lead → quote → payment → SO/JO → operations, as state machines with the form each stage produces;
+> - P1 re-approval (cost isn't stored on quotes, so for now any cut below the approved price goes back to Neil);
+> - F3 "Revise contract amount": one Accounts Receivable row for the difference, ref `SO-<orderId>-R<n>`, payments untouched, SO/JO Rev. n;
+> - P5 balance via a new `payment_claims` collection;
+> - one lazy-loaded form engine (`window.Forms`, §9.3) that every Forms Standard form registers on: A4, logo header, Download PDF, structural peso wall on Ops forms, no "Official Receipt"/"Sales Invoice" titles;
+> - rules and indexes, and a 9-phase plan. Phase 1 (engine + SO/JO/handoff/PA forms) is for Friday 2026-11-20.
+>
+> **Boundary:** the quick-fixes spec (`SALES-QUICK-FIXES-SPEC-2026-11-19.md`) owns F1, F2, F4–F11 and P2/P3/P4/P6. This spec owns P1, F3, P5 and all forms.
+> **Open:** owner questions SF1–SF22 (§15), each with a default the build starts on.
+
 > **2026-11-19 — Public catalogue rebuilt: text cards, "From ₱ + VAT", grouped by the configurators (COMMITTED on branch `catalogue-from-prices`, v14.0.367; NOT pushed — owner previewed desktop + phone).** Owner rulings (replace the old ones for /catalogue/ only): no illustrations/photos, features only (3–5 bullets, no spec tables), one "From ₱X + VAT" line per card from the Nov 19, 2026 Standard Price List (`scripts/public-from-prices.json`) or "Priced per project"; every other page stays price-free (CHECK 9 allows money only in the exact `cat-from` element). Groups: preparation tables · multi-purpose stations · sinks · range hoods · exhaust + fresh air · Chef Mode cooking · storage/racks/trolleys · refrigeration + other. Gates: 3059 tests (0 fail, 6 skipped), CHECK 1–11, ui-wiring clean.
 > - **Open (owner):** the PDF catalogue (`scripts/downloads/catalogue.js`) no longer parses the new cards — 6 PDF-parity tests are skipped until the owner decides what the PDF shows; real features for the multi-purpose station card (placeholder now); is the gas deck oven the ₱53,000 pugon?; add noodle boiler / combi / bain marie / grilling / bakery cards (need feature text).
 > - **To ship:** `git push origin catalogue-from-prices:master` (fast-forward of origin/master d0ea653). The main checkout's local `master` is 10 commits behind origin and was not moved.
