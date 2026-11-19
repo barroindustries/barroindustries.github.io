@@ -1513,7 +1513,9 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
   const CASES = [
     ['a signed-out browser visitor sees the site', {}, 'site', false, false],
     ['a site anchor (#services) is still the site', { hash: '#services' }, 'site', false, false],
-    ['a signed-in hint boots into the splash, never the site', { hint: true }, 'boot', false, false],
+    // Owner 2026-11-19: signed in, the bare domain is still the public homepage; only an app address boots the app.
+    ['a signed-in hint at / shows the site (the homepage is reachable while signed in)', { hint: true }, 'site', false, false],
+    ['a signed-in hint on a website anchor (#services) shows the site', { hash: '#services', hint: true }, 'site', false, false],
     // Owner 2026-10-21: autocompleted #/dashboard on a signed-out laptop must show the website, not login.
     ['an app deep link with no session hint shows the site (hash kept for after Login)', { hash: '#/tasks' }, 'site', false, false],
     ['an autocompleted #/dashboard with no hint shows the site', { hash: '#/dashboard' }, 'site', false, false],
@@ -1541,6 +1543,15 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
     const hash = href.slice(href.indexOf('#'));
     assert.deepEqual(decide({ hash }), { view: 'login', standalone: false, wantLogin: true });
     assert.deepEqual(decide({ hash, hint: true }), { view: 'boot', standalone: false, wantLogin: true });
+  });
+
+  it('a signed-in user who follows "Team portal" (/#login) lands on the dashboard, not "Page not found" (owner 2026-11-19)', () => {
+    const src = read('js/app.js').match(/function parseHash\(h\) \{[\s\S]*?\n\}/)[0];
+    const ph = vm.runInNewContext(`(${src})`, { location: { hash: '' } });
+    const parseHash = (h) => JSON.parse(JSON.stringify(ph(h)));
+    assert.deepEqual(parseHash('#login'), { page: 'dashboard', subtab: null });
+    assert.deepEqual(parseHash(''), { page: 'dashboard', subtab: null });
+    assert.deepEqual(parseHash('#/tasks/mine'), { page: 'tasks', subtab: 'mine' });
   });
 
   it('the homepage footer "Team portal" link goes to /#login too, so a click with no script still reaches the login view', () => {

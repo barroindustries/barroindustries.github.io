@@ -2730,7 +2730,8 @@ function hashFor(page, subtab) {
 window.hashFor = hashFor;
 function parseHash(h) {
   h = (h == null ? location.hash : h).replace(/^#\/?/, '');
-  if (!h) return { page: 'dashboard', subtab: null };
+  // '#login' is the website's "Team portal" address: a user who is already signed in lands on the dashboard, not "Page not found".
+  if (!h || h === 'login') return { page: 'dashboard', subtab: null };
   // A stray '%' in a shared link must not throw URIError mid-boot (it aborted
   // the rest of the sign-in bootstrap: auto-logout, heartbeat, claims listener).
   const s = h.split('/').map(x => { try { return decodeURIComponent(x); } catch (_) { return x; } });

@@ -191,7 +191,7 @@ describe('2 · the head script that writes the kit: every view except "site", an
     }
   });
 
-  it('follows the first-paint decision table exactly (tests/catalogue-public.test.mjs pins the table; this pins what each row loads): only a signed-out browser visitor with no login hash skips the kit', () => {
+  it('follows the first-paint decision table exactly (tests/catalogue-public.test.mjs pins the table; this pins what each row loads): a browser with no app address (no #login / #/route), signed in or not, skips the kit', () => {
     function both(env) {
       const attrs = {}, writes = [];
       const de = { setAttribute: (k, v) => { attrs[k] = String(v); }, getAttribute: (k) => (k in attrs ? attrs[k] : null), hasAttribute: (k) => k in attrs };
@@ -209,7 +209,7 @@ describe('2 · the head script that writes the kit: every view except "site", an
     }
     const CASES = [
       [{}, 'site', 0], [{ hash: '#services' }, 'site', 0], [{ hash: '#/tasks' }, 'site', 0], [{ hash: '#/dashboard' }, 'site', 0],
-      [{ hint: true }, 'boot', 1], [{ hash: '#/tasks', hint: true }, 'boot', 1], [{ hash: '#login' }, 'login', 1], [{ hash: '#login', hint: true }, 'boot', 1],
+      [{ hint: true }, 'site', 0], [{ hash: '#services', hint: true }, 'site', 0], [{ hash: '#/tasks', hint: true }, 'boot', 1], [{ hash: '#login' }, 'login', 1], [{ hash: '#login', hint: true }, 'boot', 1],
       [{ modes: ['standalone'] }, 'boot', 1], [{ modes: ['fullscreen'] }, 'boot', 1], [{ modes: ['minimal-ui'] }, 'boot', 1], [{ modes: ['window-controls-overlay'] }, 'boot', 1],
       [{ navStandalone: true }, 'boot', 1], [{ modes: ['standalone'], hash: '#login' }, 'boot', 1],
       [{ lsThrows: true }, 'boot', 1], [{ mmThrows: true }, 'boot', 1], [{ noMatchMedia: true }, 'boot', 1],
@@ -484,9 +484,9 @@ describe('7 · the hand-off: "Team portal" reloads into /#login from the website
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('7b · the legacy-session probe: a browser that already holds a signed-in session boots the app even though its hint is missing', () => {
-  const probeSrc = (head.match(/<script>\(function \(\) \{\s*if \(document\.documentElement\.getAttribute\('data-view'\) !== 'site'\) return;\s*window\.addEventListener\('load'[\s\S]*?\}\)\(\);<\/script>/) || [''])[0].replace(/^<script>/, '').replace(/<\/script>$/, '');
+  const probeSrc = (head.match(/<script>\(function \(\) \{\s*if \(document\.documentElement\.getAttribute\('data-view'\) !== 'site'\) return;\s*(?:if \([^\n]*\n\s*)?window\.addEventListener\('load'[\s\S]*?\}\)\(\);<\/script>/) || [''])[0].replace(/^<script>/, '').replace(/<\/script>$/, '');
 
-  function run({ view = 'site', probed = false, noDatabases = false, dbs = [{ name: 'firebaseLocalStorageDb' }], hasStore = true, keys = ['firebase:authUser:KEY:[DEFAULT]'], openFails = false }) {
+  function run({ view = 'site', hash = '#/tasks', probed = false, noDatabases = false, dbs = [{ name: 'firebaseLocalStorageDb' }], hasStore = true, keys = ['firebase:authUser:KEY:[DEFAULT]'], openFails = false }) {
     const events = {}, timers = [], log = [], store = { hint: null, probed: probed ? '1' : null };
     const tick = (fn) => Promise.resolve().then(fn);
     const db = {
@@ -504,7 +504,7 @@ describe('7b · the legacy-session probe: a browser that already holds a signed-
       setTimeout: (fn, ms) => timers.push([fn, ms]), indexedDB,
       sessionStorage: { getItem: (k) => (k === 'bi-probed' ? store.probed : null), setItem: (k, v) => { if (k === 'bi-probed') store.probed = v; log.push(`session ${k}=${v}`); } },
       localStorage: { getItem: () => null, setItem: (k, v) => { if (k === 'bi-auth-hint') store.hint = v; log.push(`local ${k}=${v}`); } },
-      location: { reload: () => log.push('reload') },
+      location: { hash, reload: () => log.push('reload') },
     };
     vm.runInNewContext(probeSrc, sandbox);
     const fire = async () => { if (events.load) events.load(); for (const t of timers.splice(0)) t[0](); await new Promise((r) => setTimeout(r, 20)); };
@@ -515,6 +515,8 @@ describe('7b · the legacy-session probe: a browser that already holds a signed-
     assert.ok(probeSrc.length > 100, 'probe script not found');
     assert.deepEqual(run({ view: 'boot' }).events, {}, 'must not even listen in the app views');
     for (const view of ['login', 'app']) assert.deepEqual(run({ view }).events, {});
+    // owner 2026-11-19: / (and a website anchor) is the website even while signed in — the probe must not pull it into the app
+    for (const hash of ['', '#', '#services', '#login']) assert.deepEqual(run({ hash }).events, {}, `listened at "${hash}"`);
     const r = run({});
     assert.deepEqual([Object.keys(r.events), r.timers.length, r.log], [['load'], 0, []]);
     r.events.load();
