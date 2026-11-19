@@ -32,15 +32,15 @@ function build() {
   pages.push(L.cover({
     photo: 'ispsc-01.jpg', edition: '2026 edition', kicker: 'Company profile',
     title: '<span class="nowrap">Stainless-steel</span> kitchens, built to order by our own team.',
-    sub: `${CO.legal}, well known as ${CO.brand}. Designed, fabricated, delivered and installed by one team, for restaurants, hotels, schools and government institutions.`,
+    sub: `${CO.brand}, by ${CO.legal}. Designed, fabricated, delivered and installed by one team, for restaurants, hotels, schools and government institutions.`,
     footLeft: `<b>23 years</b> in business`, footRight: `<b>${CO.site}</b>`, photoPos: '50% 40%',
   }));
 
   // 2 — at a glance
   pages.push(L.page({ doc: DOC, label: 'At a glance', body: `
     <p class="eyebrow">At a glance</p>
-    <h1 class="h1">${CO.name} at a glance</h1>
-    <p class="lead">${CO.legal} is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.</p>
+    <h1 class="h1">${CO.brand} at a glance</h1>
+    <p class="lead">${CO.brand} is the brand of ${CO.legal}, an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.</p>
     <div class="mt3">${L.proofBar()}</div>
     <div class="cols c32 gap8 mt4 top">
       <div><p class="h4">Contents</p><div class="mt1">${toc()}</div></div>
@@ -64,7 +64,7 @@ function build() {
   pages.push(L.page({ doc: DOC, label: 'Who we are', body: `
     <p class="eyebrow">01 · Who we are</p>
     <h1 class="h1">Who we are</h1>
-    <p class="lead">${CO.legal}, well known as ${CO.brand}, designs, builds, delivers and installs stainless-steel kitchens from its base in Quezon City, Metro Manila.</p>
+    <p class="lead">${CO.brand}, by ${CO.legal}, designs, builds, delivers and installs stainless-steel kitchens from its base in Quezon City, Metro Manila.</p>
     <div class="cols ${SHOW_LEADERSHIP ? 'c32' : ''} gap8 mt3 top">
       <div>
         <p>The company began as a family business in Baguio City and La Union and has been in business for 23 years. Our kitchens have long been known as ${CO.brand}.</p>
@@ -73,7 +73,7 @@ function build() {
       </div>
       ${SHOW_LEADERSHIP ? `<div class="card paper">
         <p class="h4">Leadership</p>
-        <div class="person mt2"><div class="pt"><img src="${img('own-president.jpg')}" alt="Narciso Neil Barro"></div><div><b>Narciso Neil Barro</b><span>President</span></div></div>
+        <div class="person mt2"><div class="pt"><img src="${img('own-president.jpg')}" alt="Narciso Neil Barro"></div><div><b>Narciso Neil Barro</b><span>President, ${CO.legal}</span></div></div>
       </div>` : ''}
     </div>
     <p class="h4 mt4">Our story</p>

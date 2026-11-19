@@ -170,7 +170,7 @@ function build() {
     photo: null, edition: '2026 edition', kicker: 'Product catalogue',
     title: '<span class="nowrap">Stainless-steel</span> kitchen equipment, built to your sizes.',
     sub: `${nProd} products in 8 groups, from preparation tables and sinks to Chef Mode cooking equipment, refrigeration, and the exhaust, gas and fire suppression systems that go with them.`,
-    footLeft: `<b>${CO.brand}™</b> by ${CO.name}`, footRight: `<b>${CO.site}</b>`,
+    footLeft: `<b>${CO.brand}™</b> by ${CO.legal}`, footRight: `<b>${CO.site}</b>`,
   }));
 
   pages.push(L.page({ doc: DOC, label: 'Contents', body: `

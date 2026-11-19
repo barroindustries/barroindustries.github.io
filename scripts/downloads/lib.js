@@ -175,7 +175,7 @@ const projCap = (k) => PROJ_ALT[k].replace(/^(ISPSC 2026|DMMMSU) — /, (m) => m
 
 // ───────────────────────────── pages ─────────────────────────────
 function runningHeader(docName) {
-  return `<header class="rh"><span class="brand"><img src="${img('logo.jpg')}" alt=""><span class="bn"><b>${CO.name}</b><i>${CO.brand}™</i></span></span><span class="dn">${esc(docName)}</span></header>`;
+  return `<header class="rh"><span class="brand"><img src="${img('logo.jpg')}" alt=""><span class="bn"><b>${CO.brand}</b><i>By ${CO.legal}</i></span></span><span class="dn">${esc(docName)}</span></header>`;
 }
 const runningFooter = () => `<footer class="rf"><span>${CO.footerCopy}</span><span class="pn"></span></footer>`;
 function page({ doc, cls = '', body, label }) {
@@ -184,7 +184,7 @@ function page({ doc, cls = '', body, label }) {
 function cover({ photo, edition, kicker, title, sub, footLeft, footRight, photoPos = 'center' }) {
   return `<section class="page cover${photo ? '' : ' nophoto'}" data-label="Cover">
   ${photo ? `<div class="cv-photo"><img src="${img(photo)}" alt="" style="object-position:${photoPos}"></div>` : '<div class="cv-photo plain"></div>'}
-  <div class="cv-top"><div class="cv-brand"><img src="${img('logo.jpg')}" alt=""><div><b>${CO.name}</b><i>${CO.brand}™</i></div></div><span class="cv-ed">${esc(edition)}</span></div>
+  <div class="cv-top"><div class="cv-brand"><img src="${img('logo.jpg')}" alt=""><div><b>${CO.brand}</b><i>By ${CO.legal}</i></div></div><span class="cv-ed">${esc(edition)}</span></div>
   <div class="cv-body">
     <p class="eyebrow">${esc(kicker)}</p>
     <h1 class="cv-title">${title}</h1>
