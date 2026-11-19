@@ -1588,7 +1588,7 @@ function renderItemListLd(db, opts) {
   const items = [];
   const projectCard = (id) => (opts.projectCards || []).find(x => x.id === id);
   for (const c of report.categories) {
-    for (const pc of (report.projects || []).filter(x => x.category === c.id && projectCard(x.id).first)) items.push({ name: projectCard(pc.id).name, cat: c.id });   // the featured hero cards lead their group
+    for (const pc of (report.projects || []).filter(x => x.category === c.id && projectCard(x.id).first)) items.push({ name: projectCard(pc.id).name, cat: c.id, url: projectCard(pc.id).learn && /^\/products\//.test(projectCard(pc.id).learn.path) ? SITE_ORIGIN + projectCard(pc.id).learn.path : null });   // the featured hero cards lead their group
     for (const f of report.families.filter(x => x.category === c.id)) items.push({ name: fams.families[f.id].label, cat: c.id, url: FAMILY_PAGES[f.id] ? SITE_ORIGIN + FAMILY_PAGES[f.id].path : null });
     for (const p of report.published.filter(x => x.category === c.id)) {
       items.push({ name: publicProduct(byId.get(p.id), { noteOverrides: overrides, textFixes: fixes }).name, cat: c.id });

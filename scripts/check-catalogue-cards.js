@@ -51,6 +51,16 @@ try {
     const pgLines = pg.match(/<p class="cat-from[ "][^>]*>/g) || [];
     if (pgLines.length !== 1 || !pg.includes(want)) out.push('products/' + slug + '/index.html: its price line is not the catalogue card\'s (' + pgLines.length + ' price line(s))');
   }
+  // the four later product pages (2026-11-20): each carries ONE starting-price line equal to its catalogue card's (the hood page shares the range hood card's price)
+  const LATER = { 'pugon-pandesal-oven': 'pugon', 'teppanyaki-grill': 'teppanyaki', 'inasal-charcoal-grill': 'inasal', 'rear-pitch-range-hood': 'hood' };
+  for (const slug of Object.keys(LATER)) {
+    const e = prices[LATER[slug]];
+    if (!e) { out.push(LATER[slug] + ': no entry in scripts/public-from-prices.json'); continue; }
+    let pg = '';
+    try { pg = rd('products/' + slug + '/index.html'); } catch (_) { out.push('products/' + slug + '/index.html is missing'); continue; }
+    const pgLines = pg.match(/<p class="cat-from[ "][^>]*>/g) || [];
+    if (pgLines.length !== 1 || !pg.includes(wantLine(e))) out.push('products/' + slug + '/index.html: its price line is not the catalogue card\'s (' + pgLines.length + ' price line(s))');
+  }
   try { const ov = rd('products/gas-deck-ovens/index.html'); if (/<p class="cat-from/.test(ov) || !/<meta http-equiv="refresh" content="0; url=\/catalogue\/#cat-cooking">/.test(ov) || !/<meta name="robots" content="noindex, follow">/.test(ov)) out.push('products/gas-deck-ovens/index.html: it must be the noindex forward to /catalogue/#cat-cooking with no price line'); } catch (_) { out.push('products/gas-deck-ovens/index.html (the forward) is missing'); }
   let hubHtml = '';
   try { hubHtml = rd('products/index.html'); } catch (_) { out.push('products/index.html (the forward to the catalogue) is missing'); }

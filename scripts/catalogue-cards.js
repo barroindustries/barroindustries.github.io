@@ -124,6 +124,7 @@ const PROJECT_CARDS = Object.freeze([
     size: '4 trays of 40 × 60 cm per deck',
     specs: ['SS304 interior, insulated body', 'H-type burner with needle valve and gauge', 'Counterweighted door that stays where you put it'],
     options: '1 deck (4 trays) or 2 decks (8 trays)',
+    learn: { path: '/products/pugon-pandesal-oven/', about: 'the Pugon pandesal oven' },
   },
   {
     id: 'teppanyaki', group: 'cooking', first: true, code: 'CK-TP-900', name: 'Teppanyaki grill', tag: 'Featured',
@@ -131,6 +132,7 @@ const PROJECT_CARDS = Object.freeze([
     size: '900 × 750 × 850 mm',
     specs: ['12 mm cooking plate', 'Grease trough and drawer', '150 mm backsplash'],
     options: '900 or 1200 mm wide',
+    learn: { path: '/products/teppanyaki-grill/', about: 'the teppanyaki grill' },
   },
   {
     id: 'inasal', group: 'cooking', first: true, code: 'GR-CH-900', name: 'Inasal charcoal grill', tag: 'Featured',
@@ -138,6 +140,7 @@ const PROJECT_CARDS = Object.freeze([
     size: '900 mm long',
     specs: ['5/16 in stainless grill bars', 'Pull-out charcoal bin', 'Stainless frame with adjustable feet'],
     options: '900, 1200 or 1500 mm long',
+    learn: { path: '/products/inasal-charcoal-grill/', about: 'the inasal charcoal grill' },
   },
   {
     id: 'noodle_boiler', group: 'cooking', code: 'CK-NB-6', name: 'Noodle boiler', tag: 'Chef Mode',

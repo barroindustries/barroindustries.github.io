@@ -527,7 +527,7 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     }));
     // a family with its own /products/ page points there (the target of its card's "Learn more" link); every other item points at its category anchor
     const expected = sections.flatMap((s) => s.cards.map((c) => ({ name: c.name, url: c.learn ? `https://barroindustries.com${c.learn}` : `${catalogue.url}#cat-${s.id}` })));
-    assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 10, 'all ten catalogue families point at their product page');
+    assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 13, 'the ten catalogue families and the Pugon, teppanyaki and inasal cards point at their product page');
     assert.equal(expected.length, 32, 'the page shows 32 cards: the ten configurable families (no gas deck oven: owner 2026-11-19), the 14 fixed items and the eight project cards, the three featured hero products first in Chef Mode (Website Notes, 2026-11-19)');
     assert.equal(list.numberOfItems, 32);
     assert.deepEqual(list.itemListElement.map((i) => ({ name: i.name, url: i.url })), expected);
