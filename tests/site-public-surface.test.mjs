@@ -528,8 +528,8 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     // a family with its own /products/ page points there (the target of its card's "Learn more" link); every other item points at its category anchor
     const expected = sections.flatMap((s) => s.cards.map((c) => ({ name: c.name, url: c.learn ? `https://barroindustries.com${c.learn}` : `${catalogue.url}#cat-${s.id}` })));
     assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 11, 'all eleven configurable families point at their product page');
-    assert.equal(expected.length, 30, 'the page shows 30 cards: the eleven configurable families first in their groups, then the 14 fixed items and the five project cards (2026-11-19)');
-    assert.equal(list.numberOfItems, 30);
+    assert.equal(expected.length, 33, 'the page shows 33 cards: the eleven configurable families, the 14 fixed items and the eight project cards, the three featured hero products first in Chef Mode (Website Notes, 2026-11-19)');
+    assert.equal(list.numberOfItems, 33);
     assert.deepEqual(list.itemListElement.map((i) => ({ name: i.name, url: i.url })), expected);
     list.itemListElement.forEach((item, i) => {
       assert.deepEqual(Object.keys(item), ['@type', 'position', 'name', 'url']);
@@ -1180,10 +1180,10 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     assert.ok(/food-grade/.test(proofSub) && /laboratory-grade/.test(proofSub));
     assert.ok(proofSub.replace('SS304 / SS316', '').trim().length <= 56, `the proof-bar sub-line is ${proofSub.length} characters: it would run to three lines`);
     for (const k of ['description', 'og:description', 'twitter:description']) for (const p of [home, catalogue]) assert.ok(/SS304/.test(p.meta(k)) && /SS316/.test(p.meta(k)) && p.meta(k).indexOf('SS304') < p.meta(k).indexOf('SS316'), `${p.file}: ${k}`);
-    assert.ok(catText.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
+    assert.ok(catText.includes('made in our own shop in SS304 stainless steel (SS316 on request) and built to your sizes.'));
     // 2026-11-19: a card is text with feature bullets, no specification list, so the per-card Material row is gone; the standard grade is still a bullet of the preparation card and the lede says both grades
     assert.equal(materialRows.length, 0, 'a Material row is back on a card');
-    assert.ok(catalogue.html.includes('<li>Food-grade SS304, SS316 on request</li>'));
+    assert.ok(catalogue.html.includes('<li>SS304 stainless steel</li>') && catalogue.html.includes('SS316 on request</p>'));
     for (const t of [homeText, catText]) { assert.ok(t.includes('SS304') && t.includes('SS316')); assert.ok(t.indexOf('SS304') < t.indexOf('SS316'), 'SS304 must come first'); }
   });
 

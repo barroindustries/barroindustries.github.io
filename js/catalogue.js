@@ -30,7 +30,7 @@
     // and not the button. A card also carries (in data-kw, never shown) its product code and, for a configurable product, the names and codes of the products it
     // replaced in data-kw (never shown), so "PW-006" or "double sink" still finds the Sink.
     var haystack = cards.map(function (c) {
-      var parts = c.querySelectorAll('h3, .cat-lead, .cat-feat'), s = c.getAttribute('data-kw') || '';
+      var parts = c.querySelectorAll('h3, .cat-code, .cat-lead, .cat-size, .cat-feat, .cat-options'), s = c.getAttribute('data-kw') || '';
       for (var i = 0; i < parts.length; i++) s += ' ' + parts[i].textContent;
       return s.toLowerCase().replace(/\s+/g, ' ');
     });

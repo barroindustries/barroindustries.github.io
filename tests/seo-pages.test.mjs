@@ -1257,7 +1257,7 @@ describe('the homepage\'s own words, kept: the projects, the process, the warran
 
   it('describes the stainless-steel options exactly as the catalogue does (the page and the catalogue cannot drift apart)', () => {
     const cat = visibleText(catalogue);
-    for (const phrase of ['One, two or three layers', 'One to four sinks', 'Three to six tiers', 'One to three tiers', 'Floor-standing or wall-hung', 'Swing or sliding doors', 'Gooseneck or pre-rinse spray faucet', 'Solid or slotted surface', 'SS304', 'Made to your length, width and height', 'Made to your length and depth']) assert.ok(cat.includes(phrase), `the catalogue no longer says "${phrase}"`);
+    for (const phrase of ['SS304 stainless steel', 'SS316 on request', 'up to two upper shelves', 'One to four bowls', 'pre-rinse spray faucet', 'One to three tiers, solid or slotted', 'Floor or wall', 'swing or sliding doors', 'Hinged doors', 'Stainless brackets', 'Four solid shelves']) assert.ok(cat.includes(phrase), `the catalogue no longer says "${phrase}"`);
     const t = visibleText(byPath('/services/stainless-steel-fabrication/').main);
     for (const phrase of ['One to three layers', 'One to four sinks', 'gooseneck or pre-rinse spray faucet', 'Floor-standing or wall-hung', 'swing or sliding doors', 'one to three shelves inside', 'One to three tiers', 'solid or slotted surface', 'Three to six tiers', 'with or without wheels', 'Your length, width and height', 'Your length and depth', 'food-grade SS304 stainless steel as standard', 'laboratory-grade SS316 on request', 'Our standard finish is hairline, with brushed, mirror or satin on request.']) assert.ok(t.includes(phrase), `the fabrication page lost "${phrase}"`);
   });

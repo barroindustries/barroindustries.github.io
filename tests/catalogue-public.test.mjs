@@ -586,11 +586,11 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     assert.equal(out.replace(/<figure class="cat-photo">[\s\S]*?<\/figure>/, ''), html, 'the photo changes nothing else');
   });
 
-  it('a fixed card is  <li class="cat-card" data-id data-kw>  with its name, then the words (one line + 3-5 bullets) when scripts/catalogue-cards.js has them, then ONE price line', () => {
-    const copy = { 'T-001': { desc: 'A test stove.', features: ['One', 'Two', 'Three'] } };
+  it('a fixed card is  <li class="cat-card" data-id data-kw>  with its name, then the words (code, one sentence, size, 3-4 specs, options) when scripts/catalogue-cards.js has them, then ONE price line', () => {
+    const copy = { 'T-001': { code: 'CK-TS-1', desc: 'A test stove.', size: '600 × 750 mm', specs: ['One', 'Two', 'Three'], options: 'Left or right' } };
     const out = render(PRODUCTS, { cardCopy: copy, prices: { 'T-001': { from: 23500 }, 'T-002': { perProject: true } } });
     const c1 = out.split('<li class="cat-card').find(c => c.startsWith('" data-id="T-001"')).split('</li>\n')[0] + '</li>\n';
-    assert.equal(c1, '" data-id="T-001" data-kw="T-001"><div class="cat-head"><h3>Test Stove &lt;b&gt;One&lt;/b&gt;</h3><p class="cat-lead">A test stove.</p></div><ul class="cat-feat"><li>One</li><li>Two</li><li>Three</li></ul><p class="cat-from">From <data value="23500">₱23,500</data> <span class="cat-vat">+ VAT</span></p></li>\n');
+    assert.equal(c1, '" data-id="T-001" data-kw="T-001"><div class="cat-head"><h3>Test Stove &lt;b&gt;One&lt;/b&gt;</h3><p class="cat-code">CK-TS-1</p><p class="cat-lead">A test stove.</p></div><p class="cat-size"><span>Standard size:</span> 600 × 750 mm</p><ul class="cat-feat"><li>One</li><li>Two</li><li>Three</li></ul><p class="cat-options"><span>Options:</span> Left or right</p><p class="cat-from">From <data value="23500">₱23,500</data> <span class="cat-vat">+ VAT</span></p></li>\n');
     const c2 = out.split('<li class="cat-card').find(c => c.startsWith('" data-id="T-002"'));
     assert.ok(c2.includes('<p class="cat-from cat-from-ask">Priced per project</p>') && !c2.includes('cat-feat') && !c2.includes('cat-lead'));
   });
@@ -603,15 +603,23 @@ describe('renderCatalogue — the /catalogue/ block', () => {
   });
 
   it('the price line is the ONLY place money may be written: the same amount in a name, a feature, a description or a category label still refuses the build', () => {
-    const copy = (f) => ({ 'T-001': { desc: 'A test stove.', features: ['One', 'Two', f] } });
+    const copy = (f) => ({ 'T-001': { desc: 'A test stove.', specs: ['One', 'Two', f] } });
     const prices = { 'T-001': { from: 23500 } };
     for (const bad of ['From ₱23,500', 'only 23,500 a set', 'PHP 5000', 'the best price', 'low cost', 'markup 20%']) {
-      assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: copy(bad), prices })), [{ id: 'T-001', field: 'features[2]', rule: 'money' }], bad);
+      assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: copy(bad), prices })), [{ id: 'T-001', field: 'specs[2]', rule: 'money' }], bad);
     }
     assert.deepEqual(violationsOf(() => render([prod({ id: 'T-001', name: 'Stove from ₱23,500' })], { prices })), [{ id: 'T-001', field: 'name', rule: 'money' }]);
-    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: { 'T-001': { desc: 'Priced per project', features: ['One', 'Two', 'Three'] } }, prices })), [{ id: 'T-001', field: 'desc', rule: 'money' }]);
-    // and a feature list that is not 3-5 short bullets is refused too
-    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: { 'T-001': { desc: 'x', features: ['One', 'Two'] } } })), [{ id: 'T-001', field: 'copy', rule: 'copy' }]);
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: { 'T-001': { desc: 'Priced per project', specs: ['One', 'Two', 'Three'] } }, prices })), [{ id: 'T-001', field: 'desc', rule: 'money' }]);
+    // the code, the size and the options go through the same guards (a thousands comma is money to the scan: write 1200, not 1,200)
+    const w = (extra) => ({ 'T-001': { desc: 'x', specs: ['One', 'Two', 'Three'], ...extra } });
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: w({ size: '1,200 × 600 mm' }), prices })), [{ id: 'T-001', field: 'size', rule: 'money' }]);
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: w({ options: 'up to 1,500 mm' }), prices })), [{ id: 'T-001', field: 'options', rule: 'money' }]);
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: w({ code: 'From ₱23,500' }), prices })).map((v) => v.field), ['code', 'copy']);
+    // and a spec list that is not 3-4 short lines, or a malformed code, is refused too
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: { 'T-001': { desc: 'x', specs: ['One', 'Two'] } } })), [{ id: 'T-001', field: 'copy', rule: 'copy' }]);
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: { 'T-001': { desc: 'x', specs: ['One', 'Two', 'Three', 'Four', 'Five'] } } })), [{ id: 'T-001', field: 'copy', rule: 'copy' }]);
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: w({ code: 'lower-1' }) })), [{ id: 'T-001', field: 'copy', rule: 'copy' }]);
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: w({ features: ['old'] }) })), [{ id: 'T-001', field: 'key features', rule: 'copy' }]);
   });
 
   it('the exact from-price element is recognised and nothing looser: stripFromLines removes the two generated forms only', () => {
@@ -627,7 +635,7 @@ describe('renderCatalogue — the /catalogue/ block', () => {
   });
 
   it('a project card (no SKU, no configurator in the quote flow) is a text card whose button is a plain link to #request-quote; it is counted, searchable and in the item list', () => {
-    const pc = [{ id: 'station', group: 'station', name: 'A Station', tag: 'Made to order', desc: 'One line.', features: ['One', 'Two', 'Three'], learn: { path: '/services/x/', about: 'x things' } }];
+    const pc = [{ id: 'station', group: 'station', name: 'A Station', tag: 'Made to order', desc: 'One line.', specs: ['One', 'Two', 'Three'], learn: { path: '/services/x/', about: 'x things' } }];
     const out = render(PRODUCTS, { projectCards: pc, prices: { station: { perProject: true } } });
     assert.ok(out.includes('<li class="cat-card cat-card-project" data-ask="station" data-kw="station"><div class="cat-head"><p class="cat-tag">Made to order</p><h3>A Station</h3><p class="cat-lead">One line.</p></div>'));
     assert.ok(out.includes('<p class="cat-learn"><a class="link-arrow" href="/services/x/">Learn more about x things</a></p><p class="cat-from cat-from-ask">Priced per project</p><a class="cat-ask" href="#request-quote">Request a quote</a></li>'));
@@ -998,15 +1006,16 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(!/<(?!\/?(?:section|div|p|h[1-3]|ul|li|nav|a|span|data|form|label|input|button|svg|circle|path|figure|figcaption|img)\b)[a-z]/i.test(catBlock), 'an unexpected tag');
   });
 
-  it('every card is TEXT plus at most its captioned product photo (owner rulings 2026-11-19): no tile, no placeholder icon, no specification list, no notes block, no product code on view', () => {
+  it('every card is TEXT plus at most its captioned product photo (owner rulings 2026-11-19): no tile, no placeholder icon, no specification table, no notes block; a card has its code line, size line, 3-4 specs and options line only as the Website Notes give them', () => {
     const bare = catBlock.replace(/<svg class="cat-search-icon"[\s\S]*?<\/svg>/, '').replace(/<figure class="cat-photo"><img [^>]*><figcaption>Representative image<\/figcaption><\/figure>/g, '');
-    assert.ok(!/<img\b|<figure\b|<figcaption\b|<svg\b[^>]*cat-ic|cat-photo|cat-tile|cat-specs|cat-notes|cat-meta|cat-code|cat-label|Representative image|\.webp/.test(bare));
+    assert.ok(!/<img\b|<figure\b|<figcaption\b|<svg\b[^>]*cat-ic|cat-photo|cat-tile|cat-specs|cat-notes|cat-meta|cat-label|Representative image|\.webp/.test(bare));
     const cards = catBlock.split('<li class="cat-card').slice(1);
     for (const c of cards) {
       assert.ok(/<h3>[^<]+<\/h3>/.test(c), 'a card has no name');
-      assert.equal((c.match(/<ul class="cat-feat">/g) || []).length, 1, 'a card has no feature list');
+      assert.equal((c.match(/<ul class="cat-feat">/g) || []).length, 1, 'a card has no spec list');
       const feats = (c.match(/<ul class="cat-feat">([\s\S]*?)<\/ul>/)[1].match(/<li>/g) || []).length;
-      assert.ok(feats >= 3 && feats <= 5, `a card has ${feats} feature bullets (3 to 5)`);
+      assert.ok(feats >= 3 && feats <= 4, `a card has ${feats} specs (3 to 4)`);
+      for (const k of ['cat-code', 'cat-size', 'cat-options']) assert.ok((c.match(new RegExp(`<p class="${k}">`, 'g')) || []).length <= 1, `${k} twice`);
       assert.equal((c.match(/<p class="cat-lead">/g) || []).length, 1, 'a card has no one-line description');
     }
   });
@@ -1074,13 +1083,13 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     for (const id of ['EX-001', 'EX-002', 'EX-003', 'EX-018', 'EX-019', 'EX-020', 'EX-021']) assert.ok(ventilation.includes(`${id} `), `${id} is a keyword of the hood card`);
     // the page chrome (everything except the product cards) and the head no longer talk about the removed systems
     // (2026-11-19: "Exhaust and fresh air" is a group of the page again, as a project card, so the block names it; gas lines and fire suppression stay out everywhere)
-    const chrome = catBlock.replace(/<li class="cat-card[\s\S]*?<\/li>/g, '');
+    const chrome = catBlock.replace(/<li class="cat-card[\s\S]*?<\/li>\n/g, '');
     assert.ok(!/gas lines?|fire[- ]suppression/i.test(visibleText(chrome)), 'block chrome mentions gas lines or fire suppression');
     for (const [label, text] of [['hand-written page', publicCopy(catHand)], ['head', attrText(catHead)]]) {
       assert.ok(!/exhaust|fresh[- ]air|gas lines?|fire[- ]suppression/i.test(text), `${label} still mentions a removed category`);
     }
     // the exhaust group is ONE project card (no product code, no SKU): ducting and blowers are not listed one by one
-    assert.deepEqual(askCards, ['station', 'exhaust', 'noodle_boiler', 'combi_stove', 'trolley']);
+    assert.deepEqual(askCards, ['station', 'exhaust', 'pugon', 'teppanyaki', 'inasal', 'noodle_boiler', 'combi_stove', 'trolley']);   // page order: the three featured hero products lead Chef Mode
     assert.match(catHead, /name="description" content="[^"]*range hoods/);   // the Ventilation category (added 2026-10-28) is in the description by its product: since the owner's shortening of 2026-10-28 the description names products, not the six categories
   });
 
@@ -1188,8 +1197,9 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(cat.includes('id="cat-top"') && cat.includes('aria-label="Back to top"'));
   });
 
-  it('keeps the premium copy: the intro line the owner suggested, and the owner\'s short product-led meta description (2026-10-28), which leads with the grades and no longer says "premium" (the homepage description still does)', () => {
-    assert.ok(catBlock.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
+  it('keeps the plain intro line of the Website Notes (2026-11-19: no "Premium"), and the owner\'s short product-led meta description (2026-10-28), which leads with the grades and does not say "premium" (the homepage description still does)', () => {
+    assert.ok(catBlock.includes('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, made in our own shop in SS304 stainless steel (SS316 on request) and built to your sizes. Sizes are in mm. The “From” figure on each card is a starting amount before VAT; your quotation depends on the size and options you choose.</p>'));
+    assert.ok(!/premium|world-class|high.quality/i.test(visibleText(catBlock)), 'a hype word on the catalogue page');
     assert.match(catHead, /name="description" content="Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: /);
   });
 
@@ -1402,7 +1412,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     for (const [label, text] of [['homepage', publicCopy(homeSite)], ['homepage head', attrText(homeHead)], ['catalogue page', publicCopy(cat)]]) {
       assert.ok(!US.test(text), `${label}: a US spelling (${(text.match(US) || [])[0]})`);
     }
-    assert.ok(/catalogue/i.test(publicCopy(homeSite)) && /millimetres/.test(visibleText(catBlock)));
+    assert.ok(/catalogue/i.test(publicCopy(homeSite)) && /Sizes are in mm/.test(visibleText(catBlock)));
   });
 
   it('writes the hero lead grammatically (the owner caught "We design, fabricate, delivers and installs")', () => {

@@ -73,7 +73,7 @@ describe('the owner\'s designs replace the stock photos', () => {
     assert.deepEqual(Object.entries(fams).filter(([, f]) => f.photo).map(([k, f]) => [k, f.photo]), [['prep_table', 'PW-003'], ['sink', 'PW-008'], ['hood', 'EX-001'], ['cabinet', 'PW-015']]);
     const cards = require('../scripts/catalogue-cards.js').PROJECT_CARDS;
     assert.deepEqual(cards.map((c) => [c.id, c.image || null, c.photo || null]), [['station', 'site/img/products/render-15-commercial-station-183-cabinet-trash.webp', null], ['exhaust', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', null],
-      ['noodle_boiler', null, null], ['combi_stove', null, null], ['trolley', null, null]]);
+      ['pugon', null, null], ['teppanyaki', null, null], ['inasal', null, null], ['noodle_boiler', null, null], ['combi_stove', null, null], ['trolley', null, null]]);
     const page = read('catalogue/index.html');
     const withPhoto = [...page.matchAll(/<li class="cat-card[^"]*" data-(?:family|id|ask)="([^"]+)"[^>]*>(<figure class="cat-photo">)?/g)].filter((m) => m[2]).map((m) => m[1]);
     assert.deepEqual(withPhoto, ['prep_table', 'station', 'sink', 'hood', 'exhaust', 'cabinet']);
