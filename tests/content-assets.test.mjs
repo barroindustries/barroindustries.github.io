@@ -1378,6 +1378,17 @@ describe('guides: the kitchen ventilation requirements guide (2026-11-19) — th
 // The seven guides of 2026-11-19 (owner: "write all seven"). Every generic rule above already holds for them (they are in GUIDES). This block pins what is particular
 // to them: the date, the keyword in title / H1 / description, five FAQ questions, 1000-1500 words, the "no code, permit or regulation named" discipline of the
 // October guides (only the ventilation requirements guide may name the laws), no statistic or price word, the listings, and the links every one must carry.
+describe('guides: the labels around each article (2026-11-19) — the section kicker above the H1 only; "Keep reading" and "Get started" kept', () => {
+  it('has exactly one section kicker, directly above the H1, and keeps the related and closing sections\' own labels', () => {
+    for (const p of articles) {
+      assert.equal((p.html.match(/<p class="eyebrow kg-kicker">/g) || []).length, 1, `${p.path}: section kickers`);
+      assert.ok(/<p class="eyebrow kg-kicker"><a href="\/guides\/#[a-z-]+">[^<]+<\/a><\/p>\s*<h1>/.test(p.html), `${p.path}: the kicker is not directly above the H1`);
+      assert.ok(/<section id="related"[\s\S]*?<p class="eyebrow">Keep reading<\/p>/.test(p.html), `${p.path}: the related section lost its "Keep reading" label`);
+      assert.ok(/<section class="pg-cta"[\s\S]*?<p class="eyebrow">Get started<\/p>/.test(p.html), `${p.path}: the closing section lost its "Get started" label`);
+    }
+  });
+});
+
 describe('guides: the seven guides of 2026-11-19 — dates, keywords, structure, no laws named, listings and links', () => {
   const SEVEN = [
     ['/guides/stainless-steel-work-table-guide/', 'stainless steel work table', ['/products/stainless-steel-work-tables/', '/guides/ss304-vs-ss316-stainless-steel/']],
