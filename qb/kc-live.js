@@ -258,10 +258,29 @@
     });
     return loading;
   };
+  /* the signed-in user, once Firebase has restored the session.  The builder calls load() at boot, before auth has read its saved sign-in, so auth.currentUser is still null
+     then and the profile read would make everybody Sales (the President lost his two buttons on the first live day, v15.0.1).  onAuthStateChanged fires once the restore is
+     done (with the user, or null when nobody is signed in); a page without auth, or one that never answers, goes on after AUTH_WAIT_MS with whatever is there. */
+  var AUTH_WAIT_MS = 5000;
+  function authReady() {
+    var u0 = currentUser();
+    if (u0) return Promise.resolve(u0);
+    var a = null; try { a = typeof auth !== 'undefined' ? auth : null; } catch (e) { a = null; }
+    if (!a || typeof a.onAuthStateChanged !== 'function') return Promise.resolve(null);
+    return new Promise(function (res) {
+      var done = false, off = null;
+      function end(u) { if (done) return; done = true; try { if (typeof off === 'function') off(); } catch (e) { /* ignore */ } res(u || currentUser()); }
+      setTimeout(function () { end(null); }, AUTH_WAIT_MS);
+      try { off = a.onAuthStateChanged(function (u) { end(u); }); } catch (e) { end(null); }
+      if (done && typeof off === 'function') { try { off(); } catch (e) { /* ignore */ } }
+    });
+  }
   function doLoad() {
     setState('loading', '');
-    var u = currentUser();
     if (onFile() || !dbReady()) return finish('offline', 'No database in this session.');
+    return authReady().then(readAll);
+  }
+  function readAll(u) {
     var reads = Promise.all([
       u && u.uid ? getDoc('users', u.uid) : Promise.resolve({ ok: false, err: { code: 'unauthenticated' } }),
       getDoc('settings', 'quote_builder'), getDoc('kc_config', 'settings'), getDoc('kc_config', 'list_prices'), getAll('kc_materials')

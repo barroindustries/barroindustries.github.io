@@ -232,6 +232,29 @@ const seedDocs = (over = {}) => ({
 const loaded = async (seed, opt = {}, envOpt = {}) => { const env = makeEnv({ db: makeFakeDb(seed, opt), ...envOpt }); await env.KCLive.load(); return env; };
 
 describe('KCLive.load: the five reads', () => {
+  it('waits for the restored sign-in (first live day, v15.0.1): at boot auth.currentUser is still null; the profile is read once onAuthStateChanged answers, so the President is the President', async () => {
+    const env = makeEnv({ db: makeFakeDb(seedDocs()), user: null });
+    let cb = null, unsub = 0;
+    env.win.auth = { currentUser: null, onAuthStateChanged(f) { cb = f; return () => { unsub++; }; } };
+    const p = env.KCLive.load();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(typeof cb, 'function', 'it asks auth instead of reading with nobody');
+    assert.equal(env.KCLive.state, 'loading');
+    const u = { uid: 'u-pres', displayName: 'Neil Barro' }; env.win.auth.currentUser = u; cb(u);
+    await p;
+    assert.equal(env.KCLive.role, 'president'); assert.equal(env.KC.S.role, 'president'); assert.equal(env.KCLive.state, 'live');
+    assert.equal(unsub, 1, 'the listener is removed after the first answer');
+  });
+  it('nobody signed in: auth answers null and the role stays Sales; an auth that never answers goes on after the wait with Sales too', async () => {
+    const a = makeEnv({ db: makeFakeDb(seedDocs()), user: null });
+    a.win.auth = { currentUser: null, onAuthStateChanged(f) { Promise.resolve().then(() => f(null)); return () => {}; } };
+    await a.KCLive.load(); assert.equal(a.KCLive.role, 'sales');
+    const b = makeEnv({ db: makeFakeDb(seedDocs()), user: null });
+    b.win.auth = { currentUser: null, onAuthStateChanged() { return () => {}; } };
+    const p = b.KCLive.load(); await Promise.resolve(); await Promise.resolve();
+    const t = b.timers.find(x => x && x.fn && x.ms === 5000); assert.ok(t, 'a 5 s wait is set'); t.fn();
+    await p; assert.equal(b.KCLive.role, 'sales');
+  });
   it('reads the role, the switch, the settings, the list prices and the materials, and goes live', async () => {
     const env = await loaded(seedDocs());
     const { KC, KCLive } = env;
