@@ -441,14 +441,17 @@
   }
   const formulaLowText = f => 'The formula price (' + money(f.formula) + ') is more than 10% below the list-based price (' + money(f.list) + '). Check the material prices. The price on the line is not changed.';
   const floorMode = () => (window.KC && window.KC.FLOOR_MODE === 'formula') ? 'formula' : 'list';
-  /* the catalogue price of a catalogue / website line: the line's own price while it is the one the calculator (or the website) gave; once a price is typed over it, a FIXED product's base price is the only one that
-     can be read back (a formula product's price needs the calculator's dimensions); null when unknown */
+  /* the catalogue price of a catalogue / website line: the line's own price while it is the one the calculator (or the website) gave; once a price is typed over it, a FIXED product's base price can be read back from
+     the catalogue.  A formula (size-priced) product's price needs the calculator's dimensions, so the page keeps the calculator's price on the line when the line is added (basisUnitPrice, KC mode only: Fable review
+     F5) and that is the standard a typed price is held against; a line made before that (no stored price) has none and stays neutral.  null when unknown */
   function catalogueListPrice(item, liveById) {
     if (!item) return null;
     if (!isManual(item)) { const u = num(item.unitPrice); if (u > 0) return u; }
     if (item.familyId) { const w = num(item.basisUnitPrice); return w > 0 ? w : null; }
     const live = (liveById || liveMap()).get(item.id);
-    return (live && live.formulaType === 'fixed' && num(live.basePrice) > 0) ? num(live.basePrice) : null;
+    if (live && live.formulaType === 'fixed' && num(live.basePrice) > 0) return num(live.basePrice);       // a fixed product: today's rule, unchanged
+    const calc = num(item.basisUnitPrice);                                                                    // F5: the price the calculator gave when the line was added
+    return calc > 0 ? calc : null;
   }
   /* -> { unit, known, kind }  per unit; `share` = the line's share of the distributed additional costs (kc lines and cost-priced catalogue lines only) */
   function standardOf(item, lc, liveById) {

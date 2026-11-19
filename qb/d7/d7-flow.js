@@ -13,7 +13,8 @@
      approvalCovers()            true while the approval the quote carries still covers it: KCRules.approvalCovers({ carry, net, standardTotal, costKnown })
      showApprovalLink(payload?)  the panel with the link to Approvals, a Copy link button and a ready-to-paste message; also reachable from the "Pending Approval" badge (no payload: it is rebuilt from the page)
      renderScreen()              redraw the open screen (Materials price list / Pricing settings) after a price, a setting or a role change
-     boot()  syncButtons()       D7.boot(): the two top-bar buttons "Materials price list" and "Pricing settings" (drawn only while D7.live, and only for the President and Purchasing or when the quote is a KC one)
+     boot()  syncButtons()       D7.boot(): the two top-bar buttons "Materials price list" and "Pricing settings" (drawn only while D7.live, and only for the President and Purchasing: Fable review F8, the bar was crowded);
+                                 everyone else reads the materials price list from a small text link beside "Add custom item" on a KC quote, and has a way back ("Quote builder") while a screen is open
    ON KC: KC.setScreen(id)      'builder' | 'prices' | 'settings'.  A screen sets body[data-d7-screen] (d7-flow.css then hides .main), closes the kc panel and the website panel, and calls KC.renderPrices() /
                                 KC.renderSettings() (qb/kc/admin-d7.js).  The hosts #scrPrices / #scrSettings are in the page; they are made here when they are missing.
    ============================================================================================================== */
@@ -233,11 +234,11 @@
     F.syncButtons();
   };
 
-  /* the buttons exist in the DOM only when they are wanted, so a legacy builder is byte for byte today's: the feature is live (D7.live) AND the quote is a KC one, or the person is the President or Purchasing
-     (the President flips the switch and imports the prices from Pricing settings even while the switch is off; Purchasing keeps the price list) */
+  /* the two buttons exist in the DOM only when they are wanted, so a legacy builder is byte for byte today's: the feature is live (D7.live) AND the person is the President or Purchasing (the President flips the switch and
+     imports the prices from Pricing settings even while the switch is off; Purchasing keeps the price list).  Fable review F8: the top bar was crowded (14 controls, two or three rows), and Sales and Operations cannot change
+     anything on either screen, so the two buttons are no longer drawn for them, whatever the quote.  They still READ the materials price list (owner Q67): see the link below. */
   function wanted() {
     if (!D7.live) return false;
-    if (builderOn()) return true;
     var r = D7.role();
     return r === 'president' || r === 'purchasing';
   }
@@ -246,8 +247,12 @@
     return b;
   }
   F.wantsButtons = wanted;
+  /* the link of everyone else: one small text link "Materials price list" in the Estimator, beside "Add custom item", on a KC quote (a person who has the two buttons does not need it) */
+  function wantsLink() { return !!D7.live && !wanted() && builderOn(); }
+  F.wantsLink = wantsLink;
   F.syncButtons = function () {
     var bar = document.querySelector('.topbar-right'), sheet = $('mtbSheet'), want = wanted(), cur = curScreen();
+    var onScreen = !!D7.live && cur !== 'builder';                   // whoever opened a screen (the link, for a person without the buttons) must be able to leave it
     function put(host, anchor, make, id, label, screen) {
       var have = $(id);
       if (!want) { if (have && have.parentNode) have.parentNode.removeChild(have); return; }
@@ -258,14 +263,28 @@
       var help = $('btnHelp');
       put(bar, help, function () { return btn('btn btn-outline no-print d7-topbtn', 'd7BtnPrices', LABELS.prices, 'prices'); }, 'd7BtnPrices', LABELS.prices, 'prices');
       put(bar, help, function () { return btn('btn btn-outline no-print d7-topbtn', 'd7BtnSettings', LABELS.settings, 'settings'); }, 'd7BtnSettings', LABELS.settings, 'settings');
-      var back = $('d7BtnBack'), showBack = want && cur !== 'builder';
-      if (showBack && !back) { back = btn('btn btn-outline no-print d7-topbtn', 'd7BtnBack', '← Quote builder', 'builder'); bar.insertBefore(back, bar.firstChild); }
-      if (!showBack && back && back.parentNode) back.parentNode.removeChild(back);
+      var back = $('d7BtnBack');
+      if (onScreen && !back) { back = btn('btn btn-outline no-print d7-topbtn', 'd7BtnBack', '← Quote builder', 'builder'); bar.insertBefore(back, bar.firstChild); }
+      if (!onScreen && back && back.parentNode) back.parentNode.removeChild(back);
     }
     if (sheet) {
       var first = sheet.querySelector('.mtb-divider');
       put(sheet, first, function () { return btn('mtb-row d7-mtbrow', 'd7MtbPrices', LABELS.prices, 'prices'); }, 'd7MtbPrices', LABELS.prices, 'prices');
       put(sheet, first, function () { return btn('mtb-row d7-mtbrow', 'd7MtbSettings', LABELS.settings, 'settings'); }, 'd7MtbSettings', LABELS.settings, 'settings');
+      /* a phone has no top-bar button: the person without the two rows gets one "Quote builder" row at the top of the menu while a screen is open (the others leave by pressing the row of the open screen) */
+      var mback = $('d7MtbBack'), wantBack = onScreen && !want;
+      if (wantBack && !mback) { mback = btn('mtb-row d7-mtbrow', 'd7MtbBack', '← Quote builder', 'builder'); var hdr = sheet.querySelector('.mtb-sheet-hdr'); sheet.insertBefore(mback, hdr ? hdr.nextSibling : sheet.firstChild); }
+      if (!wantBack && mback && mback.parentNode) mback.parentNode.removeChild(mback);
+    }
+    /* the Estimator link: beside "Add custom item" */
+    var row = $('productSearchRow'), lnk = $('d7LnkPrices');
+    if (!wantsLink()) { if (lnk && lnk.parentNode) lnk.parentNode.removeChild(lnk); }
+    else if (row) {
+      if (!lnk) {
+        lnk = document.createElement('button'); lnk.type = 'button'; lnk.id = 'd7LnkPrices'; lnk.className = 'd7-lnk-prices no-print'; lnk.setAttribute('data-d7', 'screen'); lnk.setAttribute('data-screen', 'prices');
+        lnk.setAttribute('title', 'See the materials and their prices (the President and Purchasing change them)'); lnk.textContent = 'Materials price list';
+        var add = $('btnAddCustomItem'); if (add && add.parentNode === row) row.insertBefore(lnk, add.nextSibling); else row.appendChild(lnk);
+      }
     }
   };
 

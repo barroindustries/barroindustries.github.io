@@ -27,6 +27,18 @@ body{font-family:var(--font);background:var(--gray-light);color:var(--text);font
 .topbar-logo{font-size:16px;font-weight:700;}
 .topbar-logo span{color:var(--accent);}
 .topbar-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+/* Fable review F8 — the "📄 PDF ▾" menu of the KC top bar. Everywhere else (the switch off, a legacy quote, Brilliance Steel, a phone) the wrapper and the list are display:contents, which draws nothing of their own: the three print buttons
+   are flex items of .topbar-right exactly as before, and the menu button is hidden. In KC mode on a desktop the three buttons live in a drop-down under the one button. */
+.pdf-menu,.pdf-menu-list{display:contents;}
+#btnPdfMenu{display:none;}
+@media(min-width:769px){
+  body.d7-on .pdf-menu{display:block;position:relative;}
+  body.d7-on #btnPdfMenu{display:inline-flex;}
+  body.d7-on .pdf-menu.open #btnPdfMenu{background:rgba(255,255,255,.18);}
+  body.d7-on .pdf-menu-list{display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:310;min-width:200px;flex-direction:column;gap:5px;padding:7px;background:var(--dark-blue);border:1px solid rgba(255,255,255,.28);border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.35);}
+  body.d7-on .pdf-menu.open .pdf-menu-list{display:flex;}
+  body.d7-on .pdf-menu-list .btn{width:100%;justify-content:flex-start;white-space:nowrap;}
+}
 .btn{padding:7px 13px;border:none;border-radius:6px;cursor:pointer;font-size:12px;
   font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:5px;}
 .btn-outline{background:transparent;border:1.5px solid rgba(255,255,255,.45);color:white;}
@@ -1312,9 +1324,16 @@ body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:nor
     <span class="filed-badge" id="filedBadge" onclick="if(quoteStatus==='pending_approval'&&d7On())D7.h('flow.showApprovalLink')">✓ FILED</span>
     <button class="btn btn-outline" id="btnNew" onclick="clearForm()">🗑 New</button>
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
-    <button class="btn btn-outline" id="btnPrint" onclick="doPrint()" title="Save the quotation as a PDF — the file name is the client name + quote number">📄 Save PDF</button>
-    <button class="btn btn-outline" id="btnAgentPrint" onclick="doPrintAgent()" style="border-color:var(--purple);color:#d9b3ff;">🧾 Agent Copy</button>
-    <button class="btn btn-outline" id="btnWorkforcePrint" onclick="doPrintWorkforce()" title="Print/PDF a crew copy with NO prices — item details, qty and unit only" style="border-color:#4a9;color:#9fe0c5;">🛠 Workforce Copy</button>
+    <!-- Fable review F8 — in KC mode (body.d7-on), on a desktop, the three print buttons fold into this one "📄 PDF ▾" menu (togglePdfMenu). With the switch off, on a legacy quote, on Brilliance Steel or on a phone (which has its own
+         menu sheet) the wrapper and the list draw nothing, the menu button is hidden, and the three buttons sit in the bar exactly as they always did. Their ids, handlers and the code behind them are unchanged. -->
+    <div class="pdf-menu no-print" id="pdfMenu">
+      <button class="btn btn-outline" id="btnPdfMenu" type="button" onclick="togglePdfMenu()" aria-haspopup="true" aria-expanded="false" aria-controls="pdfMenuList" title="Download the quotation as a PDF, or print the Agent Copy or the Workforce Copy">📄 PDF ▾</button>
+      <div class="pdf-menu-list" id="pdfMenuList">
+        <button class="btn btn-outline" id="btnPrint" onclick="doPrint()" title="Save the quotation as a PDF — the file name is the client name + quote number">📄 Save PDF</button>
+        <button class="btn btn-outline" id="btnAgentPrint" onclick="doPrintAgent()" style="border-color:var(--purple);color:#d9b3ff;">🧾 Agent Copy</button>
+        <button class="btn btn-outline" id="btnWorkforcePrint" onclick="doPrintWorkforce()" title="Print/PDF a crew copy with NO prices — item details, qty and unit only" style="border-color:#4a9;color:#9fe0c5;">🛠 Workforce Copy</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2120,7 +2139,7 @@ body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:nor
       <div class="d7-only" id="helpKcSection">
         <h4>Configurators</h4>
         <p>Add items has <strong>seven tabs</strong>: Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems. Each tab shows its <strong>configurators</strong> first, then the catalogue items. A configured line <strong>prices itself</strong> from the materials price list (materials + labor 30 / 50 / 70 % + 10 % misc, × 2, rounded to the nearest 10); a <strong>Chef Mode</strong> line starts from the Standard Product Price List and adds what its options cost by the same formula (it says <em>list price</em>). Type a price to override it, ↺ goes back, and a price below the standard shows a warning. <strong>Catalogue items</strong> keep their catalogue price. ➕ <strong>Add custom item</strong> opens a configurator too: pick the materials from the price list (every row shows its list price) and type the quantities; only the President types free costs, and the line always needs review. Amounts show centavos, and Quantity and unit share one column. The OH and MK dials are gone: the President can set <strong>one markup for the whole quote</strong>, and a discount stops at the project cost. Additional labor is priced at cost × that markup; delivery, installation and other at cost + 25 %. A new Barro Kitchens or Barro Industries quote starts at a 65 % down payment.</p>
-        <p>Every line prints in <strong>one format</strong>: the item code in small grey text (for example CK-HP-4; a line with no code prints none), material and use, the title, dimensions, specs, notes. The signatures read Prepared by, Approved by and Client conforme. The Photo column shows the photo of the line or its drawing, and the Workforce Copy carries the drawing and the build detail (no prices). A line that <strong>needs review</strong>, or a quote sold <strong>below its standard price</strong>, goes to the President: Verify &amp; File says why and, once you send it, shows a <strong>link</strong> to copy and pass to him by Messenger or Viber; he approves it from the Approvals page. An approved quote keeps its approval when you reopen it, unless the new total falls below the approved total and below the standard price. The PDF button saves the A4 document named by its quote number and revision.</p>
+        <p>Every line prints in <strong>one format</strong>: the item code in small grey text (for example CK-HP-4; a line with no code prints none), material and use, the title, dimensions, specs, notes. The signatures read Prepared by, Reviewed &amp; Approved by and Client conforme. The Photo column shows the photo of the line or its drawing, and the Workforce Copy carries the drawing and the build detail (no prices). A line that <strong>needs review</strong>, or a quote sold <strong>below its standard price</strong>, goes to the President: Verify &amp; File says why and, once you send it, shows a <strong>link</strong> to copy and pass to him by Messenger or Viber; he approves it from the Approvals page. An approved quote keeps its approval when you reopen it, unless the new total falls below the approved total and below the standard price. The <strong>📄 PDF</strong> menu in the top bar holds <strong>Download PDF</strong> (the A4 document, named by its quote number and nothing else: the R number at the end of the number is the revision), Agent Copy and Workforce Copy.</p>
         <p>Where the numbered list below describes the old tabs, the ⚙ chips, the OH / MK dials, the cost-plus pricing or the OH load on additional costs, this section is what a quote on the new rules does.</p>
       </div>
       <div id="helpKcDevice" style="display:none;">
@@ -2420,6 +2439,17 @@ let quoteEngine='legacy';   // 'legacy' | 'kc1' — saved with the quote in the 
 function d7On(){ return !!(window.D7 && D7.live) && quoteEngine==='kc1' && currentCo!=='BS' && !isLegacyDoc(); }
 // KC:L2 — the engine a BLANK quote takes: 'kc1' when the office switch and this device allow it for this user (KCLive.allowsNew(), qb/kc-live.js), else 'legacy'. Brilliant Steel is always legacy.
 function kcDefaultEngine(){ try{ return (window.KCLive && KCLive.allowsNew && KCLive.allowsNew() && currentCo!=='BS') ? 'kc1' : 'legacy'; }catch(e){ return 'legacy'; } }
+// Fable review F10 (2026-11-20) — the office switch gives this person the configurators, but the prices did not load (KCLive state offline / denied): a new quote then quietly starts in the OLD builder. Say so, in the status
+// line (it stays until the next load) and in a toast, once per load. Nothing when the switch does not give this person the configurators, or when they loaded.
+const KC_FAILED_MSG='The configurators did not load. Tap Reload DB.';
+function kcNoticeIfFailed(){
+  try{
+    if(!(window.KCLive && typeof KCLive.failedForUser==='function' && KCLive.failedForUser())) return false;
+    const m=document.getElementById('statusMsg'); if(m) m.textContent=(m.textContent?m.textContent+' — ':'')+'⚠️ '+KC_FAILED_MSG;
+    showToast('⚠️ '+KC_FAILED_MSG,'error');
+    return true;
+  }catch(e){ return false; }
+}
 // KC:L2 — a state is about to be loaded: take ITS engine now, before anything else looks at d7On() (setCompany() re-renders the lines before applyPricingFields() runs, and a quote must never be drawn, or priced, with the
 // engine of the quote that was open before it). applyPricingFields() says the same thing again, from the same state.
 function kcStampEngine(pricing){ quoteEngine = (pricing && pricing.engine==='kc1') ? 'kc1' : 'legacy'; }
@@ -2892,6 +2922,7 @@ async function loadDatabase(force) {
     // load).
     VOLUME_TIERS = normalizeVolumeTiers(meta.volumeTiers);
     setStatus('online',`✅ Live database — ${DB.products.length} products in ${DB.categories.length} categories`);
+    kcNoticeIfFailed();   // F10 — the switch allows this person but the prices did not load: the old builder must not start without a word
     initUI();
     return;
   } catch (e) {
@@ -2965,7 +2996,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // instead of the parent blindly guessing with a fixed setTimeout (the old
   // 450ms race — deleted in app.js renderQuoteBuilderIframe).
   try{ window.parent.postMessage({type:'QB_READY'}, window.location.origin); }catch(e){}
-  document.getElementById('quoteDate').value = new Date().toISOString().split('T')[0];
+  // F15 — the Manila date, not the UTC one (before 8 AM in Manila the UTC date is still yesterday)
+  document.getElementById('quoteDate').value = manilaToday();
   setCompany(bootCompany());
   cfgInit();   // CONFIGURATOR: Escape + Enter handling for the panel (null-guarded)
   renderTerms();
@@ -3353,6 +3385,27 @@ function mtbRun(fnName){
 function mtbSetCompany(co){ setCompany(co); closeMobileSheet(); }
 function mtbSetView(v){ setView(v); closeMobileSheet(); }
 
+// Fable review F8 — the "📄 PDF ▾" menu of the KC top bar. It only holds the three print buttons that were always there (their handlers are untouched); this opens and closes the drop-down. A click anywhere but on the menu
+// button closes it (capture phase: the Download PDF handler of the document layer stops the click it answers, which must not keep the menu open), Escape closes it and gives the focus back to the button.
+function togglePdfMenu(force){
+  const m=document.getElementById('pdfMenu'); if(!m) return;
+  const open=typeof force==='boolean' ? force : !m.classList.contains('open');
+  m.classList.toggle('open',open);
+  const b=document.getElementById('btnPdfMenu'); if(b) b.setAttribute('aria-expanded',open?'true':'false');
+  if(open){ const first=document.getElementById('btnPrint'); if(first && first.focus){ try{ first.focus(); }catch(e){} } }
+}
+function closePdfMenu(){ togglePdfMenu(false); }
+document.addEventListener('click',e=>{
+  const m=document.getElementById('pdfMenu'); if(!m || !m.classList.contains('open')) return;
+  if(e.target && e.target.closest && e.target.closest('#btnPdfMenu')) return;
+  closePdfMenu();
+},true);
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  const m=document.getElementById('pdfMenu'); if(!m || !m.classList.contains('open')) return;
+  closePdfMenu(); const b=document.getElementById('btnPdfMenu'); if(b && b.focus) b.focus();
+});
+
 function mtbSync(){
   const pillMode=document.getElementById('mtbPillMode');
   const pillCo=document.getElementById('mtbPillCo');
@@ -3606,7 +3659,7 @@ function buildQuoteNo(){
   const co=document.getElementById('qnoCo').value||'BK';
   const loc=document.getElementById('qnoLoc').value||'XX';
   const mth=document.getElementById('qnoMethod').value||'XX';
-  const d=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
+  const d=document.getElementById('quoteDate').value||manilaToday();
   const dt=d.replace(/-/g,'').slice(2);
   const seq=String(document.getElementById('qnoSeq').value||1).padStart(3,'0');
   const rev=(typeof _autoRev==='number' && _autoRev>0)?_autoRev:1;   // revision/copy for this client
@@ -3668,7 +3721,7 @@ async function autoComputeCustRev(){
   if(typeof db==='undefined' || typeof auth==='undefined' || !auth.currentUser) return; // bare `auth` — a top-level const in firebase-config.js is NOT window.auth
   const name=(document.getElementById('clientName')?.value||'').trim().toLowerCase();
   const coll=quoteCollFor(currentCo);
-  const today=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
+  const today=document.getElementById('quoteDate').value||manilaToday();
   try{
     const snap=await db.collection(coll).where('createdBy','==',auth.currentUser.uid).get().catch(()=>({docs:[]}));
     // Same per-company narrowing as autoClientSeq() above — bk_quotes holds both
@@ -3681,7 +3734,7 @@ async function autoComputeCustRev(){
     // duplicate revision number would be FILED rather than merely previewed.
     const _all=snap.docs.map(d=>d.data());
     const docs=(coll==='bk_quotes')?_all.filter(x=>(x.company||'BK')===currentCo):_all;
-    const isToday=x=>{ if((x.quoteDate||x.date||'').slice(0,10)===today) return true; const t=x.createdAt&&x.createdAt.toDate?x.createdAt.toDate():null; return t && t.toISOString().slice(0,10)===today; };
+    const isToday=x=>{ if((x.quoteDate||x.date||'').slice(0,10)===today) return true; const t=x.createdAt&&x.createdAt.toDate?x.createdAt.toDate():null; return t && manilaToday(t)===today; };   // F15 — the day a quote was made is the Manila day, like the quote date it is compared with
     const distinctToday=new Set(docs.filter(isToday).map(x=>(x.clientName||'').trim().toLowerCase()).filter(Boolean));
     const newClientToday = name && !distinctToday.has(name);
     _autoCust=Math.max(1, distinctToday.size + (newClientToday?1:0));
@@ -3776,6 +3829,7 @@ function d7SyncMode(force){
     // the label and the option that differ between the two modes: "➕ Add custom item" and the 65 % down-payment option
     const bc=document.getElementById('btnAddCustomItem'); if(bc) bc.textContent=on?'➕ Add custom item':'➕ Custom item';
     const o65=document.querySelector('#dpMode option[value="65"]'); if(o65) o65.hidden=!on;
+    D7.h('flow.syncButtons');   // Fable review F8 — the Estimator link "Materials price list" (beside "Add custom item") follows the mode of the quote
   }
   else if(force) renderCatTabs();
 }
@@ -3952,6 +4006,13 @@ function fixedItemDimString(p){
   return parts.join(' × ')+(u.text?'':' '+measureUnit);
 }
 
+// Fable review F5 (2026-11-20) — a catalogue line keeps the price the calculator gave when it was added (basisUnitPrice, the field a website line already uses for its website figure), in KC mode only: it is the
+// standard a TYPED price is held against, so typing a size-priced (formula) item below it forces the President's approval like a fixed-price item (qb/d7/d7-pricing.js catalogueListPrice). A legacy quote gets
+// no such field: its lines are exactly what they were.
+function kcCalcBasis(price){
+  try{ return (d7On() && Number(price)>0) ? { basisUnitPrice:Number(price) } : {}; }catch(e){ return {}; }
+}
+
 // Adds a fixed-price, no-spec product straight to the quote at qty 1 — same
 // item shape addItemFromCalc() builds, still priced through computePrice()
 // (so the Material Price Index coefficient / rounding stay byte-identical to
@@ -3965,6 +4026,7 @@ function addFixedItemDirect(p){
     leadTime:p.leadTime||'—', laborHours:p.laborHours||null,
     capitalMaterials:p.capitalMaterials||0, capitalLabor:p.capitalLabor||0,
     formulaType:p.formulaType,
+    ...kcCalcBasis(price),
   });
   saveToStorage();
   renderItems();
@@ -4252,6 +4314,7 @@ function addItemFromCalc(){
     capitalMaterials:p.capitalMaterials||0,
     capitalLabor:p.capitalLabor||0,
     formulaType:p.formulaType,
+    ...kcCalcBasis(price),
   });
 
   saveToStorage();
@@ -7298,7 +7361,7 @@ function autoLeadDays(){
 function getStartDate(){
   return document.getElementById('projStart')?.value
     || document.getElementById('quoteDate')?.value
-    || new Date().toISOString().split('T')[0];
+    || manilaToday();
 }
 function getLeadDays(){
   const v=document.getElementById('overallLead')?.value;
@@ -9010,7 +9073,7 @@ function clearForm(){
   ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','subject'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
   });
-  const today=new Date().toISOString().split('T')[0];
+  const today=manilaToday();   // F15 — a new quote is dated the Manila day (UTC is still yesterday before 8 AM)
   // Reset pricing / payment / delivery fields to defaults
   const _eng=kcDefaultEngine();   // KC:L2 — the engine of the new blank quote follows the office switch ('legacy' when it is off)
   applyPricingFields({engine:_eng,showVat:false,discountMode:'pct',discountPct:'0',discountAmtCustom:'',
@@ -9032,6 +9095,8 @@ function clearForm(){
   document.getElementById('filedBadge').style.cursor='';
   updateFiledSig();
   saveToStorage();
+  // Live test 2026-11-20: a reopened quote switches the number to manual; New must go back to auto, or the next quote reuses the old number and skips the duplicate guard (reserveAtomicQnoSeq runs only in auto).
+  if(typeof setQnoMode==='function' && qnoMode!=='auto') setQnoMode('auto');
   buildQuoteNo();
   renderItems();
   renderTerms();
@@ -9464,7 +9529,7 @@ async function reserveAtomicQnoSeq(){
   const co=document.getElementById('qnoCo')?.value||'BK';
   const loc=document.getElementById('qnoLoc')?.value||'XX';
   const mth=document.getElementById('qnoMethod')?.value||'XX';
-  const d=document.getElementById('quoteDate')?.value||new Date().toISOString().split('T')[0];
+  const d=document.getElementById('quoteDate')?.value||manilaToday();
   const key=`qno_${co}_${loc}_${mth}_${d}`;
   try{
     const ref=db.collection('_counters').doc(key);
@@ -9510,6 +9575,12 @@ async function fileQuotation(){
   const fileBtnEl=document.getElementById('fileBtn');
   if(fileBtnEl){ fileBtnEl.disabled=true; fileBtnEl.style.opacity='0.5'; }
   await reserveAtomicQnoSeq();
+  // Owner Q65 (2026-11-19) + live test 2026-11-20: a quote reopened from a filing and filed "as a new revision" kept the SAME number (…R1 again), which is how one
+  // quote number ended up on several filings. It now takes the next revision number (R1 → R2) before the payload is built; the flag stops a second bump if File is tapped again.
+  if(reopenSourceDocId && !reopenAsRevisionFlag && fileMode!=='update'){
+    const _rq=document.getElementById('quoteNo'); if(_rq && _rq.value){ _rq.value=bumpRevisionNo(_rq.value); }
+    reopenAsRevisionFlag=true;
+  }
   const reqApproval = !!reviewBlockReason() || document.getElementById('reqApprovalCheck')?.checked || false;   // D7:E19 — a line in review can never reach the QUOTE_FILED branch below
   const quotePayload = buildQuotePayload();
   const quoteCostSidecar = buildCostSidecar();   // QUOTE-COSTS — rides the envelope, never the payload
@@ -9888,7 +9959,7 @@ function loadEditableState(state, opts){
     // draft, and set today's date so the user just reviews & re-files.
     if(opts.asRevision){
       quoteStatus='draft'; filedAt='';
-      const today=new Date().toISOString().split('T')[0];
+      const today=manilaToday();   // F15 — a new revision is dated the Manila day
       const dEl=document.getElementById('quoteDate'); if(dEl) dEl.value=today;
       const qEl=document.getElementById('quoteNo');
       // Bump ONLY the -Rn suffix. Do NOT call syncDateIntoQuoteNo() here — that
@@ -10122,8 +10193,16 @@ function formatPeso(n){
   // D7:E13 (M13) — under D7 amounts show centavos, on screen and in print (₱545,180.00). The math and every rounding step are unchanged; Brilliant Steel and "as issued" quotes keep whole pesos.
   return d7On() ? '₱'+Number(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}) : '₱'+Math.round(n).toLocaleString('en-PH');
 }
+/* Fable review F15 (2026-11-20) — today as a calendar date (YYYY-MM-DD) in Asia/Manila, not UTC. Before 8 AM in Manila the UTC date is still yesterday: a new quote was dated the day before and its number carried yesterday's date
+   (a 3 AM run on Nov 20 made "...261119"). en-CA formats as YYYY-MM-DD; without Intl or the zone, Manila is UTC+8 all year (no daylight saving), so add 8 hours. The same rule as KC.today in the configurator engine. `d` is for tests
+   and for the createdAt of a stored quote. */
+function manilaToday(d){
+  const now = (d && typeof d.getTime==='function' && isFinite(d.getTime())) ? d : new Date();
+  try{ const s=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(now); if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; }catch(e){ /* fall through */ }
+  return new Date(now.getTime()+8*3600*1000).toISOString().slice(0,10);
+}
 function addDays(iso,n){
-  const d=new Date((iso||new Date().toISOString().split('T')[0])+'T12:00:00');
+  const d=new Date((iso||manilaToday())+'T12:00:00');
   d.setDate(d.getDate()+Math.round(n||0));
   return d;
 }
@@ -10224,7 +10303,7 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
   { ver:51, date:'2026-11-20', kc:true, items:[
     'Add items has seven tabs now — Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems — and each tab shows its configurators ahead of the catalogue items. ➕ Add custom item opens a configurator too: pick the materials from the price list and type the quantities.',
     'A configured line prices itself from the materials price list, and a Chef Mode line starts from the Standard Product Price List. Type a price to override it; ↺ puts the computed price back, and a price below the standard shows a warning. Catalogue items keep their catalogue price.',
-    'Every line prints in one format — the item code (for example CK-HP-4) in small grey text, then material and use, title, dimensions, specs and notes — with the photo of the line or its drawing beside it. Amounts show centavos, Quantity and unit share one column, the signatures read Prepared by, Approved by and Client conforme, and the 🛠 Workforce Copy carries the drawing and the build detail (still no prices).',
+    'Every line prints in one format — the item code (for example CK-HP-4) in small grey text, then material and use, title, dimensions, specs and notes — with the photo of the line or its drawing beside it. Amounts show centavos, Quantity and unit share one column, the signatures read Prepared by, Reviewed & Approved by and Client conforme, and the 🛠 Workforce Copy carries the drawing and the build detail (still no prices).',
     'A line that needs review, or a quote priced below the standard, goes to the President for approval: Verify & File says why and, once you send it, gives you a link to pass to him by Messenger or Viber. An approved quote keeps its approval when you reopen it.',
     'The President can set one markup for a quote (the OH and MK dials are gone from these quotes), and a discount stops at the project cost.',
     'Quotes, drafts and templates made before today open and price exactly as before, and Brilliance Steel quotes price as before (their letterhead now names the company BRILLIANCE STEEL CORPORATION).',
@@ -10475,8 +10554,8 @@ const TOUR_STEPS = [
  { target:'#btnVerify', title:'Verify & File',
    kcBody:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price". A line that needs review, or a quote priced below the standard, cannot be filed by Sales: Verify & File says why, and "Send for approval" then shows a link to pass to the President by Messenger or Viber.',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price".' },
- { target:'#btnPrint', title:'Save PDF, Agent & Workforce copies',
-   kcBody:'The PDF button saves the client document as an A4 PDF named by its quote number and revision ("<quote no.> Rev. 1") — the ONLY way a quotation is shared. Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: the drawing and the build detail of each line, with quantity and unit — no prices anywhere.',
+ { target:'#btnPrint', kcTarget:'#btnPdfMenu', title:'Save PDF, Agent & Workforce copies',
+   kcBody:'The 📄 PDF button opens a small menu. Download PDF saves the client document as an A4 PDF named by its quote number and nothing else (the R number at the end of it is the revision) — the ONLY way a quotation is shared. Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: the drawing and the build detail of each line, with quantity and unit — no prices anywhere.',
    body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: item details, qty and unit only — no prices anywhere.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',
    body:'📦 opens the full product pricelist — scroll or search, tap a product and it lands on the quote (configurable items open the calculator first). Products themselves are added or edited in the Inventory department, not here.' },
@@ -10598,6 +10677,7 @@ function tourGo(delta){
 }
 
 function tourSkips(step){ return !!((step.legacyOnly && d7On()) || (step.kcOnly && !d7On())); }
+function tourTargetSel(step){ return (d7On() && step.kcTarget) ? step.kcTarget : step.target; }   // F8: the PDF buttons are in the "📄 PDF ▾" menu on a KC quote: the step points at the menu button
 function tourTitle(step){ return (d7On() && step.kcTitle) ? step.kcTitle : (step.title||''); }
 function tourBody(step){ return (d7On() && step.kcBody) ? step.kcBody : (step.body||''); }
 function showTourStep(i, dir){
@@ -10644,7 +10724,7 @@ function showTourStep(i, dir){
   } else tourCloseConfigurator();
   let target=null;
   if(step.target){
-    target=document.querySelector(step.target);
+    target=document.querySelector(tourTargetSel(step));
     if(target && step.closest) target=target.closest(step.closest)||target;
     if(!target || target.offsetParent===null){ showTourStep(i+dir, dir); return; }
     const rect=target.getBoundingClientRect();

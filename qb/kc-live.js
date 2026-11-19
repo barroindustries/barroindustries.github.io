@@ -16,6 +16,7 @@
    ROLE   KCLive.roleOf(profile)   president | purchasing | manager (Operations) | sales (also Finance and any profile that could not be read)
    SWITCH KCLive.allowsNew()       may a BLANK quote start on the configurators for this person: settings/quote_builder.kcMode ('off' default | 'president' | 'on') x role, with the per-device override in
                                    localStorage.bkqb_kc_force ('1' = on for this device, '0' = off).  Never true before the prices are ready.
+          KCLive.failedForUser()   the switch gives this person the configurators but the prices did not load (state offline / denied): the page says so (Fable review F10)
           KCLive.flags             { kcMode, approveAll, approvalBelowStandard, catalogueCostPricing }  (defaults: 'off', false, 'force', false)
    APPROVAL  KCLive.afterLoad(state)   after every LOAD_QUOTE / LOAD_TEMPLATE: for a state that came from a filed quote it reads that quote and its cost sidecar, builds the approval carry (spec 3.4), grafts the typed
                                    costs back into the lines' cfg (in memory only), then reprices and redraws.   KCLive.carry() / setCarry(c)   the carry the page keeps in its pricing fields.
@@ -115,8 +116,8 @@
   }
   /* the per-device override: '1' = treat the switch as 'on' on this device, '0' = treat it as 'off'; anything else follows the office setting */
   KCLive.force = function () { var v = lsGet('bkqb_kc_force'); return v === '1' ? '1' : (v === '0' ? '0' : null); };
-  KCLive.allowsNew = function () {
-    if (!KCLive.ready) return false;                                // no prices, no new configured quote
+  /* what the office switch and this device say for THIS person, prices aside */
+  function switchAllows() {
     var f = KCLive.force();
     if (f === '0') return false;
     if (f === '1') return true;
@@ -124,6 +125,15 @@
     if (m === 'on') return true;
     if (m === 'president') return KCLive.role === 'president';
     return false;
+  }
+  KCLive.allowsNew = function () {
+    if (!KCLive.ready) return false;                                // no prices, no new configured quote
+    return switchAllows();
+  };
+  /* Fable review F10: the switch gives this person the configurators but the prices did not load (offline: a read failed or timed out, or no prices are imported; denied: the account may not read them), so a new quote
+     starts in the OLD builder.  The page asks this after every load and says so, instead of leaving the person to wonder why the tabs look old. */
+  KCLive.failedForUser = function () {
+    return (KCLive.state === 'offline' || KCLive.state === 'denied') && switchAllows();
   };
 
   /* ============================== the reads (spec 4.3) ============================== */
@@ -316,15 +326,21 @@
     return authReady().then(readAll);
   }
   function readAll(u) {
+    var parts = [];                                                   // what each read has answered so far: a timeout still knows who this is and what the switch says (Fable review F10)
     var reads = Promise.all([
       u && u.uid ? getProfile(u.uid) : Promise.resolve({ ok: false, err: { code: 'unauthenticated' } }),
       getDoc('settings', 'quote_builder'), getDoc('kc_config', 'settings'), getDoc('kc_config', 'list_prices'), getAll('kc_materials')
-    ]);
+    ].map(function (p, i) { return p.then(function (v) { parts[i] = v; return v; }); }));
     var TIMEOUT = {}, timer = null;
     var timeout = new Promise(function (res) { timer = setTimeout(function () { res(TIMEOUT); }, LOAD_TIMEOUT_MS); });
     return Promise.race([reads, timeout]).then(function (r) {
       clearTimeout(timer);
-      if (r === TIMEOUT) return finish('offline', 'The price list did not answer in time.');
+      if (r === TIMEOUT) {                                            // the prices are not applied (the state is offline), but a profile and a switch that did answer are kept
+        var prof = parts[0], sw = parts[1];
+        if (prof && prof.ok && prof.exists) { KCLive.role = KCLive.roleOf(prof.data); KCLive.userName = nameOf(prof.data); }
+        if (sw && sw.ok && sw.exists) KCLive.flags = flagsOf(sw.data);
+        return finish('offline', 'The price list did not answer in time.');
+      }
       return apply(r);
     });
   }
