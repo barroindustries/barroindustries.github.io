@@ -398,7 +398,7 @@ describe('search finds every card — the configurable ones included — by runn
     assert.equal((block.match(/data-kw="/g) || []).length, 30);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
     assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head"|figure class="cat-photo")/.test(block), 'a card starts with something other than its photo or its head');
-    assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 12, 'the 12 cards with a mapped photo (7 configurable, 3 fixed, trolleys, exhaust)');
+    assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 6, 'the 6 cards with one of the owner\'s design images (preparation table, sink, range hood, cabinet; station, exhaust); every other card is text only (owner 2026-11-19)');
   });
 });
 

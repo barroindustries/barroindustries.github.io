@@ -83,12 +83,12 @@ const CARD_COPY = Object.freeze({
 // quote. `group` is the public category id the card sits in (scripts/build-catalogue.js PUBLIC_CATEGORIES); `learn` is an optional link.
 const PROJECT_CARDS = Object.freeze([
   {
-    id: 'station', group: 'station', name: 'Multi-purpose kitchen station', tag: 'Made to order',
+    id: 'station', group: 'station', image: 'site/img/products/render-15-commercial-station-183-cabinet-trash.webp', name: 'Multi-purpose kitchen station', tag: 'Made to order',
     desc: 'A stainless steel station built around your layout and the work it has to do.',
     features: ['Stainless steel construction', 'Made to your size and layout', 'Configuration agreed with you per project'],
   },
   {
-    id: 'exhaust', group: 'exhaust', photo: 'EX-004', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
+    id: 'exhaust', group: 'exhaust', image: 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
     desc: 'Ducting, blowers and fresh air planned together with your range hood.',
     features: ['Exhaust ducting and fittings', 'Inline blowers', 'Fresh-air supply for the kitchen', 'Designed around your hood and your layout'],
     learn: { path: '/services/exhaust-and-fresh-air-systems/', about: 'exhaust and fresh-air systems' },
@@ -104,7 +104,7 @@ const PROJECT_CARDS = Object.freeze([
     features: ['Two burners, a griddle and a fryer on one top', 'Oven under the burners', '1800 mm long', 'Stainless steel construction'],
   },
   {
-    id: 'trolley', group: 'storage', photo: 'PW-034', name: 'Trolleys', tag: 'Made to order',
+    id: 'trolley', group: 'storage', name: 'Trolleys', tag: 'Made to order',
     desc: 'Stainless steel trolleys for trays, pans and dishes.',
     features: ['Stainless steel construction', 'Caster wheels', 'Tray-slide trolleys and bakery pan-rack trolleys', 'Size and tray capacity agreed with you'],
   },

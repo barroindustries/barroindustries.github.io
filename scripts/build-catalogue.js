@@ -561,6 +561,36 @@ function loadPhotoMap(opts) {
   return { photos, files: new Set(Object.values(photos).map(p => p.src)).size, skipped };
 }
 
+/**
+ * loadProjectImages({ cards, root }) -> { images } — a PROJECT card (scripts/catalogue-cards.js) may name its own image path directly, `image: 'site/img/products/<slug>.webp'`
+ * (the owner's own design drawings are not tied to a master product id). Validated exactly like the photo map: path shape, no pricing / brand word in the path, the file
+ * and its -thumb sibling exist, both are real WebP of the same shape, the thumb is narrower. images[cardId] = { src, thumb, width, height, mainWidth }. One aggregated Error.
+ */
+function loadProjectImages(opts) {
+  opts = opts || {};
+  const root = opts.root || REPO_ROOT;
+  const images = Object.create(null);
+  const problems = [];
+  const sizeOf = (relPath) => { try { return webpSize(fs.readFileSync(path.join(root, relPath))); } catch (_) { return null; } };
+  for (const pc of (opts.cards || [])) {
+    if (pc.image === undefined) continue;
+    const val = pc.image, id = pc.id;
+    if (typeof val !== 'string' || !PHOTO_PATH_RE.test(val) || /-thumb\.webp$/.test(val)) { problems.push(`${id}: image must look like "site/img/products/<slug>.webp" (lower-case slug, not a -thumb file)`); continue; }
+    if (brandInPath(val) || isMoneyish(val)) { problems.push(`${id}: the image path trips a pricing / partner-brand guard`); continue; }
+    const thumb = thumbPathOf(val);
+    let ok = true;
+    for (const f of [val, thumb]) if (!fs.existsSync(path.join(root, f))) { problems.push(`${id}: missing file ${f}`); ok = false; }
+    if (!ok) continue;
+    const m = sizeOf(val), t = sizeOf(thumb);
+    if (!m || !t) { problems.push(`${id}: ${!m ? val : thumb} is not a readable WebP`); continue; }
+    if (Math.abs(m.width / m.height - t.width / t.height) > 0.03) { problems.push(`${id}: ${val} and its thumb have different aspect ratios`); continue; }
+    if (t.width >= m.width) { problems.push(`${id}: the thumb must be narrower than ${val}`); continue; }
+    images[id] = { src: val, thumb, width: t.width, height: t.height, mainWidth: m.width };
+  }
+  if (problems.length) throw new Error(`scripts/catalogue-cards.js: ${problems.length} image problem(s):\n  ${problems.join('\n  ')}`);
+  return { images };
+}
+
 // ── public categories ───────────────────────────────────────────────────────
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
@@ -1380,7 +1410,7 @@ function renderCatalogue(db, opts) {
     lines.push('<ul class="cat-grid">');
     for (const f of g.familyCards) lines.push(renderFamilyCard(f, copyOf(f.id), priceOf(f.id), keywordsOf(f.id), photoFor(fams && fams.photoOf[f.id])));
     for (const p of g.products) lines.push(renderCard(p, copyOf(p.id), priceOf(p.id), photoFor(p.id)));
-    for (const pc of g.projectCards) lines.push(renderProjectCard(pc, priceOf(pc.id), photoFor(pc.photo)));
+    for (const pc of g.projectCards) lines.push(renderProjectCard(pc, priceOf(pc.id), photoFor(pc.photo || (pc.image ? 'image:' + pc.id : null))));
     lines.push('</ul>');
     lines.push('</section>');
   }
@@ -1422,7 +1452,7 @@ function renderCatalogue(db, opts) {
     }
   }
   report.droppedMaterialKeys = droppedMaterialKeys;
-  report.photos = groups.reduce((n, g) => n + g.familyCards.filter(f => photoFor(fams && fams.photoOf[f.id])).length + g.products.filter(p => photoFor(p.id)).length + g.projectCards.filter(pc => photoFor(pc.photo)).length, 0);
+  report.photos = groups.reduce((n, g) => n + g.familyCards.filter(f => photoFor(fams && fams.photoOf[f.id])).length + g.products.filter(p => photoFor(p.id)).length + g.projectCards.filter(pc => photoFor(pc.photo || (pc.image ? 'image:' + pc.id : null))).length, 0);
   report.projects = groups.flatMap(g => g.projectCards.map(pc => ({ id: pc.id, category: g.id })));
   const everyCard = [...report.families.map(x => x.id), ...report.published.map(x => x.id), ...report.projects.map(x => x.id)];
   report.cardIds = everyCard;
@@ -1616,6 +1646,7 @@ function main(argv) {
   const fams = loadPublicFamilies({ published, master: db });   // throws unless every published SKU is absorbed or fixed, exactly once
   const projectPhotoIds = new Set(CARDS.PROJECT_CARDS.map(pc => pc.photo).filter(Boolean));   // a project card may borrow an unpublished product's photo (the trolley)
   const photoMap = loadPhotoMap({ ids, skipIds: ids.filter(id => !published.has(id) && !projectPhotoIds.has(id)) });   // throws on a bad photo map; {} when the file is absent
+  const projectImages = loadProjectImages({ cards: CARDS.PROJECT_CARDS });                // a project card's own image path (owner designs); throws on a bad path / file
   const previewMap = loadPreviewManifest({ families: fams });                              // throws on a bad preview manifest; {} when none yet
   const projectCards = CARDS.PROJECT_CARDS;
   const cardCopy = CARDS.CARD_COPY;
@@ -1631,7 +1662,8 @@ function main(argv) {
   if (copyProblems.length) throw new Error(`scripts/catalogue-cards.js: ${copyProblems.length} problem(s):\n  ${copyProblems.join('\n  ')}`);
 
   const report = {};
-  const rOpts = { photos: photoMap.photos, publicCategories: pub, families: fams, projectCards, cardCopy, prices };
+  const photosAll = Object.assign({}, photoMap.photos); for (const id of Object.keys(projectImages.images)) photosAll['image:' + id] = projectImages.images[id];   // a project card's own image sits under 'image:<card id>'
+  const rOpts = { photos: photosAll, publicCategories: pub, families: fams, projectCards, cardCopy, prices };
   const block = renderCatalogue(db, Object.assign({ report }, rOpts));                   // throws before anything is written
 
   const island = renderCatalogueData(db, Object.assign({}, rOpts, { previews: previewMap.previews }));   // same guards, same product set
@@ -1686,7 +1718,7 @@ function main(argv) {
 }
 
 module.exports = {
-  publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, renderItemListLd, injectIntoHtml, injectIsland, injectItemList, stripJsonComments, esc, webpSize, loadPhotoMap,
+  publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, renderItemListLd, injectIntoHtml, injectIsland, injectItemList, stripJsonComments, esc, webpSize, loadPhotoMap, loadProjectImages,
   loadPublicCategories, publishedProductIds, PUBLIC_CATEGORIES, EXCLUDED_CATEGORIES,
   loadPublicFamilies, renderFamiliesJs, loadPreviewManifest, renderFamilyCard, FAMILIES_FILE, FAMILIES_JS, FAMILIES_JS_MIRROR, PREVIEWS_FILE,
   FAMILY_PAGES, FINISH_IDS, loadFromPrices, FROM_PRICES_FILE, FROM_LINE_RE, stripFromLines, priceLine, renderCard, renderProjectCard,

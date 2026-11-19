@@ -63,15 +63,15 @@ const BASE = 'https://barroindustries.com';
 const STYLE_RE = /<style id="page-css">([\s\S]*?)<\/style>/;     // the generated inline stylesheet (scripts/inline-page-css.js)
 
 // ── the pages ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-const FAMILIES = {                       // product page -> the configurable family it sells, its catalogue category and the words of its keyword (the hub's order)
+const FAMILIES = {                       // product page -> the configurable family it sells, its catalogue category and the words of its keyword (the hub's order, which is the catalogue's: preparation, washing, ventilation, cooking, storage)
+  'stainless-steel-work-tables':             { fam: 'prep_table',   cat: 'cat-preparation', key: /stainless steel (work )?tables?/i },
   'stainless-steel-sinks':                   { fam: 'sink',         cat: 'cat-washing',     key: /stainless steel sinks?/i },
   'stainless-steel-dish-tables':             { fam: 'dish_table',   cat: 'cat-washing',     key: /stainless steel dish tables?/i },
-  'stainless-steel-work-tables':             { fam: 'prep_table',   cat: 'cat-preparation', key: /stainless steel (work )?tables?/i },
+  'stainless-steel-range-hoods':             { fam: 'hood',         cat: 'cat-ventilation', key: /stainless steel range hoods?/i },
   'commercial-gas-stoves':                   { fam: 'stove',        cat: 'cat-cooking',     key: /commercial gas stoves?/i },
   'commercial-wok-ranges':                   { fam: 'wok_range',    cat: 'cat-cooking',     key: /commercial wok ranges?/i },
   'commercial-griddles-grillers-and-fryers': { fam: 'cooking_line', cat: 'cat-cooking',     key: /commercial griddles?/i },
   'gas-deck-ovens':                          { fam: 'deck_oven',    cat: 'cat-cooking',     key: /gas deck ovens?/i },
-  'stainless-steel-range-hoods':             { fam: 'hood',         cat: 'cat-ventilation', key: /stainless steel range hoods?/i },
   'stainless-steel-cabinets':                { fam: 'cabinet',      cat: 'cat-storage',     key: /stainless steel cabinets?/i },
   'stainless-steel-shelving':                { fam: 'wall_shelf',   cat: 'cat-storage',     key: /stainless steel wall shel(f|ves)/i },
   'stainless-steel-racks':                   { fam: 'rack',         cat: 'cat-storage',     key: /stainless steel racks?/i },
@@ -185,7 +185,9 @@ const OTHERS = OTHER_PAGES.map((f) => load(null, f));
 
 function publicStrings(p) {
   const out = [{ kind: 'title', value: p.title }];
-  for (const t of p.S.texts) if (inBody(t.chain)) out.push({ kind: 'text', value: decode(t.text) });
+  // the starting-price line (owner ruling 2026-11-19: "From ₱N + VAT" / "Priced per project", the catalogue's own element) is the ONE place an amount may be: it is
+  // skipped here and pinned on its own (the 'starting price' describe block below: exact form, equal to scripts/public-from-prices.json and to the catalogue card)
+  for (const t of p.S.texts) if (inBody(t.chain) && !t.chain.some((e) => /^cat-from\b/.test(e.attrs.class || ''))) out.push({ kind: 'text', value: decode(t.text) });
   for (const a of p.S.attrs) if (['alt', 'title', 'aria-label', 'content', 'placeholder'].includes(a.name)) out.push({ kind: `<${a.tag} ${a.name}>`, value: decode(a.value) });
   for (const c of p.S.comments) out.push({ kind: 'comment', value: c.text });
   // the copyright markup (2026-10-22) is schema.org vocabulary, not copy: the key "license" and the type "Organization" are not claims or a US spelling
@@ -220,6 +222,7 @@ const PLACES = ['Ilocos Sur', 'La Union', 'Baguio', 'La Trinidad', 'Tarlac', 'Pa
 const ADDRESS = '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines';
 const MSG_ICON = '<svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>';
 const msgLink = (cls, text) => `<a ${cls ? `class="${cls}" ` : ''}href="${MSGR}" rel="noopener" target="_blank" data-brand>${MSG_ICON}${text}</a>`;
+const PRICE_EL_RE = /<p class="cat-from[ "][^>]*>.*?<\/p>/g;           // the exact starting-price element (the catalogue's own, scripts/build-catalogue.js FROM_LINE_RE)
 const PRICE_SENTENCE = 'Prices depend on size and options.';
 const PRICE_LINE = 'Prices depend on size and options. Get an estimated range online in minutes — no account needed.';
 const SS_SENTENCE = 'Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.';
@@ -657,7 +660,8 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
     const TOKENS = /basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|laborHours|ratePerDay|\bmarkup\b|₱|PHP ?[0-9]/i;
     each((p) => {
       assert.ok(!TOKENS.test(p.head), `${p.path}: a price token in the head`);
-      assert.ok(!TOKENS.test(p.bodyHtml) && !/\b[0-9]{1,3}(,[0-9]{3})+\b/.test(p.bodyHtml), `${p.path}: a price token in the body`);
+      const bodyNoFrom = p.bodyHtml.replace(PRICE_EL_RE, '');             // the starting-price element is blanked in place, as CHECK 9 does
+      assert.ok(!TOKENS.test(bodyNoFrom) && !/\b[0-9]{1,3}(,[0-9]{3})+\b/.test(bodyNoFrom), `${p.path}: a price token in the body`);
     });
     noHit(/₱|\bPHP\b|\bpesos?\b|\b\d{1,3}(,\d{3})+\b|\bcheap(er|est)?\b|\baffordabl|\bdiscounts?\b|\bpromos?\b|\bfree\b|\boffers?\b|\boffered\b|\bbudget\b|\bbargain|\bper (piece|unit|kg|metre|meter)\b/i, 'an amount or a pricing word', PAGES, strip);
     // the words "price", "pricing" and "cost": nowhere except the owner's sentence ("Prices depend on size and options.")
@@ -728,7 +732,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
   });
 
   it('is written in British English, with no doubled space, no hyphen used as a dash, and the ™ only on the brand lockup and KitchenShield', () => {
-    noHit(/\b(catalog(?!ue)|colors?|centers?|meters?|labor|fiber(?:glass)?|galvaniz\w*|steriliz\w*|pasteuriz\w*|organiz\w*|customiz\w*|optimiz\w*|specializ\w*|standardiz\w*|centraliz\w*|minimiz\w*|maximiz\w*|utiliz\w*|recogniz\w*|summariz\w*|gray|aluminum|analyze[ds]?|defense|favor\w*|neighbor\w*|program(?!me))\b/i, 'a US spelling');
+    noHit(/\b(catalog(?!ue)|colors?|centers?|meters?|labor|fiber(?:glass)?|galvaniz\w*|steriliz\w*|pasteuriz\w*|organiz\w*|customiz\w*|optimiz\w*|specializ\w*|standardiz\w*|centraliz\w*|minimiz\w*|maximiz\w*|utiliz\w*|recogniz\w*|summariz\w*|gray|aluminum|analyze[ds]?|defense|favor\w*|neighbor\w*|program(?!me))\b/i, 'a US spelling', PAGES, (v) => v.replace(/\/site\/img\/[a-z0-9\/._-]+/gi, ''));   // an image FILE name keeps the owner's own design name (duct-fiberglass-insulation.webp); its alt text and caption are British
     each((p) => {
       const segments = stripTags(p.bodyHtml, '\u0001').split('\u0001').map((s) => s.trim()).filter(Boolean);
       for (const s of segments) assert.ok(!/\S {2,}\S/.test(s), `${p.path}: doubled space in "${s.slice(0, 50)}"`);
@@ -948,9 +952,14 @@ describe('the options on each product page are the ones the configurators offer 
   });
 
   it('shows a product picture only where the product exists in the picture: the griddle, griller and fryer page and the hood page do; the dish table, wok range and deck oven pages (no photograph of those) use the text hero and show none', () => {
-    for (const [s, n] of [['commercial-griddles-grillers-and-fryers', 3], ['stainless-steel-range-hoods', 5]]) {   // the hood page gained four product renders (owner's image set, 2026-11-19)
+    // owner ruling 2026-11-19: the old stock photos were the WRONG pictures; a page shows only the owner's own designs, and no picture at all where there is no design
+    // (the "What it can look like" gallery, section #renders, is the owner's own set of the same designs: it is pinned by its own tests, so it is taken out here)
+    const noGallery = (h) => h.replace(/<section id="renders"[\s\S]*?<\/section>/, '');
+    for (const [s, n] of [['stainless-steel-work-tables', 2], ['stainless-steel-sinks', 2], ['stainless-steel-range-hoods', 1], ['commercial-griddles-grillers-and-fryers', 0], ['commercial-gas-stoves', 0], ['stainless-steel-racks', 0], ['stainless-steel-shelving', 0]]) {
       const p = byPath(`/products/${s}/`);
-      assert.equal((p.html.match(/<span>Representative image<\/span>/g) || []).length, n, s);
+      const h = noGallery(p.html);
+      assert.equal((h.match(/<span>Representative image<\/span>/g) || []).length, n, s);
+      if (n === 0) assert.ok(!/<figure class="pg-fig">[^]*?\/site\/img\/products\//.test(noGallery(p.main)), `${s}: a product picture where there is no design`);
       assert.ok(!p.main.includes('pg-hero-plain'), `${s}: a project photograph leads the page`);   // (the inline stylesheet names the class too: look in <main>)
     }
     for (const s of ['stainless-steel-dish-tables', 'commercial-wok-ranges', 'gas-deck-ovens']) {
@@ -968,9 +977,10 @@ describe('the options on each product page are the ones the configurators offer 
     }
   });
 
-  it('tags each hub card with the catalogue category of its family — Washing, Preparation, Cooking, Ventilation, Storage — by the anchor the card links to (the catalogue was re-grouped on 2026-11-19 and its headings are longer now; the six older anchors, which the hub and every product page use, still exist and keep these one-word names)', () => {
+  it('tags each hub card with the catalogue group of its family — the catalogue\'s own heading, word for word (Preparation tables, Sinks and dish tables, Range hoods, Chef Mode cooking equipment, Storage, racks and trolleys) — by the anchor the card links to (owner 2026-11-19: /products/ is aligned with /catalogue/)', () => {
     const hub = byPath('/products/').section('products-list');
-    const HUB_WORD = { preparation: 'Preparation', washing: 'Washing', cooking: 'Cooking', ventilation: 'Ventilation', storage: 'Storage' };
+    const HUB_WORD = Object.fromEntries([...catalogue.matchAll(/<h2 id="cat-h-([a-z]+)">([^<]*?)\s*</g)].map((m) => [m[1], decode(m[2])]));   // the catalogue's own group headings
+    assert.deepEqual(Object.values(HUB_WORD), ['Preparation tables', 'Multi-purpose kitchen stations', 'Sinks and dish tables', 'Range hoods', 'Exhaust and fresh air', 'Chef Mode cooking equipment', 'Storage, racks and trolleys', 'Refrigeration and other equipment']);
     for (const [slug, f] of Object.entries(FAMILIES)) {
       assert.ok(catalogue.includes(`<h2 id="cat-h-${f.cat.replace('cat-', '')}">`), `${slug}: the catalogue has no ${f.cat} group`);
       const label = HUB_WORD[f.cat.replace('cat-', '')];
@@ -990,7 +1000,7 @@ describe('the options on each product page are the ones the configurators offer 
     const d = hub.meta('description');
     for (const w of ['wok ranges', 'ovens', 'hoods']) assert.ok(d.includes(w), `the description lacks "${w}"`);
     assert.ok(!/\b(six|6)\b[^.]{0,30}\bproducts\b/i.test(textOf(hub.main)) && !/\bsix\b[^.]{0,20}\b(equipment|configurable)\b/i.test(d), 'a count of six is left on the hub');
-    assert.ok(hub.section('catalogue-links').includes('<a href="/catalogue/#cat-ventilation">Ventilation</a>'), 'the Ventilation chip');
+    assert.ok(hub.section('catalogue-links').includes('<a href="/catalogue/#cat-ventilation">Range hoods</a>'), 'the Range hoods chip');
   });
 
   it('says on the hub the same options in one line each, so the hub and the catalogue cannot drift apart', () => {
@@ -1065,7 +1075,7 @@ describe('the price-intent block: the owner\'s sentence, a link to where the con
       const p = byPath(`/products/${s}/`), sec = p.section('estimate');
       assert.match(sec, /<h2 id="estimate-h">How much is an? [a-z, ]+\?<\/h2>/, `${s}: the price heading`);   // a comma: "a commercial griddle, griller or fryer"
       assert.ok(sec.includes('<h3>Prices depend on size and options.</h3>'), `${s}: the sentence`);
-      assert.ok(textOf(sec).includes(PRICE_LINE), `${s}: the sentence continues "${PRICE_LINE}"`);
+      assert.ok(textOf(sec.replace(PRICE_EL_RE, '')).includes(PRICE_LINE), `${s}: the sentence continues "${PRICE_LINE}"`);
       assert.ok(/estimated range/.test(textOf(sec)) && /final quotation/.test(textOf(sec)), `${s}: the block says what happens next`);
     }
     const hub = byPath('/products/').section('estimate');
@@ -1282,8 +1292,8 @@ describe('links: every internal link resolves, the hub lists every product, ever
     assert.ok(byPath('/products/commercial-gas-stoves/') && ['/services/lpg-gas-line-installation/', '/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/kitchen-fire-suppression/'].every((u) => hrefs(byPath('/products/commercial-gas-stoves/')).includes(u)), 'the stove page does not link to its gas line, hood, fresh air and fire suppression pages');
   });
 
-  it('points the category links only at categories the catalogue has (the six public categories)', () => {
-    const ok = new Set(['cat-preparation', 'cat-washing', 'cat-cooking', 'cat-ventilation', 'cat-storage', 'cat-refrigeration']);
+  it('points the category links only at categories the catalogue has (its eight groups)', () => {
+    const ok = new Set(['cat-preparation', 'cat-station', 'cat-washing', 'cat-ventilation', 'cat-exhaust', 'cat-cooking', 'cat-storage', 'cat-refrigeration']);
     each((p) => { for (const u of hrefs(p).filter((x) => x.startsWith('/catalogue/#') || /^\/catalogue\/\?configure=[a-z_]+#/.test(x))) assert.ok(ok.has(u.split('#')[1]), `${p.path}: ${u}`); });   // the Configure button's anchor too
   });
 });

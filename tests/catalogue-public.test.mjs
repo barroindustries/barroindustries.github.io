@@ -1244,8 +1244,12 @@ describe('product photos (the map stays valid, but since 2026-11-19 NO catalogue
   it('shows the mapped product photos again (owner 2026-11-19 later), each captioned "Representative image" and lazy-loaded, and only from scripts/product-photos.json', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
     const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
     const figs = catBlock.match(/<figure class="cat-photo">[\s\S]*?<\/figure>/g) || [];
-    assert.equal(figs.length, 12);
-    const mapped = new Set(Object.entries(map).filter(([k]) => k[0] !== '_').map(([, v]) => '/' + v.replace(/\.webp$/, '-thumb.webp')));
+    // owner ruling 2026-11-19 (later): the stock photos were the wrong pictures. Six cards show one of the owner's own design images (four families through the map, two project cards
+    // through their own `image` path); every other card is text only
+    assert.equal(figs.length, 6);
+    const projectImages = require('../scripts/catalogue-cards.js').PROJECT_CARDS.map(pc => pc.image).filter(Boolean);
+    assert.deepEqual(projectImages.sort(), ['site/img/products/render-15-commercial-station-183-cabinet-trash.webp', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp']);
+    const mapped = new Set([...Object.entries(map).filter(([k]) => k[0] !== '_').map(([, v]) => v), ...projectImages].map(v => '/' + v.replace(/\.webp$/, '-thumb.webp')));
     for (const f of figs) {
       assert.ok(f.includes('<figcaption>Representative image</figcaption>') && f.includes('loading="lazy"'));
       assert.ok(mapped.has(f.match(/<img src="([^"]+)"/)[1]), 'a photo that is not in scripts/product-photos.json');
