@@ -3527,7 +3527,7 @@ let _autoCust=null, _autoRev=null, _autoCustTimer=null;
 function scheduleAutoCustRev(){ clearTimeout(_autoCustTimer); _autoCustTimer=setTimeout(autoComputeCustRev, 350); }
 async function autoComputeCustRev(){
   if(qnoMode!=='auto') return;
-  if(typeof db==='undefined' || !(window.auth&&auth.currentUser)) return;
+  if(typeof db==='undefined' || typeof auth==='undefined' || !auth.currentUser) return; // bare `auth` — a top-level const in firebase-config.js is NOT window.auth
   const name=(document.getElementById('clientName')?.value||'').trim().toLowerCase();
   const coll=quoteCollFor(currentCo);
   const today=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
@@ -9107,7 +9107,7 @@ function setFileMode(m){ fileMode=m; } // Wave 3 Q4 — 'revision' | 'update'
 // entirely self-contained here — no app.js change needed.
 async function reserveAtomicQnoSeq(){
   if(qnoMode!=='auto' || reopenSourceDocId) return; // reopened/revision numbers are untouched
-  if(typeof db==='undefined' || !(window.auth&&auth.currentUser)) return;
+  if(typeof db==='undefined' || typeof auth==='undefined' || !auth.currentUser) return; // bare `auth` — a top-level const in firebase-config.js is NOT window.auth
   const co=document.getElementById('qnoCo')?.value||'BK';
   const loc=document.getElementById('qnoLoc')?.value||'XX';
   const mth=document.getElementById('qnoMethod')?.value||'XX';
