@@ -530,7 +530,7 @@ else
   # Owner ruling 2026-11-19: the public catalogue has EXACTLY these eight groups, in this order (the configurators of the 17-18 Nov call;
   # the older ids are kept so every #cat-… link still lands), and no product from the excluded fresh-air / gas-line / fire-suppression
   # categories (nor, from the exhaust category, anything but the range hoods: owner rulings 2026-10-21 and 2026-10-28).
-  cat_groups=$(grep -oE '<section class="cat-group" id="cat-[a-z_]+"' "$CAT_PAGE" | sed -E 's/.*id="cat-//; s/"$//' | tr '\n' ' ')
+  cat_groups=$(grep -oE '<section class="cat-group" data-cat="[a-z_]+"' "$CAT_PAGE" | sed -E 's/.*data-cat="//; s/"$//' | tr '\n' ' ')
   if [ "$cat_groups" != "preparation station washing ventilation exhaust cooking storage refrigeration " ]; then
     echo "FAIL: $CAT_PAGE must have exactly the eight public groups (preparation station washing ventilation exhaust cooking storage refrigeration), in that order — found: ${cat_groups:-none}"
     echo "  FIX: scripts/build-catalogue.js (PUBLIC_CATEGORIES) + scripts/public-categories.json, then re-run  node scripts/build-catalogue.js"

@@ -71,12 +71,12 @@ const FAMILIES = {                       // product page -> the configurable fam
   'commercial-gas-stoves':                   { fam: 'stove',        cat: 'cat-cooking',     key: /commercial gas stoves?/i },
   'commercial-wok-ranges':                   { fam: 'wok_range',    cat: 'cat-cooking',     key: /commercial wok ranges?/i },
   'commercial-griddles-grillers-and-fryers': { fam: 'cooking_line', cat: 'cat-cooking',     key: /commercial griddles?/i },
-  'gas-deck-ovens':                          { fam: 'deck_oven',    cat: 'cat-cooking',     key: /gas deck ovens?/i },
   'stainless-steel-cabinets':                { fam: 'cabinet',      cat: 'cat-storage',     key: /stainless steel cabinets?/i },
   'stainless-steel-shelving':                { fam: 'wall_shelf',   cat: 'cat-storage',     key: /stainless steel wall shel(f|ves)/i },
   'stainless-steel-racks':                   { fam: 'rack',         cat: 'cat-storage',     key: /stainless steel racks?/i },
 };
 const PRODUCT_SLUGS = Object.keys(FAMILIES);
+const CARD_SLUGS = PRODUCT_SLUGS;   // the gas deck oven keeps its page but has no catalogue card or Configure button (owner 2026-11-19)
 // owner ruling 2026-11-19: the /products/ hub is retired (a noindex forward to /catalogue/, pinned in tests/product-alignment.test.mjs); these are the eleven product pages and the fresh-air page
 const PAGE_PATHS = [...PRODUCT_SLUGS.map((s) => `/products/${s}/`), '/services/fresh-air-systems/'];
 const kindOf = (p) => (p === '/products/' ? 'hub' : p.startsWith('/products/') ? 'product' : 'service');
@@ -234,22 +234,22 @@ const OVEN_PATH = '/products/gas-deck-ovens/';
 // MADE-TO-ORDER pieces, so it cannot contradict the notes of the bought-in items (CE-016 "SS202 1.0mm inner", CE-020 "SS1.2mm top, 0.8mm lower", ...)
 const HUB_CONSTRUCTION = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
 const FAQ_CONSTRUCTION = 'Our made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate, with 1.2 mm bodies and shelving and square-tube posts with adjustable bullet feet; bought-in equipment such as fryers, ovens and refrigeration keeps the specification shown in its catalogue notes.';
-const WARRANTY_TEXT = 'We give a 6-month service warranty on our equipment and work. Full-kitchen projects also include 12 months of preventive maintenance service (PMS) with KitchenShield™.';
+const WARRANTY_TEXT = 'We give a 6-month warranty on workmanship. Full-kitchen projects also include 12 months of preventive maintenance service (PMS) with KitchenShield™.';
 const INSTALL_TEXT = 'Yes. We design, fabricate, deliver and install, then commission everything on site. Service and support continue after handover.';
 const homeAlts = {};
 for (const m of home.matchAll(/<img\b[^>]*?\bsrc="(site\/img\/projects\/(?:ispsc|dmmmsu)\/\d\d)(?:-thumb)?\.webp"[^>]*?\balt="([^"]*)"/g)) (homeAlts[m[1]] ||= new Set()).add(decode(m[2]));
 for (const m of home.matchAll(/<img\b[^>]*?\balt="([^"]*)"[^>]*?\bsrc="(site\/img\/projects\/(?:ispsc|dmmmsu)\/\d\d)(?:-thumb)?\.webp"/g)) (homeAlts[m[2]] ||= new Set()).add(decode(m[1]));
 
-const SEO_IMAGES = ['og-sinks', 'og-work-tables', 'og-gas-stoves', 'og-cabinets', 'og-shelving', 'og-racks', 'og-fresh-air', 'og-dish-tables', 'og-wok-ranges', 'og-griddles-grillers-fryers', 'og-gas-deck-ovens', 'og-range-hoods'].map((n) => `${n}.webp`).concat(['hero-shelving.webp', 'hero-racks.webp']).sort();
+const SEO_IMAGES = ['og-sinks', 'og-work-tables', 'og-gas-stoves', 'og-cabinets', 'og-shelving', 'og-racks', 'og-fresh-air', 'og-dish-tables', 'og-wok-ranges', 'og-griddles-grillers-fryers', 'og-range-hoods'].map((n) => `${n}.webp`).concat(['hero-shelving.webp', 'hero-racks.webp']).sort();
 
 describe('the 13 pages exist, in their own folders, with their own images', () => {
   it('has an index.html for every page, and /products/ holds exactly the forward to the catalogue and the eleven product pages (no stray file, no per-town or per-keyword page)', () => {
     for (const p of PAGES) assert.ok(p.html.length > 8000, `${p.file} is missing or empty`);
-    assert.equal(PAGES.length, 12);
+    assert.equal(PAGES.length, 11);
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) (e.isDirectory() ? walk(`${d}/${e.name}`) : files.push(`${d}/${e.name}`)); };
     walk('products');
-    assert.deepEqual(files.sort(), ['products/index.html', ...PRODUCT_SLUGS.map((s) => `products/${s}/index.html`)].sort());
+    assert.deepEqual(files.sort(), ['products/index.html', 'products/gas-deck-ovens/index.html', ...PRODUCT_SLUGS.map((s) => `products/${s}/index.html`)].sort());
     assert.ok(exists('services/fresh-air-systems/index.html'));
     assert.deepEqual(fs.readdirSync(path.join(ROOT, 'services/fresh-air-systems')), ['index.html']);
   });
@@ -348,7 +348,7 @@ describe('<head>: title, description, canonical, Open Graph, Twitter, CSP, fonts
 
   it('says the social card\'s alt text with the words the homepage already uses for that photo (no new claim in an alt)', () => {
     const ALT_OF = { 'og-products': 'dmmmsu/01', 'og-sinks': 'ispsc/06', 'og-work-tables': 'ispsc/02', 'og-gas-stoves': 'ispsc/07', 'og-cabinets': 'dmmmsu/02', 'og-shelving': 'dmmmsu/04', 'og-racks': 'dmmmsu/03', 'og-fresh-air': 'ispsc/01',
-      'og-dish-tables': 'ispsc/03', 'og-wok-ranges': 'ispsc/05', 'og-griddles-grillers-fryers': 'dmmmsu/01', 'og-gas-deck-ovens': 'dmmmsu/01', 'og-range-hoods': 'ispsc/01' };   // the five of 2026-10-28: crops of the un-watermarked masters, stamped like the others
+      'og-dish-tables': 'ispsc/03', 'og-wok-ranges': 'ispsc/05', 'og-griddles-grillers-fryers': 'dmmmsu/01', 'og-range-hoods': 'ispsc/01' };   // the five of 2026-10-28: crops of the un-watermarked masters, stamped like the others
     each((p) => {
       const card = p.meta('og:image').match(/\/(og-[a-z-]+)\.webp$/)[1];
       assert.ok(homeAlts[`site/img/projects/${ALT_OF[card]}`].has(p.meta('og:image:alt')), `${p.path}: the social alt "${p.meta('og:image:alt')}" is not one the homepage uses for ${ALT_OF[card]}`);
@@ -906,23 +906,6 @@ describe('the options on each product page are the ones the configurators offer 
     assert.ok(/The construction line above is for a griddle\./.test(note));
   });
 
-  it('gas deck ovens: one to three decks, three or six trays per deck (the width follows the trays: 700 or 1200 mm), none or a heavy-duty stand — and a width as the only size', () => {
-    const p = byPath('/products/gas-deck-ovens/'), r = rows(p), f = FAMS.families.deck_oven;
-    assert.equal(r.Decks, cap(words('deck_oven', 'decks')) + '.');
-    assert.deepEqual(group('deck_oven', 'decks').options.map((o) => o.v), [1, 2, 3]);
-    assert.deepEqual(group('deck_oven', 'trays').options.map((o) => [o.v, o.hint]), [[3, 'Standard width'], [6, 'Wide body']]);
-    assert.equal(r['Trays per deck'], 'Three or six: a standard-width body for three trays, a wide body for six.');
-    assert.deepEqual(group('deck_oven', 'stand').options.map((o) => o.v), ['none', 'heavy']);
-    assert.equal(r.Stand, 'None, to set the oven on your own base, or a heavy-duty stand.');
-    assert.deepEqual([f.minDimWhen[0].group, f.minDimWhen[0].includes, f.minDimWhen[0].min.W], ['trays', 6, 1200]);
-    assert.deepEqual(f.maxDimWhen.map((m) => [m.includes, m.max.W]), [[3, 700], [6, 1200]], 'the width is locked to 700 or 1200 mm by the trays per deck');
-    assert.ok(r.Size.startsWith('Made to your width. The width follows the trays per deck: 700 mm for three trays and 1200 mm for six.'));
-    assert.deepEqual(Object.keys(f.dims), ['W'], 'the width is the only size');
-    assert.ok(p.faq[1][1].includes('700 mm') && p.faq[1][1].includes('1200 mm'));
-    // the project photographs show range ovens, never a deck oven: the page says so
-    assert.ok(/They show gas range ovens; a deck oven is built to order\./.test(textOf(p.section('projects'))));
-  });
-
   it('range hoods: a wall, island or slim canopy (each with its own limits), baffle filters or none, lighting with or without; the length and the depth only', () => {
     const p = byPath('/products/stainless-steel-range-hoods/'), r = rows(p), f = FAMS.families.hood;
     assert.deepEqual(group('hood', 'type').options.map((o) => o.v), ['wall', 'island', 'slim']);
@@ -950,7 +933,7 @@ describe('the options on each product page are the ones the configurators offer 
       if (n === 0) assert.ok(!/<figure class="pg-fig">[^]*?\/site\/img\/products\//.test(noGallery(p.main)), `${s}: a product picture where there is no design`);
       assert.ok(!p.main.includes('pg-hero-plain'), `${s}: a project photograph leads the page`);   // (the inline stylesheet names the class too: look in <main>)
     }
-    for (const s of ['stainless-steel-dish-tables', 'commercial-wok-ranges', 'gas-deck-ovens']) {
+    for (const s of ['stainless-steel-dish-tables', 'commercial-wok-ranges']) {
       const p = byPath(`/products/${s}/`);
       assert.ok(p.html.includes('<section class="pg-hero pg-hero-plain">'), `${s}: the text hero`);
       assert.ok(!/\/site\/img\/products\//.test(p.main), `${s}: a product picture of something that is not the product`);
@@ -958,7 +941,7 @@ describe('the options on each product page are the ones the configurators offer 
   });
 
   it('ends every family\'s catalogue card with its own "Learn more" link to the page that sells it (FAMILY_PAGES in scripts/build-catalogue.js): one page per family, none missing', () => {
-    for (const [slug, f] of Object.entries(FAMILIES)) {
+    for (const [slug, f] of Object.entries(FAMILIES).filter(([k]) => k !== 'gas-deck-ovens')) {
       const card = catalogue.match(new RegExp(`<li class="cat-card cat-card-family[^"]*" data-family="${f.fam}"[\\s\\S]*?<p class="cat-from`));   // up to the price line: the feature bullets are <li> too
       assert.ok(card, `${f.fam}: no card on the catalogue page`);
       assert.ok(card[0].includes(`<a class="link-arrow" href="/products/${slug}/">Learn more about `), `${f.fam}: the card does not link to /products/${slug}/`);
@@ -967,7 +950,7 @@ describe('the options on each product page are the ones the configurators offer 
 
   it('keeps the eleven product names the catalogue and the pages use the same families: one configurable family per page, eleven in all', () => {
     assert.deepEqual(FAMS.order, ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']);
-    assert.deepEqual(Object.values(FAMILIES).map((f) => f.fam).sort(), [...FAMS.order].sort());
+    assert.deepEqual(Object.values(FAMILIES).map((f) => f.fam).sort(), FAMS.order.filter((f) => f !== 'deck_oven').sort(), 'ten product pages: the gas deck oven page is a forward (owner 2026-11-19)');
     for (const s of PRODUCT_SLUGS) assert.equal(`cat-${FAMS.families[FAMILIES[s].fam].category}`, FAMILIES[s].cat, `${s}: the catalogue category`);
   });
 });
@@ -1027,7 +1010,7 @@ describe('the price-intent block: the owner\'s sentence, a link to where the con
 
   it('links each product page\'s block to its own catalogue category (where the "Configure & add" card opens the configurator): sinks and dish tables → washing, tables → preparation, stoves, wok ranges, griddles, grillers and fryers and deck ovens → cooking, range hoods → ventilation, cabinets, shelving and racks → storage', () => {
     const catIds = new Set([...catalogue.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
-    for (const s of PRODUCT_SLUGS) {
+    for (const s of CARD_SLUGS) {
       const sec = byPath(`/products/${s}/`).section('estimate');
       const hrefs = [...sec.matchAll(/<a class="site-btn site-btn-primary" href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
       assert.equal(hrefs.length, 1, `${s}: the configurator button`);
@@ -1036,7 +1019,7 @@ describe('the price-intent block: the owner\'s sentence, a link to where the con
       assert.match(hrefs[0][1], /^Configure (a|an|wall) [a-z, ]+$/);
       // the card the link lands on is the family's own configurable card, and it opens the configurator without the intake sheet first
       const fam = FAMILIES[s].fam;
-      const section = catalogue.match(new RegExp(`<section class="cat-group" id="${FAMILIES[s].cat}"[\\s\\S]*?</section>`))[0];
+      const section = catalogue.match(new RegExp(`<section class="cat-group" data-cat="${FAMILIES[s].cat.slice(4)}"[\\s\\S]*?</section>`))[0];
       assert.ok(section.includes(`data-family="${fam}"`), `${s}: the category ${FAMILIES[s].cat} has no ${fam} card`);
     }
     assert.ok(/data-family/.test(read('js/quote-request.js')) && /openConfigurator\(add\.getAttribute\('data-family'\)/.test(read('js/quote-request.js')), 'the quote request no longer opens a configurator from a card button');
@@ -1046,7 +1029,7 @@ describe('the price-intent block: the owner\'s sentence, a link to where the con
   it('sends each product page\'s Configure button to /catalogue/?configure=<the page\'s own family id>#<its category> — a real family of scripts/public-families.json, in the category it really belongs to, one button per page, every family reached exactly once — and keeps the bare /catalogue/ canonical and the sitemap free of the query URL', () => {
     const famIds = Object.keys(FAMS.families);
     const reached = [];
-    for (const s of PRODUCT_SLUGS) {
+    for (const s of CARD_SLUGS) {
       const p = byPath(`/products/${s}/`);
       const buttons = [...p.main.matchAll(/<a class="site-btn site-btn-primary" href="([^"]+)">Configure[^<]*<\/a>/g)].map((m) => m[1]);
       assert.equal(buttons.length, 1, `${s}: Configure buttons`);
@@ -1058,7 +1041,7 @@ describe('the price-intent block: the owner\'s sentence, a link to where the con
       assert.equal((p.html.match(/\?configure=/g) || []).length, 1, `${s}: a second ?configure= link, or one outside the Configure button`);
       reached.push(m[1]);
     }
-    assert.deepEqual(reached.slice().sort(), famIds.slice().sort(), 'a family has no product page with a Configure button of its own (or two pages share one)');
+    assert.deepEqual(reached.slice().sort(), famIds.filter((f) => f !== 'deck_oven').sort(), 'a family has no product page with a Configure button of its own (or two pages share one)');
     // the deep link is a convenience, not a page: search engines are told the bare catalogue is the page, and it is the only catalogue URL in the sitemap
     assert.match(catalogue, /<link rel="canonical" href="https:\/\/barroindustries\.com\/catalogue\/">/);
     assert.ok(!/\?configure=/.test(read('sitemap.xml')) && /<loc>https:\/\/barroindustries\.com\/catalogue\/<\/loc>/.test(read('sitemap.xml')), 'the sitemap lists a ?configure= URL, or no longer lists /catalogue/');
@@ -1167,7 +1150,7 @@ describe('the brand: "Barro Kitchens" is one swappable <span data-brand> per pag
       const slugs = [...p.html.matchAll(/[A-Za-z0-9/._:-]*barro-?kitchens[A-Za-z0-9/._-]*/gi)].map((m) => m[0]).sort();
       assert.deepEqual(slugs.filter((s) => !/^https:\/\/(www\.facebook\.com|m\.me)\/barrokitchens$/.test(s)), ['/site/img/barro-kitchens-96.webp', 'https://barroindustries.com/icons/barro-kitchens.png'].sort(), `${p.path}: the hyphenated brand names`);
     });
-    assert.equal(total, 108);
+    assert.equal(total, 99);
   });
 
   it('is CSS-neutral and script-neutral: no stylesheet or script selects or reads [data-brand] or [data-brand-legacy]', () => {

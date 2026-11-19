@@ -142,7 +142,7 @@ describe('the mapping: every published SKU is absorbed by exactly one family or 
   it('OWNER RULING (b) as re-grouped on 2026-11-19: the preparation, sink, hood and storage groups show ONLY the configurable products (plus the project cards); equipment that is not one of the eleven types stays a fixed item', () => {
     const page = read('catalogue/index.html');
     const secs = {};
-    for (const m of page.matchAll(/<section[^>]*id="cat-([a-z]+)"[^>]*>([\s\S]*?)<\/section>/g)) secs[m[1]] = m[2];
+    for (const m of page.matchAll(/<section[^>]*data-cat="([a-z]+)"[^>]*>([\s\S]*?)<\/section>/g)) secs[m[1]] = m[2];
     const cards = (k) => [...(secs[k] || '').matchAll(/<li class="cat-card[^"]*" data-(family|id|ask)="([^"]+)"/g)].map((x) => [x[1], x[2]]);
     assert.deepEqual(cards('preparation'), [['family', 'prep_table']]);
     assert.deepEqual(cards('station'), [['ask', 'station']], 'the multi-purpose kitchen station is a project card (no configurator in the quote flow yet)');
@@ -152,14 +152,14 @@ describe('the mapping: every published SKU is absorbed by exactly one family or 
     assert.deepEqual(cards('storage'), [['family', 'cabinet'], ['family', 'wall_shelf'], ['family', 'rack'], ['ask', 'trolley']]);
     const cooking = cards('cooking');
     assert.deepEqual(cooking.slice(0, 3), [['ask', 'pugon'], ['ask', 'teppanyaki'], ['ask', 'inasal']], 'the three featured hero products (Website Notes, 2026-11-19) lead Chef Mode');
-    assert.deepEqual(cooking.slice(3, 7), [['family', 'stove'], ['family', 'wok_range'], ['family', 'cooking_line'], ['family', 'deck_oven']], 'then the four cooking families, in the family order');
-    assert.ok(cooking.slice(7, -2).every(([k]) => k === 'id'));
+    assert.deepEqual(cooking.slice(3, 6), [['family', 'stove'], ['family', 'wok_range'], ['family', 'cooking_line']], 'then the three cooking families, in the family order (the gas deck oven has no card: owner 2026-11-19)');
+    assert.ok(cooking.slice(6, -2).every(([k]) => k === 'id'));
     assert.deepEqual(cooking.slice(-2), [['ask', 'noodle_boiler'], ['ask', 'combi_stove']], 'the noodle boiler and combi stove (price list only, not in the master) close Chef Mode as quote-request cards (owner 2026-11-19)');
     // the steamer, the warmers and the salamander oven stay fixed Chef Mode cards; the meat grinder and slicer and the proofers are "other equipment" (the fryers, griddles and deck ovens are families)
     for (const id of ['CE-011', 'CE-024', 'CE-030', 'CE-031']) assert.ok(cooking.some(([, x]) => x === id), `${id} should be a fixed Chef Mode card`);
     for (const id of ['CE-007', 'CE-009', 'CE-010', 'CE-012', 'CE-016', 'CE-019', 'CE-020', 'CE-021', 'CE-022', 'CE-023', 'CE-026', 'CE-028']) assert.ok(!cooking.some(([, x]) => x === id), `${id} is absorbed: no card of its own`);
     assert.deepEqual(cards('refrigeration').map(([, x]) => x), ['RF-001', 'RF-002', 'RF-003', 'RF-004', 'RF-005', 'RF-006', 'BA-006', 'BA-011', 'MS-015', 'MS-016']);
-    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 33);
+    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 32);
     // and the families' own categories are the ones the ruling names
     assert.deepEqual(ORDER.map((f) => FAMS.families[f].category), CATEGORY_OF);
   });
@@ -361,7 +361,7 @@ describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
     assert.ok(!nopage.includes('cat-learn') && nopage.endsWith('<p class="cat-from cat-from-ask">Priced per project</p></li>'));
     // the words of every family come from scripts/catalogue-cards.js and say only what its configurator offers (the size line names the axes the family has)
     const WORDS = require('../scripts/catalogue-cards.js').CARD_COPY;
-    for (const f of ORDER) {
+    for (const f of ORDER.filter((x) => x !== 'deck_oven')) {
       const text = [WORDS[f].desc, WORDS[f].size, ...WORDS[f].specs, WORDS[f].options].filter(Boolean).join(' | ').replace('Same depth and height as the cooking line', '');   // the owner's own spec line (Website Notes): the stand's standard height, not a size the visitor sets
       const axes = ['W', 'D', 'H'].filter((k) => fam(f).dims[k]).length;
       assert.ok(!/height/i.test(text) || axes === 3, `${f}: promises a height it does not offer`);
@@ -1141,7 +1141,7 @@ describe('js/qr-preview.js — the live preview image (placeholder + photo), run
   });
   it('CATALOGUE LAYOUT (css, 2026-11-19): one auto-fitting grid of text cards — cards at least 250px wide, so one column on a phone and two or three on a desktop; the layout itself is pinned in tests/catalogue-layout.test.mjs', () => {
     const css = read('css/catalogue.css');
-    assert.match(css, /#site \.cat-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(min\(250px,100%\),1fr\)\);gap:12px\}/);
+    assert.match(css, /#site \.cat-main\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);gap:10px/);   // owner 2026-11-19: 2 / 3 / 4 columns
     assert.ok(!/cat-card-feature|cat-grid-multi|cat-tile/.test(css), 'a layout of the old photo cards is back');
   });
   it('the CSS switches the cross-fade off under prefers-reduced-motion, and uses no inline style or 4-digit z-index', () => {
@@ -1997,7 +1997,7 @@ describe('when / maxDimWhen — conditional options and upper limits (spec §4, 
 
   it('the catalogue card no longer lists option rows (2026-11-19), so no condition text sits on it; the condition is still on the configurator sheet (PF.whenText) and the card keeps its bullets', () => {
     const WORDS = require('../scripts/catalogue-cards.js').CARD_COPY;
-    for (const f of [ck, dish, deck, hood]) {
+    for (const f of [ck, dish, hood]) {
       const card = B.renderFamilyCard(f, WORDS[f.id], null, '');
       assert.ok(!/\(Type is|\(Side is|<dt>/.test(card), `${f.id}: a condition or an option row is on the card`);
       assert.ok((card.match(/<ul class="cat-feat">/g) || []).length === 1);

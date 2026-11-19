@@ -24,14 +24,15 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .cat-clear:hover{background:rgba(11,27,63,.08)}
 #site .cat-status{min-height:1.65em;margin-top:12px;color:var(--site-muted);font-size:14px;font-weight:500}
 
-/* layout: a sticky chip bar under the header on phones, a sticky sidebar from 1024px */
-#site .cat-layout{padding-bottom:clamp(40px,5vw,64px)}
-#site .cat-nav{position:sticky;top:var(--site-head);z-index:1;margin:0 -16px 8px;padding:0 16px;overflow-x:auto;border-bottom:1px solid var(--site-line);background:#fff;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+/* layout: a filter bar (All + one button per category) sticky under the header at every width, then the card grid across the full width (owner 2026-11-19: tighter grid) */
+#site .cat-layout{padding-bottom:clamp(28px,4vw,48px)}
+#site .cat-nav{position:sticky;top:var(--site-head);z-index:1;margin:0 -16px 6px;padding:0 16px;overflow-x:auto;border-bottom:1px solid var(--site-line);background:#fff;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 #site .cat-nav::-webkit-scrollbar{display:none}
 #site .cat-nav-title{display:none}
-#site .cat-nav ul{display:flex;gap:8px;width:max-content;padding:10px 0}
-#site .cat-link{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 14px;border:1px solid var(--site-line);border-radius:999px;background:#fff;color:var(--site-ink);font-size:14px;font-weight:500;text-decoration:none;white-space:nowrap}
+#site .cat-nav ul{display:flex;gap:8px;width:max-content;min-width:100%;padding:10px 0;margin:0;list-style:none}
+#site .cat-link{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 14px;cursor:pointer;border:1px solid var(--site-line);border-radius:999px;background:#fff;color:var(--site-ink);font-size:14px;font-weight:500;text-decoration:none;white-space:nowrap}
 #site .cat-link:hover{border-color:rgba(11,27,63,.4)}
+#site .cat-link:focus-visible{outline:2px solid var(--site-navy);outline-offset:2px}
 #site .cat-link-n{color:var(--site-muted);font-variant-numeric:tabular-nums}
 #site .cat-link.is-active{border-color:var(--site-navy);background:var(--site-navy);color:#fff}
 #site .cat-link.is-active .cat-link-n{color:rgba(255,255,255,.8)}
@@ -39,26 +40,30 @@ body{margin:0;background:#fff;color:#0E1116}
 
 /* one section per category, every product shown */
 /* section.cat-group, not .cat-group: it must out-rank site.css's  #site section[id]  scroll-margin rule */
-#site section.cat-group{scroll-margin-top:calc(var(--site-head) + var(--cat-bar) + 12px)}
-#site .cat-group+.cat-group{margin-top:clamp(28px,4vw,44px)}
-#site .cat-group h2{display:flex;align-items:baseline;gap:12px;margin:18px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--site-line);font-size:clamp(1.6rem,1.4vw + 1.1rem,2.1rem)}
+#site .cat-anchor{position:absolute;width:0;height:0;margin:0;padding:0;list-style:none;scroll-margin-top:calc(var(--site-head) + var(--cat-bar) + 12px)}
+/* ONE continuous grid for the whole catalogue (owner 2026-11-19): the group sections and their lists generate no box, so every card is an item of .cat-main */
+#site section.cat-group,#site .cat-grid{display:contents}
+#site .cat-group-name{margin:0 0 6px;color:var(--site-muted);font:600 11px/1.3 var(--site-sans);letter-spacing:.1em;text-transform:uppercase}
+#site .cat-group h2{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 #site .cat-count{color:var(--site-gold-ink);font:600 14px/1 var(--site-sans);letter-spacing:.04em;font-variant-numeric:tabular-nums}
 /* ═══ THE CARDS (owner rulings 2026-11-19) ════════════════════════════════════════════════════════════════════════════════════════════
    Text cards with the product photo on top when there is one (no drawing, no tile). Children of every card, in order: .cat-head (tag, name, one line) · .cat-feat (three to five
    bullets) · .cat-learn (a configurable card only) · .cat-from (the price line) · and the button — added at run time by js/quote-request.js as .qr-add
    ("Add to quote" / "Configure & add"), or the plain link .cat-ask ("Request a quote") on a project card. The grid sizes itself: one column on a phone, two or
    three where the width allows (cards are at least 250px wide), every card of a row the same height with its price line and button at the bottom. */
-#site .cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(250px,100%),1fr));gap:12px}
-#site .cat-card{display:flex;flex-direction:column;min-width:0;padding:16px 16px 16px;border:1px solid var(--site-line);border-radius:6px;background:#fff;overflow-wrap:break-word;transition:border-color .2s,box-shadow .2s}
+#site .cat-main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0;padding:0;list-style:none}
+#site .cat-grid{margin:0;padding:0;list-style:none}
+#site .cat-main>.cat-empty{grid-column:1/-1}
+#site .cat-card{display:flex;flex-direction:column;min-width:0;padding:12px;border:1px solid var(--site-line);border-radius:6px;background:#fff;overflow-wrap:break-word;transition:border-color .2s,box-shadow .2s}
 #site .cat-card:hover{border-color:rgba(11,27,63,.3);box-shadow:0 10px 28px rgba(11,27,63,.07)}
 /* the product photo (owner 2026-11-19 later: photos back; no drawings, no tiles): full-bleed across the top of the card, the whole product visible */
-#site .cat-photo{position:relative;margin:-16px -16px 14px;aspect-ratio:4/3;border-bottom:1px solid var(--site-line);border-radius:6px 6px 0 0;background:#f7f6f2;overflow:hidden}
-#site .cat-photo img{position:absolute;inset:0;width:100%;height:100%;padding:12px 14px 28px;object-fit:contain}
-#site .cat-photo figcaption{position:absolute;left:12px;bottom:7px;color:var(--site-muted);font-size:11px;line-height:1.2}
-#site .cat-card.is-hidden,#site .cat-group.is-empty{display:none}
+#site .cat-photo{position:relative;margin:-12px -12px 10px;aspect-ratio:4/3;border-bottom:1px solid var(--site-line);border-radius:6px 6px 0 0;background:#f7f6f2;overflow:hidden}
+#site .cat-photo img{position:absolute;inset:0;width:100%;height:100%;padding:8px 10px 22px;object-fit:contain}
+#site .cat-photo figcaption{position:absolute;left:10px;bottom:5px;color:var(--site-muted);font-size:11px;line-height:1.2}
+#site .cat-card.is-hidden,#site .cat-group.is-empty,#site section.cat-group.is-off{display:none}
 
 #site .cat-tag{display:inline-block;margin:0 0 8px;padding:3px 9px;border-radius:999px;background:var(--site-navy);color:#fff;font:600 11px/1.3 var(--site-sans);letter-spacing:.1em;text-transform:uppercase}
-#site .cat-card h3{margin:0 0 6px;color:var(--site-ink);font:600 17px/1.3 var(--site-sans);letter-spacing:0}
+#site .cat-card h3{margin:0 0 4px;color:var(--site-ink);font:600 17px/1.3 var(--site-sans);letter-spacing:0}
 /* the "Featured" tag beside "Configurable" / on the hero cards: an outline in the gold, so it reads as a second mark, not a second button */
 #site .cat-tag+.cat-tag{margin-left:6px}
 #site .cat-tag-featured{background:transparent;color:var(--site-gold-ink);box-shadow:inset 0 0 0 1px var(--site-gold)}
@@ -68,26 +73,26 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .cat-lead{margin:0;color:var(--cat-ink);font-size:14.5px;line-height:1.5}
 
 /* the feature bullets: short lines, a gold dash each, 14px in the same ink */
-#site .cat-feat{margin:12px 0 0;padding:0;list-style:none;color:var(--cat-ink);font-size:14px;line-height:1.45}
-#site .cat-feat li{position:relative;margin:0;padding:3px 0 3px 16px}
+#site .cat-feat{margin:8px 0 0;padding:0;list-style:none;color:var(--cat-ink);font-size:14px;line-height:1.4}
+#site .cat-feat li{position:relative;margin:0;padding:2px 0 2px 14px}
 #site .cat-feat li::before{content:"";position:absolute;left:0;top:.95em;width:8px;height:2px;border-radius:1px;background:var(--site-gold)}
 /* the "Standard size:" and "Options:" lines: the label muted and semibold, the value in the card's ink; they wrap, never widen the card */
-#site .cat-size,#site .cat-options{margin:12px 0 0;color:var(--cat-ink);font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+#site .cat-size,#site .cat-options{margin:8px 0 0;color:var(--cat-ink);font-size:14px;line-height:1.4;overflow-wrap:anywhere}
 #site .cat-size span,#site .cat-options span{color:var(--site-muted);font-weight:600}
-#site .cat-options{margin:0 0 14px}
+#site .cat-options{margin:0 0 10px}
 #site .cat-size+.cat-feat{margin-top:8px}
 /* a configurable card's "Learn more" link to its product page (SEO build, 2026-10-22) */
-#site .cat-learn{margin:10px 0 0;font-size:14px;line-height:1.5}
+#site .cat-learn{margin:8px 0 0;font-size:14px;line-height:1.4}
 
 /* the price line sits at the bottom of the card, above the button: "From" small, the amount large, "+ VAT" small; "Priced per project" is the same line, quieter */
-#site .cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:auto 0 0;padding-top:14px;color:var(--site-muted);font-size:14px;line-height:1.3}
-#site .cat-feat,#site .cat-learn{margin-bottom:14px}
+#site .cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:auto 0 0;padding-top:10px;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .cat-feat,#site .cat-learn{margin-bottom:10px}
 #site .cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
 #site .cat-vat{font-size:14px}
 #site .cat-from-ask{color:var(--cat-ink);font-size:15px;font-weight:500}
 
 /* the project card's button: the same shape as .qr-add (css/quote-request.css), a plain link */
-#site .cat-ask{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin:12px 0 0;padding:0 16px;border:1px solid var(--site-navy);border-radius:6px;background:transparent;color:var(--site-navy);font:600 14px/1 var(--site-sans);letter-spacing:.02em;text-decoration:none}
+#site .cat-ask{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin:10px 0 0;padding:0 12px;border:1px solid var(--site-navy);border-radius:6px;background:transparent;color:var(--site-navy);font:600 14px/1 var(--site-sans);letter-spacing:.02em;text-decoration:none}
 #site .cat-ask:hover{background:var(--site-navy);color:#fff}
 #site .cat-ask:focus-visible{outline:2px solid var(--site-navy);outline-offset:3px}
 
@@ -112,17 +117,19 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (min-width:900px){
   #site .cat-cta-in{grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:72px}
 }
-@media (min-width:1024px){
-  #site .cat-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:clamp(40px,5vw,72px);align-items:start;padding-top:clamp(28px,3.4vw,44px)}
-  #site .cat-nav{top:calc(var(--site-head) + 24px);max-height:calc(100vh - var(--site-head) - 48px);max-height:calc(100dvh - var(--site-head) - 48px);margin:0;padding:0;overflow-x:visible;overflow-y:auto;border-bottom:0}
-  #site .cat-nav-title{display:block;margin-bottom:12px;color:var(--site-muted);font:600 11px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
-  #site .cat-nav ul{display:block;width:auto;padding:0}
-  #site .cat-link{justify-content:space-between;min-height:44px;padding:6px 4px 6px 16px;gap:12px;white-space:normal;line-height:1.3;border:0;border-left:2px solid var(--site-line);border-radius:0;background:transparent;font-size:15px}
-  #site .cat-link:hover{border-left-color:rgba(201,162,39,.65);color:var(--site-navy)}
-  #site .cat-link.is-active{border-left-color:var(--site-gold);background:transparent;color:var(--site-navy);font-weight:600}
-  #site .cat-link.is-active .cat-link-n{color:var(--site-gold-ink)}
-  #site section.cat-group{scroll-margin-top:calc(var(--site-head) + 24px)}
-  #site .cat-group:first-child h2{margin-top:0}
+@media (min-width:601px){
+  #site .cat-main{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  #site .cat-nav{margin:0 0 8px;padding:0}
+  #site .cat-nav ul{flex-wrap:wrap;width:auto}
+  #site .cat-link{min-height:40px;padding:0 16px}
+}
+@media (min-width:1100px){
+  #site .cat-main{grid-template-columns:repeat(4,minmax(0,1fr))}
+  #site .cat-card{padding:14px}
+  #site .cat-photo{margin:-14px -14px 12px}
+}
+@media (max-width:359px){
+  #site .cat-main{grid-template-columns:minmax(0,1fr)}
 }
 @media (prefers-reduced-motion:reduce){
   #site .cat-card,#site .cat-top,#site .cat-link{transition:none}

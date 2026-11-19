@@ -374,7 +374,7 @@ describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitema
       assert.ok(maxRepeat(d) <= 2, `${p.file}: a word is repeated in the description`);
       assert.ok(/\.$/.test(d), 'the description is a finished sentence');
     }
-    assert.ok(/^Premium commercial kitchen equipment and stainless steel fabrication in SS304 or SS316, built to order in Quezon City by Barro Kitchens by Barro Industries\.$/.test(hd));   // owner ruling 2026-10-28: 156 characters, so Google shows all of it
+    assert.ok(/^Commercial kitchen equipment and stainless steel fabrication in SS304 or SS316, built to order in Quezon City by Barro Kitchens by Barro Industries\.$/.test(hd));   // owner ruling 2026-10-28: 156 characters, so Google shows all of it
     assert.ok(hd.includes('stainless steel fabrication'), 'the homepage description names the fabrication (SEO build 2026-10-22)');
     assert.ok(/^Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: sinks, work tables, gas stoves, range hoods and shelving\.$/.test(cd));   // owner ruling 2026-10-28: 155 characters (was 227), so Google shows all of it; the products it names are checked in the next test
     // the permanent name, once, in each (owner ruling 2026-10-22)
@@ -518,7 +518,7 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     assert.equal(list['@type'], 'ItemList');
     assert.equal(list.url, catalogue.url);
     assert.equal(list.name, 'Commercial kitchen equipment catalogue');
-    const sections = catalogue.html.split('<section class="cat-group" id="cat-').slice(1).map((g) => ({
+    const sections = catalogue.html.split('<section class="cat-group" data-cat="').slice(1).map((g) => ({
       id: g.match(/^([a-z_]+)"/)[1],
       cards: [...g.matchAll(/<li class="cat-card[^"]*"[^>]*>([\s\S]*?)<p class="cat-from/g)].map((m) => ({         // up to the price line (the feature bullets are <li> too)
         name: decode(m[1].match(/<h3>([^<]*)<\/h3>/)[1]),
@@ -527,9 +527,9 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     }));
     // a family with its own /products/ page points there (the target of its card's "Learn more" link); every other item points at its category anchor
     const expected = sections.flatMap((s) => s.cards.map((c) => ({ name: c.name, url: c.learn ? `https://barroindustries.com${c.learn}` : `${catalogue.url}#cat-${s.id}` })));
-    assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 11, 'all eleven configurable families point at their product page');
-    assert.equal(expected.length, 33, 'the page shows 33 cards: the eleven configurable families, the 14 fixed items and the eight project cards, the three featured hero products first in Chef Mode (Website Notes, 2026-11-19)');
-    assert.equal(list.numberOfItems, 33);
+    assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 10, 'all ten catalogue families point at their product page');
+    assert.equal(expected.length, 32, 'the page shows 32 cards: the ten configurable families (no gas deck oven: owner 2026-11-19), the 14 fixed items and the eight project cards, the three featured hero products first in Chef Mode (Website Notes, 2026-11-19)');
+    assert.equal(list.numberOfItems, 32);
     assert.deepEqual(list.itemListElement.map((i) => ({ name: i.name, url: i.url })), expected);
     list.itemListElement.forEach((item, i) => {
       assert.deepEqual(Object.keys(item), ['@type', 'position', 'name', 'url']);
@@ -1169,18 +1169,14 @@ describe('6 · the hero logo intro: a translucent clip behind the headline that 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-grade, hairline (standard), brushed, mirror or satin', () => {
   const homeText = visibleText(home.html.slice(home.html.indexOf('<div id="site"'), home.html.indexOf('<!-- /#site -->')));
-  const proofSub = visibleText(home.html.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0].match(/<li><span class="proof-val">SS304[\s\S]*?<\/li>/)[0]);
   const catText = visibleText(catalogue.html.slice(catalogue.html.indexOf('<body')).replace(/<script[\s\S]*?<\/script>/g, ''));
   const materialRows = [...catalogue.html.matchAll(/<dt>Material<\/dt><dd>([^<]*)<\/dd>/g)].map((m) => decode(m[1]));
 
   it('states both grades on the homepage — hero lead, proof bar ("SS304 / SS316", two lines at most), meta / social descriptions — and on the catalogue — lede, every configurable card, the descriptions — SS304 first, as the standard', () => {
     assert.ok(homeText.includes('in food-grade SS304 and laboratory-grade SS316 stainless steel, including exhaust and fresh-air systems'));
-    const proof = home.html.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0];
-    assert.ok(proof.includes('<span class="proof-val">SS304 / SS316</span>'));
-    assert.ok(/food-grade/.test(proofSub) && /laboratory-grade/.test(proofSub));
-    assert.ok(proofSub.replace('SS304 / SS316', '').trim().length <= 56, `the proof-bar sub-line is ${proofSub.length} characters: it would run to three lines`);
+    assert.ok(visibleText(home.html.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0]).includes('SS304 food grade'), 'the homepage proof strip says SS304 food grade (owner 2026-11-19)');
     for (const k of ['description', 'og:description', 'twitter:description']) for (const p of [home, catalogue]) assert.ok(/SS304/.test(p.meta(k)) && /SS316/.test(p.meta(k)) && p.meta(k).indexOf('SS304') < p.meta(k).indexOf('SS316'), `${p.file}: ${k}`);
-    assert.ok(catText.includes('made in our own shop in SS304 stainless steel (SS316 on request) and built to your sizes.'));
+    assert.ok(catText.includes('built by our own team in SS304 stainless steel (SS316 on request) and built to your sizes.'));
     // 2026-11-19: a card is text with feature bullets, no specification list, so the per-card Material row is gone; the standard grade is still a bullet of the preparation card and the lede says both grades
     assert.equal(materialRows.length, 0, 'a Material row is back on a card');
     assert.ok(catalogue.html.includes('<li>SS304 stainless steel</li>') && catalogue.html.includes('SS316 on request</p>'));

@@ -110,7 +110,7 @@ const cardsOnPage = block.split('<li class="cat-card').slice(1).map((c) => c.spl
 
 describe('every card is text plus (when mapped) its product photo: photo, tag, name, code, one sentence, standard size, three or four specs, options, one price line (owner rulings 2026-11-19, Website Notes)', () => {
   it('each card on the real page is  head (tags?, name, code?, one sentence)  then  size line?  then  spec list  then  options line?  then (configurable cards) a "Learn more" link  then the price line — in that order, and nothing else', () => {
-    assert.equal(cardsOnPage.length, 33);
+    assert.equal(cardsOnPage.length, 32);
     for (const c of cardsOnPage) {
       const key = (c.match(/data-(?:family|id|ask)="([^"]+)"/) || [])[1];
       const i = [c.indexOf('<div class="cat-head">'), c.indexOf('<ul class="cat-feat">'), c.indexOf('<p class="cat-from')];
@@ -150,7 +150,7 @@ describe('every card is text plus (when mapped) its product photo: photo, tag, n
 
   it('every word on a card comes from scripts/catalogue-cards.js: one sentence (not a paragraph), three or four specs of at most 70 characters, a well-formed code, size and options, no price word, no staff-only text', () => {
     const entries = [...Object.entries(CARDS.CARD_COPY), ...CARDS.PROJECT_CARDS.map((p) => [p.id, p])];
-    assert.equal(entries.length, 33);
+    assert.equal(entries.length, 32);
     for (const [id, c] of entries) {
       assert.ok(c.desc && c.desc.length <= 100 && !/[.!?]\s+\S/.test(c.desc), `${id}: the description is not one short sentence`);
       assert.ok(!c.features, `${id}: the old feature bullets are gone`);
@@ -164,7 +164,7 @@ describe('every card is text plus (when mapped) its product photo: photo, tag, n
       assert.ok(!c.options || block.includes(`<p class="cat-options"><span>Options:</span> ${B.esc(c.options)}</p>`), `${id}: the options line`);
     }
     // each configurable card says only what its configurator really offers
-    assert.deepEqual(Object.keys(CARDS.CARD_COPY).filter((k) => FAMS.order.includes(k)).sort(), [...FAMS.order].sort(), 'a family has no wording');
+    assert.deepEqual(Object.keys(CARDS.CARD_COPY).filter((k) => FAMS.order.includes(k)).sort(), FAMS.order.filter((f) => f !== 'deck_oven').sort(), 'a family has no wording');   // the gas deck oven has no catalogue card (owner 2026-11-19)
   });
 
   it('the configurable cards state the standard material the homepage states, and nothing the homepage does not claim', () => {
@@ -174,8 +174,8 @@ describe('every card is text plus (when mapped) its product photo: photo, tag, n
     for (const c of cardsOnPage) assert.ok(!/NSF|ISO ?\d|certified|warranty|guarantee/i.test(stripTags(c)), 'an unverifiable claim sits on a card');
   });
 
-  it('the live search placeholder, status and counts count the cards of the page (33 in 8 groups)', () => {
-    assert.ok(block.includes('placeholder="Search 33 products"') && block.includes('>33 products in 8 categories</p>'));
+  it('the live search placeholder, status and counts count the cards of the page (32 in 8 groups)', () => {
+    assert.ok(block.includes('placeholder="Search 32 products"') && block.includes('>32 products in 8 categories</p>'));
   });
 });
 
@@ -183,16 +183,18 @@ describe('css/catalogue.css — compact text cards that never overflow', () => {
   const MIN = 'minmax(min(250px,100%),1fr)';
 
   it('the grid is one auto-fitting grid: cards at least 250px wide (one column on a phone, two or three on a desktop), a gap of 16px at most, nothing wider than its column', () => {
-    const g = merged('#site .cat-grid');
+    const g = merged('#site .cat-main');
     assert.equal(g.display, 'grid');
-    assert.equal(g['grid-template-columns'], `repeat(auto-fill,${MIN})`);
+    assert.equal(g['grid-template-columns'], 'repeat(2,minmax(0,1fr))');   // owner 2026-11-19: 2 columns on a phone, 3 from 601px, 4 from 1100px (media rules below), one under 360px
+    const colsAt = (w) => css.includes(`@media (min-width:${w}px)`);
+    assert.ok(colsAt(601) && colsAt(1100) && /repeat\(4,minmax\(0,1fr\)\)/.test(css) && /repeat\(3,minmax\(0,1fr\)\)/.test(css) && /max-width:359px/.test(css));
     assert.ok(px(g.gap) <= 16 && px(g.gap) >= 8);
     const c = merged('#site .cat-card');
     assert.equal(c.display, 'flex');
     assert.equal(c['flex-direction'], 'column');
     assert.equal(c['min-width'], '0');
     assert.equal(c['overflow-wrap'], 'break-word');
-    assert.ok(!/repeat\(3,/.test(css) && !/overflow-x\s*:\s*scroll/.test(css.replace(/\.cat-nav[^}]*}/g, '')), 'a fixed three-column grid or a scrolling card');
+    assert.ok(!/overflow-x\s*:\s*scroll/.test(css.replace(/\.cat-nav[^}]*}/g, '')), 'a fixed three-column grid or a scrolling card');
   });
 
   it('the price line and the button sit at the bottom of every card (the price line takes the free space above it), so a row of cards lines up', () => {
@@ -243,9 +245,10 @@ describe('css/catalogue.css — compact text cards that never overflow', () => {
 
   it('keeps the spacing between sections and the page padding modest (upper bounds, so dead space cannot creep back)', () => {
     const clampMax = (v) => parseFloat(String(v).match(/clamp\([^,]+,[^,]+,\s*([\d.]+)px\)/)[1]);
-    assert.ok(clampMax(merged('#site .cat-group+.cat-group')['margin-top']) <= 48);
-    const h2 = merged('#site .cat-group h2');
-    assert.ok(px(h2['padding-bottom']) <= 12 && /^\d+px 0 \d+px$/.test(h2.margin) && px(h2.margin.split(' ')[2]) <= 16);
+    // one continuous grid (owner 2026-11-19): no section gap and no visible group heading; the group h2 is visually hidden and the group sits on each card as an eyebrow
+    assert.equal(merged('#site section.cat-group').display, 'contents');
+    assert.equal(merged('#site .cat-group h2').position, 'absolute');
+    assert.ok(merged('#site .cat-group-name'));
     assert.ok(clampMax(merged('#site .cat-layout')['padding-bottom']) <= 64);
     assert.ok(px(merged('#site .cat-card').padding.split(' ')[0]) <= 20, 'the card padding grew');
   });
@@ -304,6 +307,8 @@ function runCatalogueScript(opts = {}) {
   const byId = {};
   const index = (n) => { if (n.attrs && n.attrs.id) byId[n.attrs.id] = n; n.children.forEach(index); };
   index(tree);
+  const sections = (n) => { if (n.attrs && n.attrs.class === 'cat-group' && n.attrs['data-cat']) byId['cat-' + n.attrs['data-cat']] = n; n.children.forEach(sections); };   // the #cat-… anchor is a zero-size item inside the section; the tests below mean the SECTION
+  sections(tree);
   const timers = [], clicks = [], replaced = [], onReady = [], onLoad = [], onFocusOut = [], winHandlers = {};
   const win = {
     innerWidth: 1440, innerHeight: 900, pageYOffset: 0,
@@ -351,7 +356,7 @@ describe('search finds every card — the configurable ones included — by runn
   const ALL = env.cards.map(env.idOf);
 
   it('starts with every card shown, and a blank query restores them all', () => {
-    assert.equal(ALL.length, 33);
+    assert.equal(ALL.length, 32);
     assert.deepEqual(env.search(''), ALL);
   });
 
@@ -373,7 +378,7 @@ describe('search finds every card — the configurable ones included — by runn
   });
 
   it('still finds fixed cards by code, name, description and bullets — and not by the tag, the price line or the button', () => {
-    assert.deepEqual(env.search('ce-016'), ['deck_oven'], 'the code of an absorbed SKU finds the family that replaced it');
+    assert.deepEqual(env.search('ce-009'), ['cooking_line'], 'the code of an absorbed SKU finds the family that replaced it');
     assert.deepEqual(env.search('ba-011'), ['BA-011']);
     assert.ok(env.search('griddle').includes('cooking_line'));
     assert.ok(env.search('humidity tray').includes('BA-006'), 'a bullet is searched');
@@ -410,8 +415,8 @@ describe('search finds every card — the configurable ones included — by runn
 
   it('js/catalogue.js reads the name, the one line and the bullets (its haystack selector) and the page keeps the data-cat / data-id / data-family hooks it and js/quote-request.js use', () => {
     assert.match(catJs, /querySelectorAll\('h3, \.cat-code, \.cat-lead, \.cat-size, \.cat-feat, \.cat-options'\)/);
-    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 33);
-    assert.equal((block.match(/data-kw="/g) || []).length, 33);
+    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 32);
+    assert.equal((block.match(/data-kw="/g) || []).length, 32);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
     assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head"|figure class="cat-photo")/.test(block), 'a card starts with something other than its photo or its head');
     assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 6, 'the 6 cards with one of the owner\'s design images (preparation table, sink, range hood, cabinet; station, exhaust); every other card is text only (owner 2026-11-19)');
@@ -458,9 +463,9 @@ describe('?configure=<family> opens that family\'s configurator by pressing its 
     assert.deepEqual(env.clicks, ['family:stove'], 'pressed again');
   });
 
-  it('opens each of the eleven families by its own id — that family\'s button and no other — and the ids are the ones on the cards', () => {
+  it('opens each of the ten catalogue families (all but the gas deck oven, which has no card) by its own id — that family\'s button and no other — and the ids are the ones on the cards', () => {
     assert.equal(FAMS.order.length, 11);
-    for (const id of FAMS.order) {
+    for (const id of FAMS.order.filter((f) => f !== 'deck_oven')) {
       const env = run('?configure=' + id);
       env.addButtons(); env.fire();
       assert.deepEqual(env.clicks, ['family:' + id], id);

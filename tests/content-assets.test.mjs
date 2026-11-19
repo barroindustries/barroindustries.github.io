@@ -187,7 +187,7 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
   it('links every services page, the catalogue, the eleven product pages, the projects, the areas page, the FAQ, the quote flow and Messenger', () => {
     const urls = new Set(links.map((l) => l.url));
     const need = ['/services/', '/services/commercial-kitchen-fit-out/', '/services/stainless-steel-fabrication/', '/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/lpg-gas-line-installation/', '/services/kitchen-fire-suppression/', '/services/institutional-and-government-supply/',
-      '/catalogue/', '/products/stainless-steel-sinks/', '/products/stainless-steel-dish-tables/', '/products/stainless-steel-work-tables/', '/products/commercial-gas-stoves/', '/products/commercial-wok-ranges/', '/products/commercial-griddles-grillers-and-fryers/', '/products/gas-deck-ovens/', '/products/stainless-steel-range-hoods/', '/products/stainless-steel-cabinets/', '/products/stainless-steel-shelving/', '/products/stainless-steel-racks/',
+      '/catalogue/', '/products/stainless-steel-sinks/', '/products/stainless-steel-dish-tables/', '/products/stainless-steel-work-tables/', '/products/commercial-gas-stoves/', '/products/commercial-wok-ranges/', '/products/commercial-griddles-grillers-and-fryers/', '/products/stainless-steel-range-hoods/', '/products/stainless-steel-cabinets/', '/products/stainless-steel-shelving/', '/products/stainless-steel-racks/',
       '/work/', '/work/ispsc-2026/', '/work/dmmmsu-2022-2023/', '/areas-we-serve/', '/faq/', '/catalogue/?quote=1', '/sales/clientinformationrequest/'];
     for (const n of need) assert.ok(urls.has(BASE + n), `llms.txt does not link ${n}`);
     assert.ok(urls.has(MSGR), 'no Messenger link');
@@ -205,7 +205,7 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
   });
 
   it('states the facts the owner confirmed: the QC address, one phone, one email, the three registrations, the warranty, both grades, four finishes (hairline the standard), 23 years, the family origin, the 13 places', () => {
-    for (const f of [ADDRESS, PHONE, EMAIL, 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'food-grade SS304', 'laboratory-grade SS316', 'hairline as standard; brushed, mirror or satin on request', '23 years', 'began as a family business in Baguio City and La Union', 'Barro Kitchens', 'Barro Industries OPC']) assert.ok(txt.includes(f), `llms.txt lacks "${f}"`);
+    for (const f of [ADDRESS, PHONE, EMAIL, 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'food-grade SS304', 'laboratory-grade SS316', 'hairline as standard; brushed, mirror or satin on request', '23 years', 'began as a family business in Baguio City and La Union', 'Barro Kitchens', 'Barro Industries OPC']) assert.ok(txt.includes(f), `llms.txt lacks "${f}"`);
     for (const p of PLACES) assert.ok(txt.includes(p), `llms.txt lacks ${p}`);
     assert.deepEqual([...new Set([...txt.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
     assert.deepEqual([...new Set([...txt.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map((m) => m[0].replace(/\D/g, '').replace(/^63/, '0')))], ['09276836300']);
@@ -224,7 +224,7 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
   it('says what the catalogue holds (the one Products list, in eight groups) and lists the eleven configurable product pages; the retired /products/ hub is not listed (owner 2026-11-19)', () => {
     assert.ok(lines.some((l) => /^- \[Products \(the catalogue\)\]\(https:\/\/barroindustries\.com\/catalogue\/\): every product in one list, in eight groups \(preparation, kitchen stations, washing, ventilation, exhaust and fresh air, Chef Mode cooking equipment, storage, refrigeration\)/.test(l)), 'the catalogue line');
     assert.ok(!/barroindustries\.com\/products\/\)/.test(txt), 'the retired hub is listed');
-    assert.equal(lines.filter((l) => /^- \[[^\]]+\]\(https:\/\/barroindustries\.com\/products\/[a-z-]+\/\)/.test(l)).length, 11, 'one line per product page');
+    assert.equal(lines.filter((l) => /^- \[[^\]]+\]\(https:\/\/barroindustries\.com\/products\/[a-z-]+\/\)/.test(l)).length, 10, 'one line per product page');
   });
 
   it('carries no amount, no banned name, no old contact detail, no system, no superlative, no project count, no client but DMMMSU and ISPSC, in British spelling', () => {
@@ -909,7 +909,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
   const sectionOf = (p, id) => (p.article.match(new RegExp(`<section id="${id}"[\\s\\S]*?</section>`)) || [''])[0];
   const faqOf = (p) => [...p.html.matchAll(/<div class="faq-item">\s*<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/g)].map((m) => ({ q: visibleText(m[1]), html: m[2], a: visibleText(m[2]) }));
   const pageText = (rel) => visibleText(read(rel));
-  const PRODUCTS = ['stainless-steel-sinks', 'stainless-steel-dish-tables', 'stainless-steel-work-tables', 'commercial-gas-stoves', 'commercial-wok-ranges', 'commercial-griddles-grillers-and-fryers', 'gas-deck-ovens', 'stainless-steel-range-hoods', 'stainless-steel-cabinets', 'stainless-steel-shelving', 'stainless-steel-racks'];
+  const PRODUCTS = ['stainless-steel-sinks', 'stainless-steel-dish-tables', 'stainless-steel-work-tables', 'commercial-gas-stoves', 'commercial-wok-ranges', 'commercial-griddles-grillers-and-fryers', 'stainless-steel-range-hoods', 'stainless-steel-cabinets', 'stainless-steel-shelving', 'stainless-steel-racks'];
 
   it('are dated 28 October 2026, listed in sitemap.xml with a lastmod no earlier than that (scripts/sitemap-lastmod.js moves it to the page\'s last change; the hub\'s no earlier than 2026-10-29), linked from the hub card and ItemList after the first two guides, and listed in llms.txt', () => {
     const sm = read('sitemap.xml'), llms = read('llms.txt'), hub = byPath('/guides/');
@@ -971,7 +971,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
         ['Gas stove', ['/products/commercial-gas-stoves/']],
         ['Wok range', ['/products/commercial-wok-ranges/']],
         ['Griddle, griller and fryer', ['/products/commercial-griddles-grillers-and-fryers/']],
-        ['Deck oven', ['/products/gas-deck-ovens/']],
+        ['Deck oven', ['/products/gas-deck-ovens/']],   // the guide (owned by another session) still lists it; the page now forwards to the catalogue
         ['Steamers and warmers', ['/catalogue/#cat-cooking']],
       ],
       'ventilation-safety': [
@@ -1092,7 +1092,6 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       [list, /Choose up to six burner positions one by one, with a griller, griddle, oven or fryer added/, P('commercial-gas-stoves'), /One to six burner positions, each chosen one by one: .* None, or a griller, a griddle, an oven or a fryer/],
       [list, /high-pressure burners in recessed wok rings for stir-frying, with one to three wok holes/, P('commercial-wok-ranges'), /Wok holes One, two or three\.[\s\S]*recessed wok rings with high-pressure burners/],
       [list, /a flat griddle, a lava-rock griller or a fryer, each on its own stand and built to your size/, P('commercial-griddles-grillers-and-fryers'), /Each one stands on its own stainless steel stand\.[\s\S]*Type A griddle, a lava-rock griller, a fryer, or a griller and a griddle side by side\./],
-      [list, /one to three decks and three or six trays on each deck/, P('gas-deck-ovens'), /Decks One, two or three\. Trays per deck Three or six/],
       [list, /wall, island or slim, with baffle filters and lighting/, P('stainless-steel-range-hoods'), /A wall canopy[\s\S]*an island canopy[\s\S]*a slim, low-profile canopy[\s\S]*baffle filters[\s\S]*Lighting With a lamp and switch/],
       [list, /fully welded ducting, with an access door for maintenance/, 'services/exhaust-and-fresh-air-systems/index.html', /Fully welded rectangular exhaust ducting[\s\S]*an access door for maintenance/],
       [list, /ducting, a blower and room diffusers/, 'services/fresh-air-systems/index.html', /Fresh-air ducting with its own blower[\s\S]*Room diffusers/],
@@ -1102,7 +1101,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       [layout, /A wet chemical system integrated with the hood protects the cooking surface and the exhaust path/, 'services/kitchen-fire-suppression/index.html', /wet chemical fire suppression system integrated with your range hood, designed to protect the cooking surface and the exhaust path/],
       [list, /a soiled table where dirty dishes are loaded and a clean table where washed dishes land, either side of the dishwasher/, P('stainless-steel-dish-tables'), /Side Clean, where washed dishes land, or soiled, where dirty dishes are loaded\./],
       [list, /Our dish tables sit beside it, with the machine on the left or on the right/, P('stainless-steel-dish-tables'), /Dishwasher On the left or on the right, facing the table\./],
-      [list, /a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/, 'faq/index.html', /6-month service warranty on our equipment and work\. Full-kitchen projects also include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/],
+      [list, /a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/, 'faq/index.html', /6-month warranty on workmanship\. Full-kitchen projects also include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/],
       [list, /built to order in food-grade SS304 as standard, or laboratory-grade SS316 on request, with seams welded and ground smooth\. Our standard finish is hairline, with brushed, mirror or satin on request\./, 'faq/index.html', /Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request\. Our standard finish is hairline, with brushed, mirror or satin on request\. Seams are welded and ground smooth/],
       [list, /A griller beside a gas range under a stainless steel hood at DMMMSU\./, P('commercial-griddles-grillers-and-fryers'), /A griller beside a gas range under a stainless steel hood at DMMMSU\./],
       [list, /We design, fabricate, deliver and install commercial kitchens, and commission everything on site/, 'faq/index.html', /We design, fabricate, deliver and install, then commission everything on site\./],

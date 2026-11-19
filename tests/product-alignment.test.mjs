@@ -31,7 +31,7 @@ const STOCK = ['commercial-gas-rice-steamer', 'countertop-gas-charbroiler', 'cou
   'stainless-steel-mobile-baking-pan-trolley', 'stainless-steel-potwash-sinktable-with-backsplash', 'stainless-steel-range-hood', 'stainless-steel-sink-with-backsplash', 'stainless-steel-wall-type-worktable-with-mid-and-bottom-shelf-with-backsplash',
   'stock-pot-gas-range', 'undercounter-door-worktable-chiller', 'undercounter-worktable-freezer', 'wall-shelf-w-backsplash'];
 // every product picture is one of the owner's design images, saved as render-NN-<slug>.webp (1200 px, with a 600 px -thumb); the ones this work needs are listed
-const DESIGNS = ['render-03-straight-table-152-two-shelves', 'render-02-straight-table-122-backsplash-shelf', 'render-15-commercial-station-183-cabinet-trash', 'render-44-two-bowl-dishwashing-sink', 'render-50-general-utility-sink', 'render-61-rear-pitch-hood-300',
+const DESIGNS = ['render-03-straight-table-152-two-shelves', 'render-02-straight-table-122-backsplash-shelf', 'render-20-commercial-station-244-four-cabinets', 'render-44-two-bowl-dishwashing-sink', 'render-50-general-utility-sink', 'render-61-rear-pitch-hood-300',
   'render-74-exhaust-and-fresh-air-cutaway', 'render-78-welded-black-iron-grease-duct', 'render-77-duct-fiberglass-insulation', 'render-80-ceiling-fresh-air-diffusers', 'render-20-commercial-station-244-four-cabinets'];
 const IS_DESIGN = (slug) => /^render-\d\d-[a-z0-9-]+$/.test(slug);
 // the two stock files kept on disk ONLY because scripts/downloads/catalogue.js (the PDF builder) still names them (the committed PDF is not regenerated yet): no public page may use them
@@ -72,7 +72,7 @@ describe('the owner\'s designs replace the stock photos', () => {
     const fams = JSON.parse(read('scripts/public-families.json')).families;
     assert.deepEqual(Object.entries(fams).filter(([, f]) => f.photo).map(([k, f]) => [k, f.photo]), [['prep_table', 'PW-003'], ['sink', 'PW-008'], ['hood', 'EX-001'], ['cabinet', 'PW-015']]);
     const cards = require('../scripts/catalogue-cards.js').PROJECT_CARDS;
-    assert.deepEqual(cards.map((c) => [c.id, c.image || null, c.photo || null]), [['station', 'site/img/products/render-15-commercial-station-183-cabinet-trash.webp', null], ['exhaust', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', null],
+    assert.deepEqual(cards.map((c) => [c.id, c.image || null, c.photo || null]), [['station', 'site/img/products/render-20-commercial-station-244-four-cabinets.webp', null], ['exhaust', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', null],
       ['pugon', null, null], ['teppanyaki', null, null], ['inasal', null, null], ['noodle_boiler', null, null], ['combi_stove', null, null], ['trolley', null, null]]);
     const page = read('catalogue/index.html');
     const withPhoto = [...page.matchAll(/<li class="cat-card[^"]*" data-(?:family|id|ask)="([^"]+)"[^>]*>(<figure class="cat-photo">)?/g)].filter((m) => m[2]).map((m) => m[1]);
@@ -123,11 +123,11 @@ describe('loadProjectImages (a project card names its own image path)', () => {
   };
   it('accepts the real design images and returns the same shape as the photo map', () => {
     const { images } = loadProjectImages({ cards: require('../scripts/catalogue-cards.js').PROJECT_CARDS });
-    assert.deepEqual(images.station, { src: 'site/img/products/render-15-commercial-station-183-cabinet-trash.webp', thumb: 'site/img/products/render-15-commercial-station-183-cabinet-trash-thumb.webp', width: 600, height: 307, mainWidth: 1200 });
+    assert.deepEqual(images.station, { src: 'site/img/products/render-20-commercial-station-244-four-cabinets.webp', thumb: 'site/img/products/render-20-commercial-station-244-four-cabinets-thumb.webp', width: 600, height: 300, mainWidth: 1200 });
     assert.deepEqual(Object.keys(images).sort(), ['exhaust', 'station']);
   });
   it('refuses a bad path, a -thumb path, a missing thumb and a file that is not WebP — one aggregated error', () => {
-    const ok = 'render-15-commercial-station-183-cabinet-trash';
+    const ok = 'render-20-commercial-station-244-four-cabinets';
     const root = scratch([`${ok}.webp`, `${ok}-thumb.webp`]);
     fs.writeFileSync(path.join(root, 'site/img/products/fake.webp'), 'not a webp');
     fs.writeFileSync(path.join(root, 'site/img/products/fake-thumb.webp'), 'not a webp');
@@ -139,7 +139,7 @@ describe('loadProjectImages (a project card names its own image path)', () => {
 });
 
 const ORDER = [['prep_table', 'stainless-steel-work-tables'], ['sink', 'stainless-steel-sinks'], ['dish_table', 'stainless-steel-dish-tables'], ['hood', 'stainless-steel-range-hoods'], ['stove', 'commercial-gas-stoves'], ['wok_range', 'commercial-wok-ranges'],
-  ['cooking_line', 'commercial-griddles-grillers-and-fryers'], ['deck_oven', 'gas-deck-ovens'], ['cabinet', 'stainless-steel-cabinets'], ['wall_shelf', 'stainless-steel-shelving'], ['rack', 'stainless-steel-racks']];
+  ['cooking_line', 'commercial-griddles-grillers-and-fryers'], ['cabinet', 'stainless-steel-cabinets'], ['wall_shelf', 'stainless-steel-shelving'], ['rack', 'stainless-steel-racks']];
 const HTML_FILES = (() => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d || '.'), { withFileTypes: true })) { const rel = d ? `${d}/${e.name}` : e.name;
   if (e.isDirectory()) { if (!['node_modules', '.git', 'downloads', 'private', 'archive', 'functions', 'dev', 'docs', 'fable-workplan', 'icons', 'site', 'css', 'js', 'scripts', 'tests'].includes(e.name)) walk(rel); } else if (e.name.endsWith('.html')) out.push(rel); } }; walk(''); return out; })();
 
@@ -150,11 +150,13 @@ describe('the product pages show the same starting price as the catalogue', () =
 
   it('shows on every product page the same starting price as its catalogue card: the JSON value, in the catalogue\'s exact element, once', () => {
     for (const [fam, slug] of ORDER) {
-      const e = prices[fam];
+      const e = fam === 'deck_oven' ? { perProject: true } : prices[fam];   // the gas deck oven has no catalogue card (owner 2026-11-19): its page says "Priced per project"
       assert.ok(e && (e.perProject || Number.isInteger(e.from)), fam);
       const want = line(e);
-      const card = cat.match(new RegExp(`<li class="cat-card cat-card-family[^"]*" data-family="${fam}"[\\s\\S]*?</li>(?=\\n<li class="cat-card|\\n</ul>)`))[0];
-      assert.ok(card.includes(want), `${fam}: the catalogue card`);
+      if (fam !== 'deck_oven') {
+        const card = cat.match(new RegExp(`<li class="cat-card cat-card-family[^"]*" data-family="${fam}"[\\s\\S]*?</li>(?=\\n<li class="cat-card|\\n</ul>)`))[0];
+        assert.ok(card.includes(want), `${fam}: the catalogue card`);
+      }
       const page = read(`products/${slug}/index.html`);
       assert.equal((page.match(/<p class="cat-from[ "]/g) || []).length, 1, `${slug}: exactly one price line`);
       assert.ok(page.includes(want), `${slug}: its price line is not the catalogue card's`);
@@ -176,7 +178,7 @@ describe('the product pages show the same starting price as the catalogue', () =
     assert.equal(run(ROOT).stdout, '', 'the repo itself must pass');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-mut-'));
     const copy = (rel) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.copyFileSync(path.join(ROOT, rel), path.join(root, rel)); };
-    for (const rel of ['catalogue/index.html', 'products/index.html', 'scripts/public-from-prices.json', ...ORDER.map((o) => `products/${o[1]}/index.html`)]) copy(rel);
+    for (const rel of ['catalogue/index.html', 'products/index.html', 'products/gas-deck-ovens/index.html', 'scripts/public-from-prices.json', ...ORDER.map((o) => `products/${o[1]}/index.html`)]) copy(rel);
     assert.equal(run(root).stdout, '');
     const edit = (rel, fn) => { const p = path.join(root, rel); const before = fs.readFileSync(p, 'utf8'); fs.writeFileSync(p, fn(before)); return () => fs.writeFileSync(p, before); };
     let undo = edit('products/stainless-steel-sinks/index.html', (t) => t.replace('<data value="20500">₱20,500</data>', '<data value="20600">₱20,600</data>'));

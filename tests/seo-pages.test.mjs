@@ -546,7 +546,7 @@ describe('the FAQ: the owner\'s questions, answered only with confirmed facts, a
   const REQUIRED = [
     ['What material do you use?', ['Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.']],
     ['Can you build to custom sizes?', ['Yes', 'made to order', 'exact dimensions']],
-    ['What warranty do you give?', ['6-month service warranty', '12 months', 'preventive maintenance service (PMS)', 'KitchenShield™']],
+    ['What warranty do you give?', ['6-month warranty on workmanship', '12 months', 'preventive maintenance service (PMS)', 'KitchenShield™']],
     ['Do you supply government agencies and schools?', ['PhilGEPS-registered', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Ilocos Sur Polytechnic State College (ISPSC)', 'procurement rules']],
     ['How do I get a quote?', ['online', 'estimated range', 'final quotation', 'No account is needed']],
     ['Do you install?', ['design, fabricate, deliver and install']],
@@ -710,14 +710,13 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
     });
   });
 
-  it('keeps the tone: 23 years and high-quality on the services hub and every service page (proof bar), 23 years on the work hub and the FAQ, and "premium" where the owner\'s homepage uses it', () => {
+  it('keeps the tone: 23 years on the services hub and every service page (proof bar), 23 years on the work hub and the FAQ, and no hype word ("premium", "high-quality") on any page (owner 2026-11-19)', () => {
     for (const p of PAGES.filter((x) => ['hub-services', 'service'].includes(x.kind))) {
       assert.ok(p.html.includes('<span class="proof-num">23</span> years'), `${p.path}: the 23 years proof item`);
-      assert.ok(/High-quality/.test(p.body), `${p.path}: high-quality`);
     }
     assert.ok(byPath('/work/').body.includes('23 years'));
-    const premium = PAGES.filter((p) => /\bpremium\b/i.test(`${p.meta('description')} ${p.body}`)).map((p) => p.path);
-    assert.ok(premium.includes('/services/') && premium.includes('/services/commercial-kitchen-fit-out/') && premium.includes('/services/stainless-steel-fabrication/'), `"premium" is on ${premium}`);
+    const hype = PAGES.filter((p) => /\b(premium|high[- ]quality|world[- ]class|finest|best-in-class|top-quality)\b/i.test(`${p.meta('description')} ${p.body}`)).map((p) => p.path).filter((x) => !x.startsWith('/guides/'));   // /guides/ is owned by another session
+    assert.deepEqual(hype, [], `a hype word is on ${hype}`);
     assert.ok(byPath('/faq/').body.includes('23 years'));
   });
 
@@ -796,7 +795,7 @@ describe('materials and finishes (owner, 2026-10-21; hairline made the standard 
     const bars = PAGES.filter((p) => p.html.includes('<ul class="proof-bar"')).map((p) => ({ p: p.path, bar: p.html.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0] }));
     assert.equal(bars.length, 7);
     assert.equal(new Set(bars.map((b) => b.bar)).size, 1, 'the proof bars differ');
-    assert.equal(visibleText(bars[0].bar), '23 years in business SS304 / SS316 High-quality, food-grade and laboratory-grade Made to order Built to your exact dimensions End-to-end Design · fabricate · deliver · install');
+    assert.equal(visibleText(bars[0].bar), '23 years in business SS304 / SS316 Food-grade and laboratory-grade Made to order Built to your exact dimensions End-to-end Design · fabricate · deliver · install');
     assert.ok(!bars.some((b) => b.p.startsWith('/work/')));
   });
 });

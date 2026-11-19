@@ -10,7 +10,7 @@ const ROOT = process.argv[2] || '.';
 const rd = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const out = [];
 const FAMILY_PAGE = { prep_table: 'stainless-steel-work-tables', sink: 'stainless-steel-sinks', dish_table: 'stainless-steel-dish-tables', hood: 'stainless-steel-range-hoods', stove: 'commercial-gas-stoves', wok_range: 'commercial-wok-ranges',
-  cooking_line: 'commercial-griddles-grillers-and-fryers', deck_oven: 'gas-deck-ovens', cabinet: 'stainless-steel-cabinets', wall_shelf: 'stainless-steel-shelving', rack: 'stainless-steel-racks' };
+  cooking_line: 'commercial-griddles-grillers-and-fryers', cabinet: 'stainless-steel-cabinets', wall_shelf: 'stainless-steel-shelving', rack: 'stainless-steel-racks' };
 const wantLine = (e) => e.perProject ? '<p class="cat-from cat-from-ask">Priced per project</p>'
   : '<p class="cat-from">From <data value="' + e.from + '">\u20B1' + String(e.from).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '</data> <span class="cat-vat">+ VAT</span></p>';
 try {
@@ -40,7 +40,8 @@ try {
   // (the /products/ hub is retired, owner ruling 2026-11-19: it is a noindex forward to /catalogue/ and carries no price line at all)
   const famOrder = [];
   for (const m of block.matchAll(/<li class="cat-card cat-card-family[^"]*" data-family="([a-z_]+)"/g)) famOrder.push(m[1]);
-  if (famOrder.length !== 11 || famOrder.some(f => !FAMILY_PAGE[f])) out.push('the catalogue does not show the eleven product families');
+  if (famOrder.length !== 10 || famOrder.some(f => !FAMILY_PAGE[f] || f === 'deck_oven')) out.push('the catalogue does not show the ten product families (the gas deck oven has no card: owner 2026-11-19)');
+  // the gas deck oven has no catalogue card and its old page is a forward (it carries no price line): see the check on it below
   for (const fam of famOrder) {
     const slug = FAMILY_PAGE[fam], e = prices[fam];
     if (!e) { out.push(fam + ': no entry in scripts/public-from-prices.json'); continue; }
@@ -50,6 +51,7 @@ try {
     const pgLines = pg.match(/<p class="cat-from[ "][^>]*>/g) || [];
     if (pgLines.length !== 1 || !pg.includes(want)) out.push('products/' + slug + '/index.html: its price line is not the catalogue card\'s (' + pgLines.length + ' price line(s))');
   }
+  try { const ov = rd('products/gas-deck-ovens/index.html'); if (/<p class="cat-from/.test(ov) || !/<meta http-equiv="refresh" content="0; url=\/catalogue\/#cat-cooking">/.test(ov) || !/<meta name="robots" content="noindex, follow">/.test(ov)) out.push('products/gas-deck-ovens/index.html: it must be the noindex forward to /catalogue/#cat-cooking with no price line'); } catch (_) { out.push('products/gas-deck-ovens/index.html (the forward) is missing'); }
   let hubHtml = '';
   try { hubHtml = rd('products/index.html'); } catch (_) { out.push('products/index.html (the forward to the catalogue) is missing'); }
   if (hubHtml && (/<p class="cat-from/.test(hubHtml) || !/<meta http-equiv="refresh" content="0; url=\/catalogue\/">/.test(hubHtml) || !/<meta name="robots" content="noindex, follow">/.test(hubHtml))) out.push('products/index.html: it must be the noindex forward to /catalogue/ with no price line');

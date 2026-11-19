@@ -82,7 +82,7 @@ const db = (products, categories) => ({ categories: categories || CATS, products
 // The synthetic master categories map onto the public ones (cooking_line -> Cooking, prep_washing -> Preparation).
 const PUBMAP = { cooking_line: 'cooking', prep_washing: 'preparation' };
 const pubOf = (products, over = {}) => ({ products: Object.fromEntries(products.map(p => [p.id, over[p.id] || PUBMAP[p.category]])), excludedProducts: {} });
-const render = (products, opts) => renderCatalogue(db(products), { publicCategories: pubOf(products), ...(opts || {}) });
+const render = (products, opts) => renderCatalogue(db(products), { publicCategories: pubOf(products), ...(opts || {}) }).replace(/<p class="cat-group-name">[^<]*<\/p>/g, '');   // the group eyebrow on each card (2026-11-19) is pinned separately
 const renderWith = (products, categories, opts) => renderCatalogue(db(products, categories), { publicCategories: pubOf(products), ...(opts || {}) });
 const violationsOf = (fn) => { try { fn(); } catch (e) { return e.violations || null; } return null; };
 const allKeys = (v, out = new Set()) => {
@@ -350,7 +350,7 @@ describe('the eight public groups (owner ruling 2026-11-19: the configurators of
     const report = {};
     const out = renderCatalogue(db([hood, duct], cats), { report, publicCategories: pub });
     assert.ok(out.includes('data-id="EX-901"') && !out.includes('EX-902'));
-    assert.ok(out.includes('<section class="cat-group" id="cat-ventilation"') && out.includes('1 products in 1 categories'));
+    assert.ok(out.includes('<section class="cat-group" data-cat="ventilation"') && out.includes('1 products in 1 categories'));
     assert.deepEqual(report.skipped.categories, {}, 'nothing is skipped by category');
     assert.deepEqual(report.skipped.products, ['EX-902']);
     assert.deepEqual(violationsOf(() => renderCatalogue(db([hood, duct], cats), { publicCategories: { products: { 'EX-901': 'ventilation' }, excludedProducts: {} } })), [{ id: 'EX-902', field: 'publicCategory', rule: 'unmapped' }]);
@@ -408,7 +408,7 @@ describe('the eight public groups (owner ruling 2026-11-19: the configurators of
     const products = [prod({ id: 'T-950' }), prod({ id: 'T-951' }), prod({ id: 'T-952' }), prod({ id: 'T-953' })];
     const map = { products: { 'T-950': 'refrigeration', 'T-951': 'storage', 'T-952': 'washing', 'T-953': 'cooking' }, excludedProducts: {} };
     const out = renderCatalogue(db(products), { publicCategories: map });
-    const order = [...out.matchAll(/<section class="cat-group" id="cat-([a-z]+)"/g)].map(m => m[1]);
+    const order = [...out.matchAll(/<section class="cat-group" data-cat="([a-z]+)"/g)].map(m => m[1]);
     assert.deepEqual(order, ['washing', 'cooking', 'storage', 'refrigeration']);          // no "preparation" section: nothing is in it
     for (const p of products) assert.equal((out.match(new RegExp(`data-id="${p.id}"`, 'g')) || []).length, 1);
     assert.ok(out.includes('4 products in 4 categories'));
@@ -535,7 +535,7 @@ describe('renderCatalogue — the /catalogue/ block', () => {
       const holders = groups.filter(g => g.includes(`data-id="${p.id}"`));
       assert.equal(holders.length, 1, `${p.id} appears in ${holders.length} groups`);
       const want = PUBMAP[p.category];
-      assert.ok(holders[0].startsWith(` id="cat-${want}" data-cat="${want}"`), `${p.id} sits in the wrong group`);
+      assert.ok(holders[0].startsWith(` data-cat="${want}"`), `${p.id} sits in the wrong group`);
     }
   });
 
@@ -639,7 +639,7 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     const out = render(PRODUCTS, { projectCards: pc, prices: { station: { perProject: true } } });
     assert.ok(out.includes('<li class="cat-card cat-card-project" data-ask="station" data-kw="station"><div class="cat-head"><p class="cat-tag">Made to order</p><h3>A Station</h3><p class="cat-lead">One line.</p></div>'));
     assert.ok(out.includes('<p class="cat-learn"><a class="link-arrow" href="/services/x/">Learn more about x things</a></p><p class="cat-from cat-from-ask">Priced per project</p><a class="cat-ask" href="#request-quote">Request a quote</a></li>'));
-    assert.ok(out.includes('3 products in 3 categories') && out.includes('<section class="cat-group" id="cat-station"'));
+    assert.ok(out.includes('3 products in 3 categories') && out.includes('<section class="cat-group" data-cat="station"'));
     assert.ok(!/data-id="station"|qr-add/.test(out), 'a project card must not look addable');
     assert.deepEqual(violationsOf(() => render(PRODUCTS, { projectCards: [{ ...pc[0], group: 'nowhere' }] })), [{ id: 'station', field: 'group', rule: 'shape' }]);
   });
@@ -928,7 +928,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
   const ids = [...catBlock.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)].map(m => m[1]);             // the FIXED items: a card of their own, shown with their code
   const famCards = [...catBlock.matchAll(/<li class="cat-card cat-card-family[^"]*" data-family="([a-z_]+)"/g)].map(m => m[1]);
   const askCards = [...catBlock.matchAll(/<li class="cat-card cat-card-project" data-ask="([a-z_]+)"/g)].map(m => m[1]);       // the PROJECT cards (no SKU, no configurator): scripts/catalogue-cards.js
-  const slugOf = (slug) => groups.find(g => g.startsWith(` id="cat-${slug}"`));
+  const slugOf = (slug) => groups.find(g => g.startsWith(` data-cat="${slug}"`));
   const stripFrom = B.stripFromLines;
   const groups = catBlock.split('<section class="cat-group"').slice(1);
   const FAMS = require('../js/qr-families.js');
@@ -959,14 +959,16 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.equal(new Set(ids).size, ids.length, 'a product id is rendered twice');
     assert.ok(ids.every(id => /^[A-Z]{2}-\d{3}$/.test(id)), 'unexpected product id shape');
     assert.equal(new Set(famCards).size, famCards.length, 'a family card is rendered twice');
-    assert.deepEqual([...famCards].sort(), [...FAMS.order].sort(), 'there must be exactly one card per configurable family');
+    assert.deepEqual([...famCards].sort(), FAMS.order.filter(f => f !== 'deck_oven').sort(), 'there must be exactly one card per configurable family (the gas deck oven has none: owner 2026-11-19)');
     assert.equal(new Set(askCards).size, askCards.length, 'a project card is rendered twice');
     const total = ids.length + famCards.length + askCards.length;
     assert.equal((catBlock.match(/<li class="cat-card/g) || []).length, total);
     assert.ok(catBlock.includes(`placeholder="Search ${total} products"`));
     const nCats = groups.length;
     assert.ok(catBlock.includes(`role="status" aria-live="polite">${total} products in ${nCats} categories</p>`));
-    const navTotals = [...catBlock.matchAll(/class="cat-link-n" data-total="(\d+)"/g)].map(m => Number(m[1]));
+    const allTotals = [...catBlock.matchAll(/class="cat-link-n" data-total="(\d+)"/g)].map(m => Number(m[1]));
+    assert.equal(allTotals[0], total, 'the "All" button counts every card');
+    const navTotals = allTotals.slice(1);
     assert.equal(navTotals.length, nCats);
     assert.equal(navTotals.reduce((a, b) => a + b, 0), total);
     groups.forEach((g, i) => {
@@ -1064,7 +1066,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
   });
 
   it('has EXACTLY the eight public groups of the owner\'s call in the ruled order — as sections, as nav links, and as deep-link slugs (the six older anchors still resolve)', () => {
-    const slugs = [...catBlock.matchAll(/<section class="cat-group" id="cat-([a-z_]+)"/g)].map(m => m[1]);
+    const slugs = [...catBlock.matchAll(/<section class="cat-group" data-cat="([a-z_]+)"/g)].map(m => m[1]);
     assert.deepEqual(slugs, ['preparation', 'station', 'washing', 'ventilation', 'exhaust', 'cooking', 'storage', 'refrigeration']);
     for (const old of ['preparation', 'washing', 'cooking', 'ventilation', 'storage', 'refrigeration']) assert.ok(cat.includes(`id="cat-${old}"`), `#cat-${old} no longer exists`);
     const nav = [...catBlock.matchAll(/<a class="cat-link" href="#cat-([a-z_]+)" data-cat="([a-z_]+)"><span class="cat-link-name">([^<]+)<\/span>/g)];
@@ -1100,10 +1102,10 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.deepEqual([...pageIds, ...absorbed].sort(), Object.keys(pubJson.products).sort(), 'the page, the families and the committed map disagree about which products are published');
     assert.equal(new Set(absorbed).size, absorbed.length, 'a SKU is absorbed by two families');
     assert.ok(!absorbed.some(id => pageIds.has(id)), 'a SKU is both absorbed and a card of its own');
-    for (const f of FAMS.order) assert.ok(groups.some(g => g.includes(`id="cat-${FAMS.families[f].category}"`) && g.includes(`data-family="${f}"`)), `${f} sits outside its category`);
+    for (const f of FAMS.order.filter(f => f !== 'deck_oven')) assert.ok(groups.some(g => g.startsWith(` data-cat="${FAMS.families[f].category.replace(/^cat-/, '')}"`) && g.includes(`data-family="${f}"`)), `${f} sits outside its category`);
     assert.ok(!Object.keys(pubJson.products).some(id => id in pubJson.excludedProducts), 'a product is both published and excluded');
     for (const g of groups) {
-      const slug = g.match(/^ id="cat-([a-z_]+)"/)[1];
+      const slug = g.match(/^ data-cat="([a-z_]+)"/)[1];
       for (const m of g.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)) assert.equal(pubJson.products[m[1]], slug, `${m[1]} sits in the wrong category`);
     }
     assert.doesNotThrow(() => loadPublicCategories({ ids: [...Object.keys(pubJson.products), ...Object.keys(pubJson.excludedProducts)] }));
@@ -1197,8 +1199,14 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(cat.includes('id="cat-top"') && cat.includes('aria-label="Back to top"'));
   });
 
+  it('is ONE continuous grid (owner 2026-11-19): every card carries its group as a small eyebrow, each group has a #cat-… anchor before its first card, and the section has no id', () => {
+    const cards = catBlock.split('<li class="cat-card').slice(1);
+    for (const c of cards) assert.ok(/<div class="cat-head"><p class="cat-group-name">[^<]+<\/p>/.test(c), 'a card without its group eyebrow');
+    for (const g of groups) { const slug = g.match(/^ data-cat="([a-z_]+)"/)[1]; assert.ok(g.includes(`<li class="cat-anchor" id="cat-${slug}" aria-hidden="true"></li>`), `${slug}: no anchor`); assert.ok(!/^ data-cat="[a-z_]+" id=/.test(g)); }
+  });
+
   it('keeps the plain intro line of the Website Notes (2026-11-19: no "Premium"), and the owner\'s short product-led meta description (2026-10-28), which leads with the grades and does not say "premium" (the homepage description still does)', () => {
-    assert.ok(catBlock.includes('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, made in our own shop in SS304 stainless steel (SS316 on request) and built to your sizes. Sizes are in mm. The “From” figure on each card is a starting amount before VAT; your quotation depends on the size and options you choose.</p>'));
+    assert.ok(catBlock.includes('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, built by our own team in SS304 stainless steel (SS316 on request) and built to your sizes. Sizes are in mm. The “From” figure on each card is a starting amount before VAT; your quotation depends on the size and options you choose.</p>'));
     assert.ok(!/premium|world-class|high.quality/i.test(visibleText(catBlock)), 'a hype word on the catalogue page');
     assert.match(catHead, /name="description" content="Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: /);
   });
@@ -1258,7 +1266,7 @@ describe('product photos (the map stays valid, but since 2026-11-19 NO catalogue
     // through their own `image` path); every other card is text only
     assert.equal(figs.length, 6);
     const projectImages = require('../scripts/catalogue-cards.js').PROJECT_CARDS.map(pc => pc.image).filter(Boolean);
-    assert.deepEqual(projectImages.sort(), ['site/img/products/render-15-commercial-station-183-cabinet-trash.webp', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp']);
+    assert.deepEqual(projectImages.sort(), ['site/img/products/render-20-commercial-station-244-four-cabinets.webp', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp']);
     const mapped = new Set([...Object.entries(map).filter(([k]) => k[0] !== '_').map(([, v]) => v), ...projectImages].map(v => '/' + v.replace(/\.webp$/, '-thumb.webp')));
     for (const f of figs) {
       assert.ok(f.includes('<figcaption>Representative image</figcaption>') && f.includes('loading="lazy"'));
@@ -1328,15 +1336,14 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(homeSite.match(/<section id="about"[\s\S]*?<\/section>/)[0].includes('<span class="about-years-num">23</span>'));
   });
 
-  it('leads with premium quality, and says "high-quality" three to five times — with the concrete specifics behind it', () => {
-    assert.match(visibleText(hero), /Premium stainless-steel kitchens, built to order in Metro Manila\./);
-    const n = (visibleText(homeSite).match(/high-quality/gi) || []).length;
-    assert.ok(n >= 3 && n <= 5, `"high-quality" appears ${n} times`);
+  it('leads with the owner\'s plain h1 (2026-11-19, no hype words), with the concrete specifics behind it', () => {
+    assert.match(visibleText(hero), /Stainless steel kitchens for restaurants, hotels and bakeries/);
+    assert.ok(!/premium|high[- ]quality|world[- ]class|finest|best-in-class|top-quality/i.test(visibleText(homeSite)), 'a hype word on the homepage');
     const text = visibleText(homeSite);
     for (const fact of ['food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline, with brushed, mirror or satin on request', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
       assert.ok(text.includes(fact) || text.includes(fact.replace(/ /g, ' ')), `the specific "${fact}" is missing`);
     }
-    assert.match(homeHead, /name="description" content="Premium commercial kitchen equipment[^"]*SS304 or SS316/);
+    assert.match(homeHead, /name="description" content="Commercial kitchen equipment[^"]*SS304 or SS316/);
   });
 
   it('keeps exhaust, fresh-air, gas lines and fire suppression as SERVICES on the homepage (owner ruling) — they are only gone from the catalogue', () => {
@@ -1418,7 +1425,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
 
   it('writes the hero lead grammatically (the owner caught "We design, fabricate, delivers and installs")', () => {
     assert.ok(!/delivers and installs|fabricate, delivers/i.test(home));
-    assert.match(visibleText(hero), /We design, fabricate, deliver and install high-quality commercial kitchens/);
+    assert.match(visibleText(hero), /We design, fabricate, deliver and install commercial kitchens/);
   });
 
   it('precaches site.css and site.js, and never a photo or the catalogue page (spec §8.4)', () => {
