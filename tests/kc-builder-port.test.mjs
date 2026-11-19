@@ -1000,7 +1000,7 @@ describe('owner Finalize Step 1 (2026-11-20): the standalone banner and the "eve
   });
   it('Pricing settings has a President-only "Every quote needs the President\'s approval" checkbox that saves approveAll through KCLive.saveSwitch', () => {
     const A = fs.readFileSync(path.join(ROOT, 'qb/kc/admin-d7.js'), 'utf8');
-    assert.match(A, /<input type="checkbox" data-approveall \$\{approveAllNow\(\)\?'checked':''\}/);
+    assert.match(A, /<input type="checkbox" style="[^"]*" data-approveall \$\{approveAllNow\(\)\?'checked':''\}/);
     assert.match(A, /await viaLive\('saveSwitch', \{ approveAll: !!on \}\);/);
     assert.match(A, /if\('approveall' in d\) return setApproveAll\(!!el\.checked\);/);
   });
