@@ -754,8 +754,7 @@ for pp in $PRODUCT_PAGES; do
     prod_fail=1
   fi
 done
-# Owner ruling 2026-11-19 (later): /products/ is aligned with /catalogue/ — each hub card and each product page carries the SAME starting price as its catalogue card
-# (scripts/public-from-prices.json), the hub lists the eleven in the catalogue's order under the catalogue's own group headings. scripts/check-catalogue-cards.js prints problems, never an amount.
+# Owner ruling 2026-11-19 (later): each product page carries the SAME starting price as its catalogue card (scripts/public-from-prices.json); /products/ is the noindex forward to /catalogue/. scripts/check-catalogue-cards.js prints problems, never an amount.
 prod_align_problems=$(node scripts/check-catalogue-cards.js | grep '^products/')
 if [ -n "$prod_align_problems" ]; then
   echo "$prod_align_problems" | sed 's/^/FAIL: /'

@@ -114,9 +114,9 @@ describe('the stylesheets that really ship carry the same numeral colour (a stal
 
   it('puts the colour on the homepage (its inline <style id="site-css">)', () => check('index.html', inline(read('index.html'), 'site-css')));
 
-  it('puts the colour on /products/ and on each of the eleven product pages (their inline <style id="page-css">)', () => {
-    const pages = ['products/index.html', ...fs.readdirSync(path.join(ROOT, 'products'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `products/${e.name}/index.html`)];
-    assert.ok(pages.length >= 12, 'the hub and the eleven product pages');            // a later product page is checked too; the count itself is pinned in tests/seo-products.test.mjs
+  it('puts the colour on each of the eleven product pages (/products/ itself is a forward to the catalogue with no proof bar) (their inline <style id="page-css">)', () => {
+    const pages = [...fs.readdirSync(path.join(ROOT, 'products'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `products/${e.name}/index.html`)];
+    assert.ok(pages.length >= 11, 'the eleven product pages');            // a later product page is checked too; the count itself is pinned in tests/seo-products.test.mjs
     for (const f of pages) { const html = read(f); assert.ok(html.includes('class="proof-num"'), `${f} has no proof bar`); check(f, inline(html, 'page-css')); }
   });
 });

@@ -36,32 +36,22 @@ try {
   });
   Object.keys(prices).forEach(k => { if (!seen.has(k)) out.push(k + ': in scripts/public-from-prices.json but not a card of the page'); });
 
-  // ── /products/ and its eleven pages: the same starting price as the catalogue card, the same order, the same group names ──
-  const famOrder = [], groupOf = {};                                   // the catalogue's own order of the eleven families, and the heading of the group each sits in
-  for (const g of block.split('<section class="cat-group"').slice(1)) {
-    const heading = ((g.match(/<h2 id="cat-h-[a-z]+">([^<]*?)\s*</) || [])[1] || '').trim();
-    for (const m of g.matchAll(/<li class="cat-card cat-card-family[^"]*" data-family="([a-z_]+)"/g)) { famOrder.push(m[1]); groupOf[m[1]] = heading; }
-  }
-  const slugOrder = famOrder.map(f => FAMILY_PAGE[f]);
+  // ── the eleven product pages (/products/<name>/): the same starting price as the catalogue card ──
+  // (the /products/ hub is retired, owner ruling 2026-11-19: it is a noindex forward to /catalogue/ and carries no price line at all)
+  const famOrder = [];
+  for (const m of block.matchAll(/<li class="cat-card cat-card-family[^"]*" data-family="([a-z_]+)"/g)) famOrder.push(m[1]);
   if (famOrder.length !== 11 || famOrder.some(f => !FAMILY_PAGE[f])) out.push('the catalogue does not show the eleven product families');
-  const hub = rd('products/index.html');
-  const hubCards = [...hub.matchAll(/<article class="pg-card">([\s\S]*?)<\/article>/g)].map(m => m[1]).filter(c => /href="\/products\/[a-z-]+\/"/.test(c));
-  const hubOrder = hubCards.map(c => (c.match(/href="\/products\/([a-z-]+)\/"/) || [])[1]);
-  if (JSON.stringify(hubOrder) !== JSON.stringify(slugOrder)) out.push('products/index.html: the product cards are not in the catalogue\'s order');
   for (const fam of famOrder) {
     const slug = FAMILY_PAGE[fam], e = prices[fam];
     if (!e) { out.push(fam + ': no entry in scripts/public-from-prices.json'); continue; }
     const want = wantLine(e);
-    const card = hubCards.find(c => c.includes('href="/products/' + slug + '/"')) || '';
-    const cardLines = card.match(/<p class="cat-from[ "][^>]*>/g) || [];
-    if (cardLines.length !== 1 || !card.includes(want)) out.push('products/index.html: the ' + fam + ' card\'s price line is not the catalogue card\'s (' + cardLines.length + ' price line(s))');
-    const tag = (card.match(/<p class="pg-card-tag">([^<]*)<\/p>/) || [])[1];
-    if (tag !== groupOf[fam]) out.push('products/index.html: the ' + fam + ' card\'s group tag is not the catalogue\'s group heading');
     let pg = '';
     try { pg = rd('products/' + slug + '/index.html'); } catch (_) { out.push('products/' + slug + '/index.html is missing'); continue; }
     const pgLines = pg.match(/<p class="cat-from[ "][^>]*>/g) || [];
     if (pgLines.length !== 1 || !pg.includes(want)) out.push('products/' + slug + '/index.html: its price line is not the catalogue card\'s (' + pgLines.length + ' price line(s))');
   }
-  if ((hub.match(/<p class="cat-from[ "][^>]*>/g) || []).length !== 11) out.push('products/index.html: it must carry exactly eleven price lines, one per card');
+  let hubHtml = '';
+  try { hubHtml = rd('products/index.html'); } catch (_) { out.push('products/index.html (the forward to the catalogue) is missing'); }
+  if (hubHtml && (/<p class="cat-from/.test(hubHtml) || !/<meta http-equiv="refresh" content="0; url=\/catalogue\/">/.test(hubHtml) || !/<meta name="robots" content="noindex, follow">/.test(hubHtml))) out.push('products/index.html: it must be the noindex forward to /catalogue/ with no price line');
 } catch (e) { out.push('catalogue card check error: ' + e.message); }
 out.forEach(x => console.log(x));

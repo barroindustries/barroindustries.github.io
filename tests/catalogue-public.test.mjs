@@ -1184,8 +1184,8 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(cat.includes('<a href="/" id="site-brand">'));
     assert.ok(cat.includes('<p class="foot-links"><a href="/">Home</a>'), 'Home is the first footer link');
     const catNav = cat.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
-    assert.deepEqual([...catNav.matchAll(/<a href="([^"]+)"(?: aria-current="page")?>([^<]+)<\/a>/g)].map(m => [m[1], m[2]]), [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/#contact', 'Contact']], 'the catalogue nav is the same six links as every other public page');
-    assert.ok(catNav.includes('<a href="/catalogue/" aria-current="page">Catalogue</a>'));
+    assert.deepEqual([...catNav.matchAll(/<a href="([^"]+)"(?: aria-current="page")?>([^<]+)<\/a>/g)].map(m => [m[1], m[2]]), [['/services/', 'Services'], ['/catalogue/', 'Products'], ['/work/', 'Our work'], ['/guides/', 'The Kitchen Guide'], ['/#contact', 'Contact']], 'the catalogue nav is the same six links as every other public page');
+    assert.ok(catNav.includes('<a href="/catalogue/" aria-current="page">Products</a>'), 'Products (the catalogue) is the current page');
     // owner 2026-10-21: the top-right slot is "Get a quote" (the intake), Login moved to the footer as "Team portal" (details: tests/site-public-surface.test.mjs)
     assert.ok(cat.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>'));
     assert.ok(!/\bLogin\b/i.test(cat.match(/<header id="site-header">[\s\S]*?<\/header>/)[0]), 'the header still says Login');
@@ -1295,9 +1295,10 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(!/products?\s*&\s*catalogue|search \d+/i.test(text));
   });
 
-  it('links to the catalogue in exactly three places: the nav, the hero button and the footer', () => {
+  it('links to the catalogue in exactly four places: the nav ("Products"), the hero button, the Fabrication step\'s "stainless steel kitchen equipment" sentence (it linked the retired /products/ hub) and the footer', () => {
     const all = homeSite.match(/href="\/catalogue\/"/g) || [];
-    assert.equal(all.length, 3, `${all.length} catalogue links`);
+    assert.equal(all.length, 4, `${all.length} catalogue links`);
+    assert.ok(homeSite.includes('<p class="fab-grades">Looking for a standard product? See our <a href="/catalogue/">stainless steel kitchen equipment</a>.</p>'));
     assert.equal((nav.match(/href="\/catalogue\/"/g) || []).length, 1);
     assert.equal((hero.match(/href="\/catalogue\/"/g) || []).length, 1);
     assert.equal((footer.match(/href="\/catalogue\/"/g) || []).length, 1);
@@ -1307,7 +1308,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
 
   it('has the nav Services · Products · Our work · Catalogue · Guides · Contact (Areas we serve and FAQ moved to the footer, owner 2026-11-19: the header was too crowded) (all but the catalogue and Contact are the public content pages), with "Get a quote" top right', () => {
     const labels = [...nav.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map(m => [m[1], m[2]]);
-    assert.deepEqual(labels, [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['#contact', 'Contact']]);
+    assert.deepEqual(labels, [['/services/', 'Services'], ['/catalogue/', 'Products'], ['/work/', 'Our work'], ['/guides/', 'The Kitchen Guide'], ['#contact', 'Contact']]);
     const cta = '<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>';
     assert.ok(homeSite.includes(cta));
     assert.ok(homeSite.indexOf(cta) > homeSite.indexOf('id="site-nav"') && homeSite.indexOf(cta) < homeSite.indexOf('id="site-menu-btn"'));

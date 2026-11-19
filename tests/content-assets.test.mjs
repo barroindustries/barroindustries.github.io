@@ -184,10 +184,10 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
     assert.ok(!/ +$/m.test(txt), 'trailing spaces');
   });
 
-  it('links every services page, the catalogue, the eleven product pages and their hub, the projects, the areas page, the FAQ, the quote flow and Messenger', () => {
+  it('links every services page, the catalogue, the eleven product pages, the projects, the areas page, the FAQ, the quote flow and Messenger', () => {
     const urls = new Set(links.map((l) => l.url));
     const need = ['/services/', '/services/commercial-kitchen-fit-out/', '/services/stainless-steel-fabrication/', '/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/lpg-gas-line-installation/', '/services/kitchen-fire-suppression/', '/services/institutional-and-government-supply/',
-      '/catalogue/', '/products/', '/products/stainless-steel-sinks/', '/products/stainless-steel-dish-tables/', '/products/stainless-steel-work-tables/', '/products/commercial-gas-stoves/', '/products/commercial-wok-ranges/', '/products/commercial-griddles-grillers-and-fryers/', '/products/gas-deck-ovens/', '/products/stainless-steel-range-hoods/', '/products/stainless-steel-cabinets/', '/products/stainless-steel-shelving/', '/products/stainless-steel-racks/',
+      '/catalogue/', '/products/stainless-steel-sinks/', '/products/stainless-steel-dish-tables/', '/products/stainless-steel-work-tables/', '/products/commercial-gas-stoves/', '/products/commercial-wok-ranges/', '/products/commercial-griddles-grillers-and-fryers/', '/products/gas-deck-ovens/', '/products/stainless-steel-range-hoods/', '/products/stainless-steel-cabinets/', '/products/stainless-steel-shelving/', '/products/stainless-steel-racks/',
       '/work/', '/work/ispsc-2026/', '/work/dmmmsu-2022-2023/', '/areas-we-serve/', '/faq/', '/catalogue/?quote=1', '/sales/clientinformationrequest/'];
     for (const n of need) assert.ok(urls.has(BASE + n), `llms.txt does not link ${n}`);
     assert.ok(urls.has(MSGR), 'no Messenger link');
@@ -221,9 +221,9 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
     assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(txt), 'the lighter top plate is chosen by staff in the Quote Builder only; the website says only the standard');
   });
 
-  it('says what the catalogue and the hub hold: six categories (ventilation among them) and the eleven configurable products', () => {
-    assert.ok(lines.some((l) => /^- \[Catalogue\]\(.*\): products in six categories \(preparation, washing, cooking, ventilation, storage, refrigeration\)/.test(l)), 'the catalogue line');
-    assert.ok(lines.some((l) => /^- \[Stainless-steel equipment\]\(.*\/products\/\): overview of the eleven configurable stainless-steel products$/.test(l)), 'the hub line');
+  it('says what the catalogue holds (the one Products list, in eight groups) and lists the eleven configurable product pages; the retired /products/ hub is not listed (owner 2026-11-19)', () => {
+    assert.ok(lines.some((l) => /^- \[Products \(the catalogue\)\]\(https:\/\/barroindustries\.com\/catalogue\/\): every product in one list, in eight groups \(preparation, kitchen stations, washing, ventilation, exhaust and fresh air, Chef Mode cooking equipment, storage, refrigeration\)/.test(l)), 'the catalogue line');
+    assert.ok(!/barroindustries\.com\/products\/\)/.test(txt), 'the retired hub is listed');
     assert.equal(lines.filter((l) => /^- \[[^\]]+\]\(https:\/\/barroindustries\.com\/products\/[a-z-]+\/\)/.test(l)).length, 11, 'one line per product page');
   });
 
@@ -612,13 +612,13 @@ describe('guides: markup — one H1, a logical heading order, unique ids, sized 
     each((p) => {
       assert.ok(p.header.includes('<a href="/" id="site-brand">') && p.header.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'));
       const nav = [...p.header.match(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/)[1].matchAll(/<a href="([^"]+)">([^<]*)<\/a>/g)].map((m) => [m[1], m[2]]);
-      assert.deepEqual(nav.filter((n) => !NEWER.has(n[0])), [['/services/', 'Services'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/#contact', 'Contact']]);
+      assert.deepEqual(nav.filter((n) => !NEWER.has(n[0])), [['/services/', 'Services'], ['/catalogue/', 'Products'], ['/work/', 'Our work'], ['/#contact', 'Contact']]);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(!/login/i.test(p.header));
       const row = p.footer.match(/<p class="foot-links">([\s\S]*?)<\/p>/)[1];
       const foot = [...row.replace(/<svg[\s\S]*?<\/svg>/g, '').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-      assert.deepEqual(foot.filter((n) => !NEWER.has(n[0])), [['/', 'Home'], ['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']]);
+      assert.deepEqual(foot.filter((n) => !NEWER.has(n[0])), [['/', 'Home'], ['/services/', 'Services'], ['/catalogue/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']]);
       assert.ok(row.includes(`<a href="${MSGR}" rel="noopener" target="_blank" data-brand>${MSG_ICON}Message us</a>`) && row.includes(`<a href="${FB}" rel="noopener" target="_blank">Facebook</a>`));
       assert.ok(row.endsWith('<a class="foot-portal" href="/#login">Team portal</a>'));
       assert.ok(p.footer.includes(`<p>${ADDRESS}</p>`) && p.footer.includes('<p class="foot-name">Barro Industries OPC</p>'));
@@ -1058,7 +1058,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
   it('link to the matching pages: the equipment list to all eleven products, the five services, the brief and both other guides; the layout guide to the four systems, the fit-out, the brief and the equipment list', () => {
     const l = hrefsOf(list), y = hrefsOf(layout);
     for (const s of PRODUCTS) assert.ok(l.has(`/products/${s}/`), `the equipment list does not link /products/${s}/`);
-    for (const u of ['/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/lpg-gas-line-installation/', '/services/kitchen-fire-suppression/', '/services/commercial-kitchen-fit-out/', '/sales/clientinformationrequest/', '/guides/how-to-plan-a-commercial-kitchen-layout/', '/guides/ss304-vs-ss316-stainless-steel/', '/guides/commissary-kitchen-requirements-philippines/', '/catalogue/#cat-refrigeration', '/catalogue/#cat-cooking', '/products/']) assert.ok(l.has(u), `the equipment list does not link ${u}`);
+    for (const u of ['/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/lpg-gas-line-installation/', '/services/kitchen-fire-suppression/', '/services/commercial-kitchen-fit-out/', '/sales/clientinformationrequest/', '/guides/how-to-plan-a-commercial-kitchen-layout/', '/guides/ss304-vs-ss316-stainless-steel/', '/guides/commissary-kitchen-requirements-philippines/', '/catalogue/#cat-refrigeration', '/catalogue/#cat-cooking', '/catalogue/']) assert.ok(l.has(u), `the equipment list does not link ${u}`);
     for (const u of ['/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/lpg-gas-line-installation/', '/services/kitchen-fire-suppression/', '/services/commercial-kitchen-fit-out/', '/sales/clientinformationrequest/', '/guides/commercial-kitchen-equipment-checklist/', '/guides/commissary-kitchen-requirements-philippines/', '/products/stainless-steel-range-hoods/']) assert.ok(y.has(u), `the layout guide does not link ${u}`);
     for (const p of NEW) {
       const rel = p.html.match(/<section id="related"[\s\S]*?<\/section>/)[0];
@@ -1114,7 +1114,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       [layout, /use a standard 850 mm/, P('commercial-wok-ranges'), /The standard working height is 850 mm\./],
       [layout, /use a standard 850 mm/, P('commercial-griddles-grillers-and-fryers'), /The standard working height is 850 mm\./],
       [layout, /a dish table with a pre-rinse sink stays at least 1200 mm long/, P('stainless-steel-dish-tables'), /keeps the length at 1200 mm or more when you add a pre-rinse sink/],
-      [layout, /stand on adjustable bullet feet/, 'products/index.html', /floor-standing pieces stand on square-tube posts with adjustable bullet feet/],
+      [layout, /stand on adjustable bullet feet/, 'faq/index.html', /square-tube posts with adjustable bullet feet/],
       [layout, /stand on adjustable bullet feet/, P('stainless-steel-work-tables'), /square-tube posts with adjustable bullet feet/],
       [layout, /stand on adjustable bullet feet/, P('stainless-steel-sinks'), /square-tube posts with adjustable bullet feet/],
       [layout, /stand on adjustable bullet feet/, P('commercial-gas-stoves'), /square-tube posts with adjustable bullet feet/],
@@ -1647,8 +1647,9 @@ for (const d of DOCS) {
     });
 
     if (d.key !== 'portfolio') {
-      it('says the standard construction on its "Two grades, four finishes" page, word for word as the website\'s /products/ hub does (owner ruling 2026-10-28), scoped to made-to-order pieces', () => {
-        assert.ok(visibleText(read('products/index.html')).includes(HUB_CONSTRUCTION), 'the website hub no longer says the sentence this PDF repeats');
+      it('says the standard construction on its "Two grades, four finishes" page, as the website\'s FAQ does (owner ruling 2026-10-28; the /products/ hub that said it verbatim is retired), scoped to made-to-order pieces', () => {
+        const faq = visibleText(read('faq/index.html'));   // the /products/ hub that said it word for word is retired (owner 2026-11-19): the FAQ says the same facts
+        for (const fact of ['1.5 mm (16 gauge) top plate', '1.2 mm bodies and shelving', 'square-tube posts with adjustable bullet feet']) assert.ok(faq.includes(fact), `the website FAQ no longer says what this PDF repeats: ${fact}`);
         const page = pages.find((p) => compact(p).includes('twogradesfourfinishes'));
         assert.ok(page, 'no "Two grades, four finishes" page');
         assert.ok(compact(page).includes(compact(HUB_CONSTRUCTION)), 'the materials page lacks the construction sentence');

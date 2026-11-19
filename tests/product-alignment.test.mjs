@@ -138,32 +138,17 @@ describe('loadProjectImages (a project card names its own image path)', () => {
   });
 });
 
-describe('/products/ is aligned with /catalogue/', () => {
+const ORDER = [['prep_table', 'stainless-steel-work-tables'], ['sink', 'stainless-steel-sinks'], ['dish_table', 'stainless-steel-dish-tables'], ['hood', 'stainless-steel-range-hoods'], ['stove', 'commercial-gas-stoves'], ['wok_range', 'commercial-wok-ranges'],
+  ['cooking_line', 'commercial-griddles-grillers-and-fryers'], ['deck_oven', 'gas-deck-ovens'], ['cabinet', 'stainless-steel-cabinets'], ['wall_shelf', 'stainless-steel-shelving'], ['rack', 'stainless-steel-racks']];
+const HTML_FILES = (() => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d || '.'), { withFileTypes: true })) { const rel = d ? `${d}/${e.name}` : e.name;
+  if (e.isDirectory()) { if (!['node_modules', '.git', 'downloads', 'private', 'archive', 'functions', 'dev', 'docs', 'fable-workplan', 'icons', 'site', 'css', 'js', 'scripts', 'tests'].includes(e.name)) walk(rel); } else if (e.name.endsWith('.html')) out.push(rel); } }; walk(''); return out; })();
+
+describe('the product pages show the same starting price as the catalogue', () => {
   const prices = JSON.parse(read('scripts/public-from-prices.json')).prices;
   const line = (e) => (e.perProject ? '<p class="cat-from cat-from-ask">Priced per project</p>' : `<p class="cat-from">From <data value="${e.from}">₱${String(e.from).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</data> <span class="cat-vat">+ VAT</span></p>`);
-  const ORDER = [['prep_table', 'stainless-steel-work-tables', 'Preparation tables'], ['sink', 'stainless-steel-sinks', 'Sinks and dish tables'], ['dish_table', 'stainless-steel-dish-tables', 'Sinks and dish tables'], ['hood', 'stainless-steel-range-hoods', 'Range hoods'],
-    ['stove', 'commercial-gas-stoves', 'Chef Mode cooking equipment'], ['wok_range', 'commercial-wok-ranges', 'Chef Mode cooking equipment'], ['cooking_line', 'commercial-griddles-grillers-and-fryers', 'Chef Mode cooking equipment'], ['deck_oven', 'gas-deck-ovens', 'Chef Mode cooking equipment'],
-    ['cabinet', 'stainless-steel-cabinets', 'Storage, racks and trolleys'], ['wall_shelf', 'stainless-steel-shelving', 'Storage, racks and trolleys'], ['rack', 'stainless-steel-racks', 'Storage, racks and trolleys']];
   const cat = read('catalogue/index.html');
-  const hub = read('products/index.html');
 
-  it('lists the eleven products in the catalogue\'s order, each tagged with the catalogue\'s own group heading', () => {
-    const catOrder = [...cat.matchAll(/data-family="([a-z_]+)"/g)].map((m) => m[1]).filter((f, i, a) => a.indexOf(f) === i);
-    assert.deepEqual(catOrder, ORDER.map((o) => o[0]), 'the catalogue\'s own family order changed: align /products/ and this test');
-    const headings = [...cat.matchAll(/<h2 id="cat-h-[a-z]+">([^<]*?)\s*</g)].map((m) => decode(m[1]));
-    for (const g of new Set(ORDER.map((o) => o[2]))) assert.ok(headings.includes(g), `the catalogue has no group "${g}"`);
-    const cards = [...hub.matchAll(/<p class="pg-card-tag">([^<]+)<\/p>\s*<h3><a href="\/products\/([a-z-]+)\/">/g)].map((m) => [m[2], decode(m[1])]);
-    assert.deepEqual(cards, ORDER.map((o) => [o[1], o[2]]));
-  });
-
-  it('links the eight catalogue groups, by their current labels and anchors', () => {
-    const chips = hub.match(/<div class="pg-chips">[\s\S]*?<\/div>/)[0];
-    const links = [...chips.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    const real = [...cat.matchAll(/<h2 id="cat-h-([a-z]+)">([^<]*?)\s*</g)].map((m) => [`/catalogue/#cat-${m[1]}`, decode(m[2])]);
-    assert.deepEqual(links, [...real, ['/catalogue/', 'The whole catalogue']]);
-  });
-
-  it('shows on every hub card and every product page the same starting price as its catalogue card: the JSON value, in the catalogue\'s exact element', () => {
+  it('shows on every product page the same starting price as its catalogue card: the JSON value, in the catalogue\'s exact element, once', () => {
     for (const [fam, slug] of ORDER) {
       const e = prices[fam];
       assert.ok(e && (e.perProject || Number.isInteger(e.from)), fam);
@@ -173,24 +158,20 @@ describe('/products/ is aligned with /catalogue/', () => {
       const page = read(`products/${slug}/index.html`);
       assert.equal((page.match(/<p class="cat-from[ "]/g) || []).length, 1, `${slug}: exactly one price line`);
       assert.ok(page.includes(want), `${slug}: its price line is not the catalogue card's`);
-      const hubCard = hub.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="/products/${slug}/"[\\s\\S]*?</article>`))[0];
-      assert.equal((hubCard.match(/<p class="cat-from[ "]/g) || []).length, 1, `${slug}: hub card has one price line`);
-      assert.ok(hubCard.includes(want), `${slug}: the hub card's price line`);
     }
-    assert.equal((hub.match(/<p class="cat-from[ "]/g) || []).length, 11);
   });
 
-  it('puts the amount nowhere else on /products/ and its pages (the estimate sentence stays as it was)', () => {
-    for (const f of ['products/index.html', ...ORDER.map((o) => `products/${o[1]}/index.html`)]) {
+  it('puts the amount nowhere else on the product pages (the estimate sentence stays), and nowhere on the pages that stay price-free', () => {
+    for (const f of ORDER.map((o) => `products/${o[1]}/index.html`)) {
       const t = read(f).replace(/<style id="page-css">[\s\S]*?<\/style>/, '').replace(/<p class="cat-from[ "][^>]*>.*?<\/p>/g, '');
       assert.ok(!/₱|\bPHP ?[0-9]|\b[0-9]{1,3}(,[0-9]{3})+\b(?!\.)/.test(t.replace(/fonts\.googleapis\.com[^"']*/g, '')), `${f}: money outside the price line`);
       assert.ok(t.includes('Prices depend on size and options.'), `${f}: the owner's sentence`);
     }
-    for (const f of ['index.html', 'services/index.html', 'work/index.html', 'faq/index.html', 'areas-we-serve/index.html', 'guides/index.html', 'services/fresh-air-systems/index.html', 'services/exhaust-and-fresh-air-systems/index.html'])
+    for (const f of ['index.html', 'products/index.html', 'services/index.html', 'work/index.html', 'faq/index.html', 'areas-we-serve/index.html', 'guides/index.html', 'services/fresh-air-systems/index.html', 'services/exhaust-and-fresh-air-systems/index.html'])
       assert.ok(!/<p class="cat-from|₱/.test(read(f).replace(/<style id="(?:page|site)-css">[\s\S]*?<\/style>/, '')), `${f}: a price on a page that stays price-free`);
   });
 
-  it('scripts/check-catalogue-cards.js passes on the repo and FAILS (naming the page, never the amount) on a scratch copy with a drifted price, a swapped hub order and a wrong group tag', () => {
+  it('scripts/check-catalogue-cards.js passes on the repo and FAILS (naming the page, never the amount) on a scratch copy with a drifted price, a price line on the forward, and a forward that is indexable or does not refresh', () => {
     const run = (root) => spawnSync(process.execPath, [path.join(ROOT, 'scripts/check-catalogue-cards.js'), root], { encoding: 'utf8' });
     assert.equal(run(ROOT).stdout, '', 'the repo itself must pass');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-mut-'));
@@ -198,26 +179,75 @@ describe('/products/ is aligned with /catalogue/', () => {
     for (const rel of ['catalogue/index.html', 'products/index.html', 'scripts/public-from-prices.json', ...ORDER.map((o) => `products/${o[1]}/index.html`)]) copy(rel);
     assert.equal(run(root).stdout, '');
     const edit = (rel, fn) => { const p = path.join(root, rel); const before = fs.readFileSync(p, 'utf8'); fs.writeFileSync(p, fn(before)); return () => fs.writeFileSync(p, before); };
-    // 1. a product page's amount differs from the catalogue
     let undo = edit('products/stainless-steel-sinks/index.html', (t) => t.replace('<data value="20500">₱20,500</data>', '<data value="20600">₱20,600</data>'));
     let out = run(root).stdout;
     assert.ok(/stainless-steel-sinks\/index\.html: its price line/.test(out) && !/20,?[56]00/.test(out), out);
     undo();
-    // 2. a hub card says "Priced per project" for a product that has an amount
-    undo = edit('products/index.html', (t) => t.replace('<p class="cat-from">From <data value="14000">₱14,000</data> <span class="cat-vat">+ VAT</span></p>', '<p class="cat-from cat-from-ask">Priced per project</p>'));
-    out = run(root).stdout;
-    assert.ok(/products\/index\.html: the wall_shelf card/.test(out), out);
+    undo = edit('products/index.html', (t) => t.replace('<h1>', '<p class="cat-from cat-from-ask">Priced per project</p><h1>'));
+    assert.ok(/products\/index\.html: it must be the noindex forward/.test(run(root).stdout));
     undo();
-    // 3. the hub order drifts from the catalogue's (the first two cards swapped)
-    undo = edit('products/index.html', (t) => { const a = t.indexOf('      <article class="pg-card">'); const b = t.indexOf('      <article class="pg-card">', a + 10); const c = t.indexOf('      <article class="pg-card">', b + 10); return t.slice(0, a) + t.slice(b, c) + t.slice(a, b) + t.slice(c); });
-    out = run(root).stdout;
-    assert.ok(/not in the catalogue's order/.test(out), out);
+    undo = edit('products/index.html', (t) => t.replace('noindex, follow', 'index, follow'));
+    assert.ok(/products\/index\.html: it must be the noindex forward/.test(run(root).stdout));
     undo();
-    // 4. a group tag that is not the catalogue's heading
-    undo = edit('products/index.html', (t) => t.replace('<p class="pg-card-tag">Range hoods</p>', '<p class="pg-card-tag">Ventilation</p>'));
-    out = run(root).stdout;
-    assert.ok(/the hood card's group tag/.test(out), out);
+    undo = edit('products/index.html', (t) => t.replace('<meta http-equiv="refresh" content="0; url=/catalogue/">', ''));
+    assert.ok(/products\/index\.html: it must be the noindex forward/.test(run(root).stdout));
     undo();
     assert.equal(run(root).stdout, '');
+  });
+});
+
+describe('Products and Catalogue are one list (owner ruling 2026-11-19)', () => {
+  const FIVE = ['<a href="/services/">Services</a>', '<a href="/catalogue/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/guides/">The Kitchen Guide</a>'];
+  const navOf = (h) => (h.match(/<nav id="site-nav"[^>]*>([\s\S]*?)<\/nav>/) || [, null])[1];
+
+  it('shows exactly Services, Products (to /catalogue/), Our work, The Kitchen Guide and Contact in the menu, then Get a quote, on every page that has a menu; no "Catalogue" menu or footer link remains', () => {
+    let n = 0;
+    for (const f of HTML_FILES) {
+      const h = read(f), nav = navOf(h);
+      if (nav === null) continue;
+      n++;
+      const links = (nav.match(/<a [^>]*>[^<]*<\/a>/g) || []).map((a) => a.replace(/ aria-current="[^"]*"/, ''));
+      assert.deepEqual(links.slice(0, 4), FIVE, `${f}: the menu`);
+      assert.match(links[4], /^<a href="(\/)?#contact">Contact<\/a>$/, `${f}: the Contact link`);
+      assert.equal(links.length, 5, `${f}: ${links.length} menu links`);
+      assert.ok(/<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="\/catalogue\/\?quote=1"[^>]*>Get a quote<\/a>/.test(h), `${f}: Get a quote`);
+      assert.ok(!/>Catalogue<\/a>/.test(h.replace(/<style[\s\S]*?<\/style>/, '')), `${f}: a "Catalogue" link remains`);
+      const foot = (h.match(/<p class="foot-links">[\s\S]*?<\/p>/) || [''])[0];
+      assert.ok(/<a href="\/catalogue\/">Products<\/a>/.test(foot) && !/href="\/products\/"/.test(foot), `${f}: the footer Products link`);
+    }
+    assert.ok(n >= 130, `only ${n} pages have a menu`);
+  });
+
+  it('marks Products as the current page on /catalogue/ ("page") and on the eleven product pages ("true")', () => {
+    const cur = (f) => [...navOf(read(f)).matchAll(/<a href="([^"]+)" aria-current="([^"]+)">/g)].map((m) => [m[1], m[2]]);
+    assert.deepEqual(cur('catalogue/index.html'), [['/catalogue/', 'page']]);
+    for (const [, slug] of ORDER) assert.deepEqual(cur(`products/${slug}/index.html`), [['/catalogue/', 'true']], slug);
+  });
+
+  it('has no internal link to the retired /products/ hub anywhere (pages, JSON-LD, llms.txt, sitemap), and the eleven product pages\' breadcrumb reads Home > Products (/catalogue/) > the page', () => {
+    for (const f of [...HTML_FILES.filter((x) => x !== 'products/index.html'), 'llms.txt', 'sitemap.xml']) {
+      const t = read(f).replace(/<style[\s\S]*?<\/style>/g, '');
+      assert.ok(!/(?:href="|\(|<loc>|"item": "|"url": "|content=")(?:https:\/\/barroindustries\.com)?\/products\/(?:["<)])/.test(t), `${f}: a link to the retired /products/ hub`);
+    }
+    for (const [, slug] of ORDER) {
+      const h = read(`products/${slug}/index.html`);
+      assert.ok(/<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="\/">Home<\/a><\/li><li><a href="\/catalogue\/">Products<\/a><\/li><li><span aria-current="page">/.test(h), `${slug}: the visible breadcrumb`);
+      assert.ok(h.includes('"name": "Products",\n          "item": "https://barroindustries.com/catalogue/"'), `${slug}: the JSON-LD breadcrumb`);
+    }
+  });
+
+  it('turns /products/ into a noindex forward to /catalogue/ (meta refresh, canonical, a visible link, the site\'s CSP) and keeps it out of the sitemap while the eleven product pages stay in it', () => {
+    const h = read('products/index.html');
+    assert.ok(h.includes('<meta http-equiv="refresh" content="0; url=/catalogue/">'));
+    assert.ok(h.includes('<link rel="canonical" href="https://barroindustries.com/catalogue/">'));
+    assert.ok(h.includes('<meta name="robots" content="noindex, follow">'));
+    assert.ok(/<a class="site-btn site-btn-primary" href="\/catalogue\/">Open the catalogue<\/a>/.test(h), 'a visible link');
+    assert.match(h, /<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-[A-Za-z0-9+\/=]+' https:\/\/fonts\.googleapis\.com;/);
+    assert.ok(!/application\/ld\+json/.test(h) && !/og:title/.test(h), 'a retired page carries no structured data');
+    const map = read('sitemap.xml');
+    assert.ok(!map.includes('<loc>https://barroindustries.com/products/</loc>'), 'the sitemap still lists the retired hub');
+    for (const [, slug] of ORDER) assert.ok(map.includes(`<loc>https://barroindustries.com/products/${slug}/</loc>`), `${slug}: not in the sitemap`);
+    assert.ok(map.includes('<loc>https://barroindustries.com/catalogue/</loc>'));
+    assert.ok(!exists('site/img/seo/og-products.webp'), 'the retired hub\'s social card is still shipped');
   });
 });
