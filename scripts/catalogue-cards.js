@@ -103,14 +103,14 @@ const CARD_COPY = Object.freeze({
 // before the configurable cards of its group (the three featured hero products). Their starting amounts are in scripts/public-from-prices.json.
 const PROJECT_CARDS = Object.freeze([
   {
-    id: 'station', group: 'station', image: 'site/img/products/render-20-commercial-station-244-four-cabinets.webp', name: 'Multi-purpose kitchen station', tag: 'Made to order',
+    id: 'station', group: 'station', name: 'Multi-purpose kitchen station', tag: 'Made to order',
     desc: 'Multi-purpose kitchen station built around your layout.',
     size: 'Built to your layout',
     specs: ['SS304 stainless steel', 'Cabinets, drawers, sink and open bays in one run', 'Worktop with backsplash'],
     options: 'Layout, length and modules agreed with you',
   },
   {
-    id: 'exhaust', group: 'exhaust', image: 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
+    id: 'exhaust', group: 'exhaust', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
     desc: 'Exhaust and fresh-air system, designed and installed by our team.',
     size: 'Designed per kitchen',
     specs: ['Exhaust ducting and blowers', 'Fresh-air supply and ceiling diffusers', 'Designed around your hood'],

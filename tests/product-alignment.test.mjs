@@ -65,18 +65,11 @@ describe('the owner\'s designs replace the stock photos', () => {
     for (const k of KEPT_FOR_PDF) assert.ok(!read('scripts/downloads/catalogue.js').includes(k), `${k}: the PDF builder names a stock file`);
   });
 
-  it('maps only the four designs a family card shows (preparation table, sink, range hood, cabinet) and gives the two project cards their own image path; every other card has no photo', () => {
-    assert.deepEqual(JSON.parse(read('scripts/product-photos.json')), {
-      'PW-003': 'site/img/products/render-03-straight-table-152-two-shelves.webp', 'PW-008': 'site/img/products/render-44-two-bowl-dishwashing-sink.webp',
-      'PW-015': 'site/img/products/render-20-commercial-station-244-four-cabinets.webp', 'EX-001': 'site/img/products/render-61-rear-pitch-hood-300.webp' });
-    const fams = JSON.parse(read('scripts/public-families.json')).families;
-    assert.deepEqual(Object.entries(fams).filter(([, f]) => f.photo).map(([k, f]) => [k, f.photo]), [['prep_table', 'PW-003'], ['sink', 'PW-008'], ['hood', 'EX-001'], ['cabinet', 'PW-015']]);
+  it('maps no photo at all (owner 2026-11-20: no product photo on the catalogue cards or the product pages): product-photos.json is empty and no project card names an image', () => {
+    assert.deepEqual(JSON.parse(read('scripts/product-photos.json')), {});
     const cards = require('../scripts/catalogue-cards.js').PROJECT_CARDS;
-    assert.deepEqual(cards.map((c) => [c.id, c.image || null, c.photo || null]), [['station', 'site/img/products/render-20-commercial-station-244-four-cabinets.webp', null], ['exhaust', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', null],
+    assert.deepEqual(cards.map((c) => [c.id, c.image || null, c.photo || null]), [['station', null, null], ['exhaust', null, null],
       ['pugon', null, null], ['teppanyaki', null, null], ['inasal', null, null], ['noodle_boiler', null, null], ['combi_stove', null, null], ['trolley', null, null]]);
-    const page = read('catalogue/index.html');
-    const withPhoto = [...page.matchAll(/<li class="cat-card[^"]*" data-(?:family|id|ask)="([^"]+)"[^>]*>(<figure class="cat-photo">)?/g)].filter((m) => m[2]).map((m) => m[1]);
-    assert.deepEqual(withPhoto, ['prep_table', 'station', 'sink', 'hood', 'exhaust', 'cabinet']);
   });
 });
 
@@ -122,7 +115,7 @@ describe('loadProjectImages (a project card names its own image path)', () => {
     return root;
   };
   it('accepts the real design images and returns the same shape as the photo map', () => {
-    const { images } = loadProjectImages({ cards: require('../scripts/catalogue-cards.js').PROJECT_CARDS });
+    const { images } = loadProjectImages({ cards: [{ id: 'station', image: 'site/img/products/render-20-commercial-station-244-four-cabinets.webp' }, { id: 'exhaust', image: 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp' }] });
     assert.deepEqual(images.station, { src: 'site/img/products/render-20-commercial-station-244-four-cabinets.webp', thumb: 'site/img/products/render-20-commercial-station-244-four-cabinets-thumb.webp', width: 600, height: 300, mainWidth: 1200 });
     assert.deepEqual(Object.keys(images).sort(), ['exhaust', 'station']);
   });

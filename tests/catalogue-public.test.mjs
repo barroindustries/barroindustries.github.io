@@ -1256,23 +1256,16 @@ describe('product photos (the map stays valid, but since 2026-11-19 NO catalogue
     const unpublished = Object.keys(map).filter(id => !ids.includes(id) && !absorbedIds.has(id));
     assert.doesNotThrow(() => loadPhotoMap({ ids: [...ids, ...absorbedIds, ...unpublished], skipIds: unpublished }));
     // every family card photo names a product that really has a mapped image (or no photo at all)
-    for (const [fid, f] of Object.entries(familiesSrc.families)) assert.ok(f.photo === null || Object.prototype.hasOwnProperty.call(map, f.photo), `${fid}: its photo product ${f.photo} has no image in the map`);
+    // (since 2026-11-20 the map is empty: no card shows a photo, so a family's `photo` product needs no entry)
+    if (Object.keys(map).filter(k => k[0] !== '_').length) for (const [fid, f] of Object.entries(familiesSrc.families)) assert.ok(f.photo === null || Object.prototype.hasOwnProperty.call(map, f.photo), `${fid}: its photo product ${f.photo} has no image in the map`);
   });
 
-  it('shows the mapped product photos again (owner 2026-11-19 later), each captioned "Representative image" and lazy-loaded, and only from scripts/product-photos.json', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
+  it('shows NO product photo on any card (owner 2026-11-20: text-only cards): scripts/product-photos.json is empty, no project card names an image, and the catalogue block has no figure, image or "Representative image" caption', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
     const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
-    const figs = catBlock.match(/<figure class="cat-photo">[\s\S]*?<\/figure>/g) || [];
-    // owner ruling 2026-11-19 (later): the stock photos were the wrong pictures. Six cards show one of the owner's own design images (four families through the map, two project cards
-    // through their own `image` path); every other card is text only
-    assert.equal(figs.length, 6);
-    const projectImages = require('../scripts/catalogue-cards.js').PROJECT_CARDS.map(pc => pc.image).filter(Boolean);
-    assert.deepEqual(projectImages.sort(), ['site/img/products/render-20-commercial-station-244-four-cabinets.webp', 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp']);
-    const mapped = new Set([...Object.entries(map).filter(([k]) => k[0] !== '_').map(([, v]) => v), ...projectImages].map(v => '/' + v.replace(/\.webp$/, '-thumb.webp')));
-    for (const f of figs) {
-      assert.ok(f.includes('<figcaption>Representative image</figcaption>') && f.includes('loading="lazy"'));
-      assert.ok(mapped.has(f.match(/<img src="([^"]+)"/)[1]), 'a photo that is not in scripts/product-photos.json');
-    }
-    assert.ok(!/\bAI\b|generated|ChatGPT/i.test(figs.join('')), 'a caption names how the image was made');
+    assert.deepEqual(Object.keys(map).filter(k => k[0] !== '_'), []);
+    assert.deepEqual(require('../scripts/catalogue-cards.js').PROJECT_CARDS.map(pc => pc.image).filter(Boolean), []);
+    assert.equal((catBlock.match(/<figure|<img|Representative image|cat-photo/g) || []).length, 0);
+    assert.ok(!/\/site\/img\/products\//.test(catBlock), 'a product image path on the catalogue');
   });
 
   it('every product image the page references exists on disk', () => {

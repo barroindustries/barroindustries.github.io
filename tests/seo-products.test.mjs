@@ -924,22 +924,12 @@ describe('the options on each product page are the ones the configurators offer 
     assert.ok(!/free-standing/i.test(p.main), 'the pins ban the word "free": say it another way');
   });
 
-  it('shows a product picture only where the product exists in the picture: the griddle, griller and fryer page and the hood page do; the dish table, wok range and deck oven pages (no photograph of those) use the text hero and show none', () => {
-    // owner ruling 2026-11-19: the old stock photos were the WRONG pictures; a page shows only the owner's own designs, and no picture at all where there is no design
-    // (the "What it can look like" gallery, section #renders, is the owner's own set of the same designs: it is pinned by its own tests, so it is taken out here)
-    const noGallery = (h) => h.replace(/<section id="renders"[\s\S]*?<\/section>/, '');
-    for (const [s, n] of [['stainless-steel-work-tables', 2], ['stainless-steel-sinks', 2], ['stainless-steel-range-hoods', 1], ['commercial-griddles-grillers-and-fryers', 0], ['commercial-gas-stoves', 0], ['stainless-steel-racks', 0], ['stainless-steel-shelving', 0]]) {
-      const p = byPath(`/products/${s}/`);
-      const h = noGallery(p.html);
-      assert.equal((h.match(/<span>Representative image<\/span>/g) || []).length, n, s);
-      if (n === 0) assert.ok(!/<figure class="pg-fig">[^]*?\/site\/img\/products\//.test(noGallery(p.main)), `${s}: a product picture where there is no design`);
-      assert.ok(!p.main.includes('pg-hero-plain'), `${s}: a project photograph leads the page`);   // (the inline stylesheet names the class too: look in <main>)
+  it('shows NO product picture on any product page (owner 2026-11-20): no render-NN image, no "Representative image" caption, no figure gallery, no "What it can look like" section — only the text hero on the pages that have it', () => {
+    for (const p of PAGES.filter((x) => /^\/products\/[a-z0-9-]+\/$/.test(x.path))) {
+      assert.ok(!/site\/img\/products\//.test(p.html), `${p.path}: a product image`);
+      assert.ok(!/Representative image|class="pg-fig"|id="renders"|What it can look like/.test(p.main), `${p.path}: a product picture, caption or gallery`);
     }
-    for (const s of ['stainless-steel-dish-tables', 'commercial-wok-ranges']) {
-      const p = byPath(`/products/${s}/`);
-      assert.ok(p.html.includes('<section class="pg-hero pg-hero-plain">'), `${s}: the text hero`);
-      assert.ok(!/\/site\/img\/products\//.test(p.main), `${s}: a product picture of something that is not the product`);
-    }
+    for (const s of ['stainless-steel-dish-tables', 'commercial-wok-ranges']) assert.ok(byPath(`/products/${s}/`).html.includes('<section class="pg-hero pg-hero-plain">'), `${s}: the text hero`);
   });
 
   it('ends every family\'s catalogue card with its own "Learn more" link to the page that sells it (FAMILY_PAGES in scripts/build-catalogue.js): one page per family, none missing', () => {

@@ -187,7 +187,7 @@ describe('css/catalogue.css — compact text cards that never overflow', () => {
     assert.equal(g.display, 'grid');
     assert.equal(g['grid-template-columns'], 'repeat(2,minmax(0,1fr))');   // owner 2026-11-19: 2 columns on a phone, 3 from 601px, 4 from 1100px (media rules below), one under 360px
     const colsAt = (w) => css.includes(`@media (min-width:${w}px)`);
-    assert.ok(colsAt(601) && colsAt(1100) && /repeat\(4,minmax\(0,1fr\)\)/.test(css) && /repeat\(3,minmax\(0,1fr\)\)/.test(css) && /max-width:359px/.test(css));
+    assert.ok(colsAt(601) && colsAt(1100) && /repeat\(4,minmax\(0,1fr\)\)/.test(css) && /repeat\(3,minmax\(0,1fr\)\)/.test(css) && /max-width:479px/.test(css));
     assert.ok(px(g.gap) <= 16 && px(g.gap) >= 8);
     const c = merged('#site .cat-card');
     assert.equal(c.display, 'flex');
@@ -231,9 +231,8 @@ describe('css/catalogue.css — compact text cards that never overflow', () => {
     }
   });
 
-  it('the pieces of the old cards are gone from the stylesheets: tile, spec list, notes, labels, code, featured and side-by-side layouts (the photo is back, full-bleed on top)', () => {
-    assert.match(css, /#site \.cat-photo\{[^}]*aspect-ratio:4\/3/);
-    for (const gone of ['.cat-tile', '.cat-ic', '.cat-specs', '.cat-notes', '.cat-label', '.cat-meta', '.cat-body', '.cat-card-feature', '.cat-grid-multi', '.has-photo', '--cat-well'])
+  it('the pieces of the old cards are gone from the stylesheets: tile, spec list, notes, labels, code, featured and side-by-side layouts (text-only cards: no product photo on the catalogue, owner 2026-11-20)', () => {
+    for (const gone of ['.cat-photo', '.cat-tile', '.cat-ic', '.cat-specs', '.cat-notes', '.cat-label', '.cat-meta', '.cat-body', '.cat-card-feature', '.cat-grid-multi', '.has-photo', '--cat-well'])
       assert.ok(!css.includes(gone) && !qrCss.includes(gone), `the stylesheets still mention ${gone}`);
   });
 
@@ -418,8 +417,8 @@ describe('search finds every card — the configurable ones included — by runn
     assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 32);
     assert.equal((block.match(/data-kw="/g) || []).length, 32);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
-    assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head"|figure class="cat-photo")/.test(block), 'a card starts with something other than its photo or its head');
-    assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 6, 'the 6 cards with one of the owner\'s design images (preparation table, sink, range hood, cabinet; station, exhaust); every other card is text only (owner 2026-11-19)');
+    assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head")/.test(block), 'a card starts with something other than its head');
+    assert.equal((block.match(/<figure|<img/g) || []).length, 0, 'every card is text only: no product photo on the catalogue (owner 2026-11-20)');
   });
 });
 
