@@ -116,7 +116,7 @@ const cat = read('catalogue/index.html');
 const catHead = cat.slice(0, cat.indexOf('</head>'));
 const catBlock = between(cat, START_MARKER, END_MARKER);
 const catHand = cat.replace(catBlock, '');                    // the catalogue page minus its generated block
-const pageIds = new Set([...catBlock.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]));
+const pageIds = new Set([...catBlock.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)].map(m => m[1]));       // the FIXED cards (2026-11-19: no code is shown on a card; data-id carries it)
 const pubJson = JSON.parse(read('scripts/public-categories.json'));
 
 describe('publicProduct — the allowlist (R1: no price field can reach the page)', () => {
@@ -184,9 +184,9 @@ describe('publicProduct — the allowlist (R1: no price field can reach the page
     assert.deepEqual(PER_LENGTH, before);
   });
 
-  it('renders dimensions without a thousands separator (it would trip the money scan)', () => {
+  it('a card shows no size line and no note any more (owner ruling 2026-11-19): the master\'s size, unit, notes and material never reach the markup', () => {
     const html = render([PER_LENGTH]);
-    assert.ok(html.includes('1200 × 700 × 850 mm · per pc'));
+    assert.ok(!html.includes('1200') && !html.includes('per pc') && !html.includes('LP burner') && !html.includes('SS304 1.1mm'));
     assert.ok(!/\b\d{1,3},\d{3}\b/.test(html));
   });
 });
@@ -312,8 +312,9 @@ describe('TEXT_FIXES — typo / British-spelling / grammar corrections of displa
   });
 
   it('every fix for a published product is reflected in the committed catalogue page, and no original survives there', () => {
-    const onPage = entries.filter(e => pageIds.has(e.id));
-    assert.ok(onPage.length >= 4, `only ${onPage.length} fixes touch a card on the page`);
+    // a card shows the NAME only (no notes since 2026-11-19), so only a name fix of a fixed card is on the page
+    const onPage = entries.filter(e => pageIds.has(e.id) && e.field === 'name');
+    assert.ok(onPage.length >= 1, `only ${onPage.length} fixes touch a card on the page`);
     for (const e of onPage) {
       assert.ok(cat.includes(esc(e.after)), `${e.id}.${e.field}: the fixed text is not on the page — re-run node scripts/build-catalogue.js`);
       // the original must not survive as a whole displayed string
@@ -332,9 +333,11 @@ describe('TEXT_FIXES — typo / British-spelling / grammar corrections of displa
   });
 });
 
-describe('the six public categories (owner ruling 2026-10-21: "just the equipment"; Ventilation added 2026-10-28)', () => {
-  it('are exactly Preparation, Washing, Cooking, Ventilation, Storage, Refrigeration — in that order — and three master categories are excluded (the exhaust category is not one of them any more)', () => {
-    assert.deepEqual(PUBLIC_CATEGORIES.map(c => [c.id, c.label]), [['preparation', 'Preparation'], ['washing', 'Washing'], ['cooking', 'Cooking'], ['ventilation', 'Ventilation'], ['storage', 'Storage'], ['refrigeration', 'Refrigeration']]);
+describe('the eight public groups (owner ruling 2026-11-19: the configurators of the 17-18 Nov call; 2026-10-21 "just the equipment" still decides which products are published)', () => {
+  it('are exactly the eight groups of the owner\'s call, in that order — and three master categories are excluded (the exhaust category is not one of them)', () => {
+    assert.deepEqual(PUBLIC_CATEGORIES.map(c => [c.id, c.label]), [
+      ['preparation', 'Preparation tables'], ['station', 'Multi-purpose kitchen stations'], ['washing', 'Sinks and dish tables'], ['ventilation', 'Range hoods'],
+      ['exhaust', 'Exhaust and fresh air'], ['cooking', 'Chef Mode cooking equipment'], ['storage', 'Storage, racks and trolleys'], ['refrigeration', 'Refrigeration and other equipment']]);
     assert.deepEqual([...EXCLUDED_CATEGORIES], ['fresh_air_system', 'gas_line', 'fire_suppression']);
     assert.ok(Object.isFrozen(PUBLIC_CATEGORIES) && Object.isFrozen(EXCLUDED_CATEGORIES));
   });
@@ -346,15 +349,13 @@ describe('the six public categories (owner ruling 2026-10-21: "just the equipmen
     const pub = { products: { 'EX-901': 'ventilation' }, excludedProducts: { 'EX-902': 'exhaust ducting: a component of the exhaust system' } };
     const report = {};
     const out = renderCatalogue(db([hood, duct], cats), { report, publicCategories: pub });
-    assert.ok(out.includes('>EX-901</p>') && !out.includes('EX-902'));
+    assert.ok(out.includes('data-id="EX-901"') && !out.includes('EX-902'));
     assert.ok(out.includes('<section class="cat-group" id="cat-ventilation"') && out.includes('1 products in 1 categories'));
     assert.deepEqual(report.skipped.categories, {}, 'nothing is skipped by category');
     assert.deepEqual(report.skipped.products, ['EX-902']);
     assert.deepEqual(violationsOf(() => renderCatalogue(db([hood, duct], cats), { publicCategories: { products: { 'EX-901': 'ventilation' }, excludedProducts: {} } })), [{ id: 'EX-902', field: 'publicCategory', rule: 'unmapped' }]);
     assert.deepEqual([...publishedProductIds(db([hood, duct], cats), pub)], ['EX-901']);
-    // Ventilation has its own placeholder icon, and it is drawn from path only
-    assert.ok(B.TILE_ICONS.ventilation && !/<(?!\/?path\b)[a-z]/i.test(B.TILE_ICONS.ventilation));
-    assert.ok(out.includes(B.TILE_ICONS.ventilation), 'the hood card carries the ventilation icon');
+    assert.ok(!/<img\b|cat-tile|cat-photo/.test(out), 'a card is plain text: no image, no tile');
   });
 
   it('an excluded category is skipped ENTIRELY: no card, no count, no search text, no nav link — and it is not guard-scanned', () => {
@@ -370,7 +371,7 @@ describe('the six public categories (owner ruling 2026-10-21: "just the equipmen
     const report = {};
     const out = renderCatalogue(db(fixtures, cats), { report, publicCategories: { products: { 'T-905': 'cooking' }, excludedProducts: {} } });
     assert.equal((out.match(/<li class="cat-card/g) || []).length, 1);
-    assert.ok(out.includes('>T-905</p>'));
+    assert.ok(out.includes('data-id="T-905"'));
     for (const gone of ['T-901', 'T-902', 'T-903', 'T-904', 'Gas Line With Price List', 'Gas Line Kit', 'Fresh Air Blower', 'Fire Suppression Tank']) assert.ok(!out.includes(gone), `${gone} leaked`);
     assert.ok(out.includes('1 products in 1 categories') && out.includes('placeholder="Search 1 products"'));
     assert.deepEqual(report.skipped, { categories: { gas_line: 2, fresh_air_system: 1, fire_suppression: 1 }, categoryProducts: 4, products: [] });
@@ -380,16 +381,16 @@ describe('the six public categories (owner ruling 2026-10-21: "just the equipmen
   it('the excluded list is a parameter of the build, not a hard-wired edit of the data (a category can be excluded or restored)', () => {
     const products = [prod({ id: 'T-910', category: 'cooking_line' }), prod({ id: 'T-911', category: 'prep_washing' })];
     const none = renderCatalogue(db(products), { publicCategories: pubOf(products), excludedCategories: ['prep_washing'] });
-    assert.ok(none.includes('>T-910</p>') && !none.includes('>T-911</p>'));
+    assert.ok(none.includes('data-id="T-910"') && !none.includes('data-id="T-911"'));
     const both = renderCatalogue(db(products), { publicCategories: pubOf(products), excludedCategories: [] });
-    assert.ok(both.includes('>T-910</p>') && both.includes('>T-911</p>'));
+    assert.ok(both.includes('data-id="T-910"') && both.includes('data-id="T-911"'));
   });
 
   it('a product listed under excludedProducts is skipped (and reported with the others), even when it would trip a guard', () => {
     const products = [prod({ id: 'T-920', name: 'Install Labour', notes: 'price per visit' }), prod({ id: 'T-921', name: 'Plain Table' })];
     const report = {};
     const out = renderCatalogue(db(products), { report, publicCategories: { products: { 'T-921': 'preparation' }, excludedProducts: { 'T-920': 'a service line' } } });
-    assert.ok(!out.includes('T-920') && !out.includes('Install Labour') && out.includes('>T-921</p>'));
+    assert.ok(!out.includes('T-920') && !out.includes('Install Labour') && out.includes('data-id="T-921"'));
     assert.deepEqual(report.skipped.products, ['T-920']);
   });
 
@@ -409,14 +410,9 @@ describe('the six public categories (owner ruling 2026-10-21: "just the equipmen
     const out = renderCatalogue(db(products), { publicCategories: map });
     const order = [...out.matchAll(/<section class="cat-group" id="cat-([a-z]+)"/g)].map(m => m[1]);
     assert.deepEqual(order, ['washing', 'cooking', 'storage', 'refrigeration']);          // no "preparation" section: nothing is in it
-    for (const p of products) assert.equal((out.match(new RegExp(`<p class="cat-code">${p.id}</p>`, 'g')) || []).length, 1);
+    for (const p of products) assert.equal((out.match(new RegExp(`data-id="${p.id}"`, 'g')) || []).length, 1);
     assert.ok(out.includes('4 products in 4 categories'));
-    // a card with no photo gets the line-icon of its public category in a neutral tile — never a big letter
-    for (const [id, catId] of [['T-950', 'refrigeration'], ['T-951', 'storage'], ['T-952', 'washing'], ['T-953', 'cooking']]) {
-      const card = out.split('<li class="cat-card').find(c => c.includes(`<p class="cat-code">${id}</p>`));
-      assert.ok(card.includes('<div class="cat-tile" aria-hidden="true"><svg class="cat-ic" viewBox="0 0 24 24"') && card.includes(B.TILE_ICONS[catId]), `${id}: wrong tile icon`);
-      assert.ok(!/<span>[A-Z]<\/span>/.test(card), `${id}: still a letter tile`);
-    }
+    assert.ok(!/<img\b|cat-tile|cat-photo/.test(out), 'a card is plain text: no image, no tile');
   });
 
   it('publishedProductIds is exactly the products that reach the page', () => {
@@ -425,7 +421,7 @@ describe('the six public categories (owner ruling 2026-10-21: "just the equipmen
     const pub = { products: { 'T-960': 'cooking', 'T-961': 'cooking', 'T-963': 'storage' }, excludedProducts: { 'T-962': 'service' } };
     assert.deepEqual([...publishedProductIds(db(products), pub)].sort(), ['T-960', 'T-963']);
     const out = renderCatalogue(db(products.filter(p => p.id !== 'T-964')), { publicCategories: pub });
-    assert.ok(!out.includes('T-961') && !out.includes('T-962') && out.includes('>T-960</p>') && out.includes('>T-963</p>'));
+    assert.ok(!out.includes('T-961') && !out.includes('T-962') && out.includes('data-id="T-960"') && out.includes('data-id="T-963"'));
   });
 });
 
@@ -451,7 +447,7 @@ describe('loadPublicCategories — scripts/public-categories.json', () => {
     try { loadPublicCategories({ file, ids: IDS }); assert.fail('should have thrown'); }
     catch (e) {
       assert.match(e.message, /4 problem\(s\)/);
-      assert.ok(e.message.includes('T-001: the category is not one of preparation, washing, cooking, ventilation, storage, refrigeration'));
+      assert.ok(e.message.includes('T-001: the category is not one of preparation, station, washing, ventilation, exhaust, cooking, storage, refrigeration'));
       assert.ok(e.message.includes('X-999: not a product id in the master'));
       assert.ok(e.message.includes('T-002: listed as published AND as excluded'));
       assert.ok(e.message.includes('T-003: the reason trips a pricing / partner-brand guard'));
@@ -536,7 +532,7 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     const groups = html.split('<section class="cat-group"').slice(1);
     assert.equal(groups.length, 2);
     for (const p of PRODUCTS) {
-      const holders = groups.filter(g => g.includes(`<p class="cat-code">${p.id}</p>`));
+      const holders = groups.filter(g => g.includes(`data-id="${p.id}"`));
       assert.equal(holders.length, 1, `${p.id} appears in ${holders.length} groups`);
       const want = PUBMAP[p.category];
       assert.ok(holders[0].startsWith(` id="cat-${want}" data-cat="${want}"`), `${p.id} sits in the wrong group`);
@@ -544,7 +540,7 @@ describe('renderCatalogue — the /catalogue/ block', () => {
   });
 
   it('orders by the ruled public category order (Preparation before Cooking), then id, and is deterministic', () => {
-    assert.ok(html.indexOf('>T-002</p>') < html.indexOf('>T-001</p>'));
+    assert.ok(html.indexOf('data-id="T-002"') < html.indexOf('data-id="T-001"'));
     assert.equal(html, render(PRODUCTS));
   });
 
@@ -553,8 +549,8 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     assert.ok(html.includes('id="cat-search"') && html.includes('role="search"'));
     assert.ok(html.includes('id="cat-status" role="status" aria-live="polite">2 products in 2 categories</p>'));
     assert.ok(html.includes('<nav class="cat-nav" id="cat-nav" aria-label="Product categories">'));
-    assert.ok(html.includes('<a class="cat-link" href="#cat-cooking" data-cat="cooking"><span class="cat-link-name">Cooking</span><span class="cat-link-n" data-total="1">1</span></a>'));
-    assert.ok(html.includes('<h2 id="cat-h-preparation">Preparation <span class="cat-count">1</span></h2>'));
+    assert.ok(html.includes('<a class="cat-link" href="#cat-cooking" data-cat="cooking"><span class="cat-link-name">Chef Mode cooking equipment</span><span class="cat-link-n" data-total="1">1</span></a>'));
+    assert.ok(html.includes('<h2 id="cat-h-preparation">Preparation tables <span class="cat-count">1</span></h2>'));
     assert.ok(html.includes('id="cat-empty"') && html.includes('hidden>'));
     assert.ok(html.includes('id="cat-search-clear"') && html.includes('id="cat-empty-clear"'));
     assert.ok(html.includes('<a class="site-btn site-btn-primary" href="/catalogue/?quote=1" data-qr-start>Request a quote</a>'));
@@ -575,45 +571,67 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     assert.ok(!/cat-more|is-open|Show all|Show fewer/.test(big));
   });
 
-  it('renders partial dimensions labelled and the material as a description list — but NEVER the master\'s ad-hoc option lists (a fixed item is quantity + size + note only)', () => {
-    assert.ok(html.includes('W 800 × H 900 mm · per pc'));
-    assert.ok(html.includes('<dt>Grade</dt><dd>SS304</dd>'));
-    assert.ok(!html.includes('Basin Depth') && !html.includes('250mm / 300mm'), 'a master option list is on a fixed card');
+  it('a card is PLAIN TEXT (owner ruling 2026-11-19): the name, no size line, no note, no material rows, no image, figure or tile — and the master\'s ad-hoc option lists never appear', () => {
+    assert.ok(html.includes('<h3>Test Sink</h3>'));
+    for (const gone of ['W 800', 'per pc', 'Basin Depth', '250mm', 'LP burner', 'cat-specs', 'cat-notes', 'cat-meta', 'cat-code', 'cat-label']) assert.ok(!html.includes(gone), `a card still carries "${gone}"`);
+    assert.ok(!/<img\b|<figure\b|cat-tile|cat-photo|cat-ic/.test(html));
   });
 
-  it('puts the product code in its own element at the head of the card, and gives an unmapped card the category line-icon in a neutral tile', () => {
-    assert.ok(html.includes(`<li class="cat-card" data-id="T-001"><div class="cat-tile" aria-hidden="true"><svg class="cat-ic" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${B.TILE_ICONS.cooking}</svg></div><div class="cat-head"><p class="cat-code">T-001</p><h3>`));
-    assert.ok(html.includes(`<li class="cat-card" data-id="T-002"><div class="cat-tile" aria-hidden="true"><svg class="cat-ic" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${B.TILE_ICONS.preparation}</svg></div><div class="cat-head"><p class="cat-code">T-002</p><h3>`));
-  });
-
-  it('a mapped card shows a lazy, sized, srcset photo with the "Representative image" caption instead of the tile', () => {
+  it('a photo map is ignored: no card carries an image any more, whatever the build is given', () => {
     const photos = { 'T-001': { src: 'site/img/products/alpha.webp', thumb: 'site/img/products/alpha-thumb.webp', width: 400, height: 300, mainWidth: 800 } };
     const out = render(PRODUCTS, { photos });
-    const card = out.split('<li class="cat-card').find(c => c.includes('>T-001</p>'));
-    assert.ok(card.startsWith(' has-photo" data-id="T-001">'));
-    assert.ok(card.includes('<figure class="cat-photo"><img src="/site/img/products/alpha-thumb.webp" srcset="/site/img/products/alpha-thumb.webp 400w, /site/img/products/alpha.webp 800w"'));
-    assert.ok(card.includes('width="400" height="300"') && card.includes('loading="lazy" decoding="async"'));
-    assert.ok(card.includes('<figcaption>Representative image</figcaption></figure>'));
-    assert.ok(!card.includes('cat-tile'));
-    // the unmapped card keeps its placeholder
-    const other = out.split('<li class="cat-card').find(c => c.includes('>T-002</p>'));
-    assert.ok(other.startsWith('" data-id="T-002">') && other.includes('cat-tile') && !other.includes('<img'));
+    assert.equal(out, html, 'the photo map changed the markup');
+    assert.ok(!/<img\b|webp|Representative image/.test(out));
   });
 
-  it('the photo alt text is the product name, escaped', () => {
-    const nasty = prod({ id: 'T-800', name: 'Say "Hi" <b>&amp;</b> Range' });
-    const photos = { 'T-800': { src: 'site/img/products/a.webp', thumb: 'site/img/products/a-thumb.webp', width: 400, height: 300, mainWidth: 800 } };
-    const out = render([nasty], { photos });
-    assert.ok(out.includes('alt="Say &quot;Hi&quot; &lt;b&gt;&amp;amp;&lt;/b&gt; Range"'));
-    assert.ok(!/alt="[^"]*[<>]/.test(out));
+  it('a fixed card is  <li class="cat-card" data-id data-kw>  with its name, then the words (one line + 3-5 bullets) when scripts/catalogue-cards.js has them, then ONE price line', () => {
+    const copy = { 'T-001': { desc: 'A test stove.', features: ['One', 'Two', 'Three'] } };
+    const out = render(PRODUCTS, { cardCopy: copy, prices: { 'T-001': { from: 23500 }, 'T-002': { perProject: true } } });
+    const c1 = out.split('<li class="cat-card').find(c => c.startsWith('" data-id="T-001"')).split('</li>\n')[0] + '</li>\n';
+    assert.equal(c1, '" data-id="T-001" data-kw="T-001"><div class="cat-head"><h3>Test Stove &lt;b&gt;One&lt;/b&gt;</h3><p class="cat-lead">A test stove.</p></div><ul class="cat-feat"><li>One</li><li>Two</li><li>Three</li></ul><p class="cat-from">From <data value="23500">₱23,500</data> <span class="cat-vat">+ VAT</span></p></li>\n');
+    const c2 = out.split('<li class="cat-card').find(c => c.startsWith('" data-id="T-002"'));
+    assert.ok(c2.includes('<p class="cat-from cat-from-ask">Priced per project</p>') && !c2.includes('cat-feat') && !c2.includes('cat-lead'));
   });
 
-  it('last line of defence: the FINISHED markup is scanned too, so a poisoned photo path cannot ship a price word or the partner name', () => {
-    const poisoned = (src) => ({ 'T-001': { src, thumb: src.replace(/\.webp$/, '-thumb.webp'), width: 400, height: 300, mainWidth: 800 } });
-    const price = violationsOf(() => render([PER_LENGTH], { photos: poisoned('site/img/products/price-list.webp') }));
-    assert.deepEqual(price, [{ id: '(rendered block)', field: 'html', rule: 'money' }]);
-    const brand = violationsOf(() => render([PER_LENGTH], { photos: poisoned(`site/img/products/${PARTNER.toLowerCase().replace(' ', '-')}-range.webp`) }));
-    assert.deepEqual(brand, [{ id: '(rendered block)', field: 'html', rule: 'brand' }]);
+  it('a card with no entry in the prices shows "Priced per project", never nothing and never a guessed amount; every card has exactly ONE price line', () => {
+    const out = render(PRODUCTS, { prices: { 'T-001': { from: 1500000 } } });
+    const cards = out.split('<li class="cat-card').slice(1);
+    for (const c of cards) assert.equal((c.match(/<p class="cat-from/g) || []).length, 1);
+    assert.ok(out.includes('<data value="1500000">₱1,500,000</data>') && out.includes('Priced per project'));
+  });
+
+  it('the price line is the ONLY place money may be written: the same amount in a name, a feature, a description or a category label still refuses the build', () => {
+    const copy = (f) => ({ 'T-001': { desc: 'A test stove.', features: ['One', 'Two', f] } });
+    const prices = { 'T-001': { from: 23500 } };
+    for (const bad of ['From ₱23,500', 'only 23,500 a set', 'PHP 5000', 'the best price', 'low cost', 'markup 20%']) {
+      assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: copy(bad), prices })), [{ id: 'T-001', field: 'features[2]', rule: 'money' }], bad);
+    }
+    assert.deepEqual(violationsOf(() => render([prod({ id: 'T-001', name: 'Stove from ₱23,500' })], { prices })), [{ id: 'T-001', field: 'name', rule: 'money' }]);
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: { 'T-001': { desc: 'Priced per project', features: ['One', 'Two', 'Three'] } }, prices })), [{ id: 'T-001', field: 'desc', rule: 'money' }]);
+    // and a feature list that is not 3-5 short bullets is refused too
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { cardCopy: { 'T-001': { desc: 'x', features: ['One', 'Two'] } } })), [{ id: 'T-001', field: 'copy', rule: 'copy' }]);
+  });
+
+  it('the exact from-price element is recognised and nothing looser: stripFromLines removes the two generated forms only', () => {
+    const { stripFromLines, priceLine, FROM_LINE_RE } = B;
+    assert.equal(stripFromLines(priceLine({ from: 23500 })), '');
+    assert.equal(stripFromLines(priceLine(null)), '');
+    for (const loose of ['<p class="cat-from">From <data value="23500">₱23,500</data> <span class="cat-vat">+ VAT</span> and ₱9,999</p>', '<p class="cat-from">From ₱23,500</p>',
+      '<p class="cat-from cat-from-ask">Priced per project, ₱500 a visit</p>', '<p class="cat-from">From <data value="23500">₱23,500</data></p>', '<p class="cat-note">From <data value="1">₱1</data> <span class="cat-vat">+ VAT</span></p>']) {
+      assert.equal(stripFromLines(loose), loose, 'a looser form was stripped');
+      assert.ok(B.MONEY_RE.test(loose) || B.FORMULA_RE.test(loose), 'a looser form would not even be caught');
+    }
+    assert.ok(FROM_LINE_RE.global, 'the regex is global (replace) — never use it with .test()');
+  });
+
+  it('a project card (no SKU, no configurator in the quote flow) is a text card whose button is a plain link to #request-quote; it is counted, searchable and in the item list', () => {
+    const pc = [{ id: 'station', group: 'station', name: 'A Station', tag: 'Made to order', desc: 'One line.', features: ['One', 'Two', 'Three'], learn: { path: '/services/x/', about: 'x things' } }];
+    const out = render(PRODUCTS, { projectCards: pc, prices: { station: { perProject: true } } });
+    assert.ok(out.includes('<li class="cat-card cat-card-project" data-ask="station" data-kw="station"><div class="cat-head"><p class="cat-tag">Made to order</p><h3>A Station</h3><p class="cat-lead">One line.</p></div>'));
+    assert.ok(out.includes('<p class="cat-learn"><a class="link-arrow" href="/services/x/">Learn more about x things</a></p><p class="cat-from cat-from-ask">Priced per project</p><a class="cat-ask" href="#request-quote">Request a quote</a></li>'));
+    assert.ok(out.includes('3 products in 3 categories') && out.includes('<section class="cat-group" id="cat-station"'));
+    assert.ok(!/data-id="station"|qr-add/.test(out), 'a project card must not look addable');
+    assert.deepEqual(violationsOf(() => render(PRODUCTS, { projectCards: [{ ...pc[0], group: 'nowhere' }] })), [{ id: 'station', field: 'group', rule: 'shape' }]);
   });
 
   it('scans category labels too: a price word or the partner name there refuses the build, naming the category', () => {
@@ -628,12 +646,12 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     const cats = [{ id: 'cooking_line', label: 'Cooking Line' }, { id: 'baking', label: 'Baking' }];
     const mixed = [prod({ id: 'BA-001', category: 'baking' }), prod({ id: 'CE-002' }), prod({ id: 'BA-000', category: 'baking' }), prod({ id: 'CE-001' })];
     const out = renderCatalogue(db(mixed, cats), { publicCategories: { products: Object.fromEntries(mixed.map(p => [p.id, 'cooking'])), excludedProducts: {} } });
-    assert.deepEqual([...out.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]), ['CE-001', 'CE-002', 'BA-000', 'BA-001']);
+    assert.deepEqual([...out.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)].map(m => m[1]), ['CE-001', 'CE-002', 'BA-000', 'BA-001']);
   });
 
   it('sorts products inside a category by id', () => {
     const out = render([prod({ id: 'T-020', name: 'Second' }), prod({ id: 'T-010', name: 'First' }), prod({ id: 'T-015', name: 'Middle' })]);
-    assert.ok(out.indexOf('>T-010</p>') < out.indexOf('>T-015</p>') && out.indexOf('>T-015</p>') < out.indexOf('>T-020</p>'));
+    assert.ok(out.indexOf('data-id="T-010"') < out.indexOf('data-id="T-015"') && out.indexOf('data-id="T-015"') < out.indexOf('data-id="T-020"'));
   });
 
   it('rejects a malformed record instead of emitting it', () => {
@@ -897,8 +915,11 @@ describe('injectIntoHtml / stripJsonComments', () => {
 });
 
 describe('the committed /catalogue/ page (R1, R5, marker integrity, every product exactly once, escaping)', () => {
-  const ids = [...catBlock.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]);             // the FIXED items: a card of their own, shown with their code
+  const ids = [...catBlock.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)].map(m => m[1]);             // the FIXED items: a card of their own, shown with their code
   const famCards = [...catBlock.matchAll(/<li class="cat-card cat-card-family[^"]*" data-family="([a-z_]+)"/g)].map(m => m[1]);
+  const askCards = [...catBlock.matchAll(/<li class="cat-card cat-card-project" data-ask="([a-z_]+)"/g)].map(m => m[1]);       // the PROJECT cards (no SKU, no configurator): scripts/catalogue-cards.js
+  const slugOf = (slug) => groups.find(g => g.startsWith(` id="cat-${slug}"`));
+  const stripFrom = B.stripFromLines;
   const groups = catBlock.split('<section class="cat-group"').slice(1);
   const FAMS = require('../js/qr-families.js');
   const absorbed = Object.values(FAMS.families).flatMap(f => Object.keys(f.absorbed));
@@ -910,9 +931,11 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(catBlock.trim().length > 10000);
   });
 
-  it('the generated block carries no price token, no formula token, no script, no handler, no inline style (R1)', () => {
-    assert.ok(!FORMULA_RE.test(catBlock), 'CHECK 9 token list matched');
-    assert.ok(!MONEY_RE.test(catBlock), 'money regex matched');
+  it('the generated block carries no price token, no formula token, no script, no handler, no inline style (R1) — outside the exact from-price elements (owner ruling 2026-11-19)', () => {
+    const rest = stripFrom(catBlock);
+    assert.ok(rest.length < catBlock.length, 'no from-price element was found');
+    assert.ok(!FORMULA_RE.test(rest), 'CHECK 9 token list matched');
+    assert.ok(!MONEY_RE.test(rest), 'money regex matched');
     assert.ok(!/<script/i.test(catBlock) && !/\son[a-z]+=/i.test(catBlock) && !/\sstyle=/i.test(catBlock));
   });
 
@@ -927,7 +950,8 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(ids.every(id => /^[A-Z]{2}-\d{3}$/.test(id)), 'unexpected product id shape');
     assert.equal(new Set(famCards).size, famCards.length, 'a family card is rendered twice');
     assert.deepEqual([...famCards].sort(), [...FAMS.order].sort(), 'there must be exactly one card per configurable family');
-    const total = ids.length + famCards.length;
+    assert.equal(new Set(askCards).size, askCards.length, 'a project card is rendered twice');
+    const total = ids.length + famCards.length + askCards.length;
     assert.equal((catBlock.match(/<li class="cat-card/g) || []).length, total);
     assert.ok(catBlock.includes(`placeholder="Search ${total} products"`));
     const nCats = groups.length;
@@ -945,7 +969,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
 
   it('is sorted: inside each public category the master\'s category order (cooking line, prep & washing, refrigeration, baking, misc), then id', () => {
     const PREFIX_ORDER = ['CE', 'PW', 'RF', 'BA', 'MS'];           // the master's category order, by product-code prefix
-    const keys = (g) => [...g.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => [PREFIX_ORDER.indexOf(m[1].slice(0, 2)), m[1]]);
+    const keys = (g) => [...g.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)].map(m => [PREFIX_ORDER.indexOf(m[1].slice(0, 2)), m[1]]);
     groups.forEach((g, i) => {
       const ks = keys(g);
       assert.ok(ks.every(k => k[0] >= 0), `group ${i} has an unexpected product-code prefix`);
@@ -956,37 +980,81 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
       const lastFamily = g.lastIndexOf('<li class="cat-card cat-card-family');
       if (lastFamily >= 0 && firstFixed >= 0) assert.ok(lastFamily < firstFixed, `group ${i}: a family card sits after a fixed item`);
     });
-    // "Cooking" opens with its four configurable families, then the cooking line, not the bakery items that were re-filed into it
-    assert.ok(groups[2].indexOf('data-family="stove"') >= 0 && groups[2].indexOf('data-family="stove"') < groups[2].indexOf('<li class="cat-card" data-id='));
-    assert.ok(groups[2].indexOf('data-family="deck_oven"') < groups[2].indexOf('<li class="cat-card" data-id='));
-    const cooking = keys(groups[2]);
+    // "Chef Mode cooking equipment" opens with its four configurable families, then the fixed items (rice steamer first); the bakery cabinets, the grinder and the slicer are in the last group (2026-11-19)
+    const cookingG = slugOf('cooking'), otherG = slugOf('refrigeration');
+    assert.ok(cookingG.indexOf('data-family="stove"') >= 0 && cookingG.indexOf('data-family="stove"') < cookingG.indexOf('<li class="cat-card" data-id='));
+    assert.ok(cookingG.indexOf('data-family="deck_oven"') < cookingG.indexOf('<li class="cat-card" data-id='));
+    const cooking = keys(cookingG);
     assert.equal(cooking[0][1], 'CE-011');
-    assert.ok(cooking.findIndex(k => k[1].startsWith('BA-')) > cooking.findIndex(k => k[1] === 'CE-031'));
+    assert.ok(!cooking.some(k => /^(BA|MS)-/.test(k[1])), 'a bakery cabinet, the grinder or the slicer sits among the Chef Mode items');
+    assert.deepEqual(keys(otherG).map(k => k[1]), ['RF-001', 'RF-002', 'RF-003', 'RF-004', 'RF-005', 'RF-006', 'BA-006', 'BA-011', 'MS-015', 'MS-016']);
   });
 
   it('escapes everything: every ampersand starts an entity, and no raw angle bracket sits in a text or attribute value', () => {
     assert.ok(!/&(?!(?:amp|lt|gt|quot|#39);)/.test(catBlock), 'an unescaped ampersand');
     assert.ok(!/(?:alt|placeholder|aria-label|data-[a-z-]+|href|src)="[^"]*[<>]/.test(catBlock), 'a raw angle bracket in an attribute');
-    assert.ok(!/<(?!\/?(?:section|div|p|h[1-3]|ul|li|nav|a|span|dl|dt|dd|form|label|input|button|svg|circle|path|figure|figcaption|img)\b)[a-z]/i.test(catBlock), 'an unexpected tag');
+    assert.ok(!/<(?!\/?(?:section|div|p|h[1-3]|ul|li|nav|a|span|data|form|label|input|button|svg|circle|path)\b)[a-z]/i.test(catBlock), 'an unexpected tag');
   });
 
-  it('every card has a tile or a photo, every photo is lazy, sized, captioned and has an alt equal to its product name', () => {
+  it('every card is PLAIN TEXT (owner ruling 2026-11-19): no <img>, no figure, no tile, no placeholder icon, no specification list, no notes block, no product code on view', () => {
+    assert.ok(!/<img\b|<figure\b|<figcaption\b|<svg\b[^>]*cat-ic|cat-photo|cat-tile|cat-specs|cat-notes|cat-meta|cat-code|cat-label|Representative image|\.webp/.test(catBlock.replace(/<svg class="cat-search-icon"[\s\S]*?<\/svg>/, '')));
     const cards = catBlock.split('<li class="cat-card').slice(1);
     for (const c of cards) {
-      const photo = c.includes('<figure class="cat-photo">');
-      assert.ok(photo || c.includes('<div class="cat-tile" aria-hidden="true">'), 'a card has neither tile nor photo');
-      if (photo) {
-        const name = c.match(/<h3>([^<]*)<\/h3>/)[1];
-        assert.ok(c.includes(`alt="${name}"`), `photo alt differs from the product name (${name})`);
-        assert.ok(/loading="lazy" decoding="async"/.test(c) && /width="\d+" height="\d+"/.test(c) && /srcset="[^"]+ \d+w, [^"]+ \d+w"/.test(c));
-        assert.ok(c.includes('<figcaption>Representative image</figcaption>'));
-      }
+      assert.ok(/<h3>[^<]+<\/h3>/.test(c), 'a card has no name');
+      assert.equal((c.match(/<ul class="cat-feat">/g) || []).length, 1, 'a card has no feature list');
+      const feats = (c.match(/<ul class="cat-feat">([\s\S]*?)<\/ul>/)[1].match(/<li>/g) || []).length;
+      assert.ok(feats >= 3 && feats <= 5, `a card has ${feats} feature bullets (3 to 5)`);
+      assert.equal((c.match(/<p class="cat-lead">/g) || []).length, 1, 'a card has no one-line description');
     }
   });
 
-  it('has EXACTLY the six public categories in the ruled order — as sections, as nav links, and as deep-link slugs', () => {
+  it('EVERY card shows exactly ONE price line: its own "From ₱x + VAT" from scripts/public-from-prices.json, or "Priced per project" — and no amount appears anywhere else on the page (owner ruling 2026-11-19, /catalogue/ only)', () => {
+    const file = JSON.parse(read('scripts/public-from-prices.json'));
+    assert.match(file._source, /Standard Price List, effective Nov 19, 2026/);
+    assert.equal(file.vat, 'ex-VAT');
+    const cards = catBlock.split('<li class="cat-card').slice(1);
+    const seen = new Set();
+    for (const c of cards) {
+      const key = (c.match(/data-(?:family|id|ask)="([^"]+)"/) || [])[1];
+      seen.add(key);
+      const lines = c.match(/<p class="cat-from[^>]*>[\s\S]*?<\/p>/g) || [];
+      assert.equal(lines.length, 1, `${key}: ${lines.length} price lines`);
+      const e = file.prices[key];
+      assert.ok(e, `${key}: no entry in scripts/public-from-prices.json`);
+      const want = e.perProject ? '<p class="cat-from cat-from-ask">Priced per project</p>'
+        : `<p class="cat-from">From <data value="${e.from}">₱${String(e.from).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</data> <span class="cat-vat">+ VAT</span></p>`;
+      assert.equal(lines[0], want, `${key}: the card's price line differs from the file`);
+      assert.ok(e.perProject || (Number.isInteger(e.from) && e.from > 0));
+    }
+    assert.deepEqual([...seen].sort(), Object.keys(file.prices).sort(), 'the cards of the page and the entries of the price file differ');
+    // the amounts are printed in the price lines ONLY: not in the page chrome, a name, a feature, the JSON-LD, the data island or the head
+    const amounts = Object.values(file.prices).filter(e => e.from).map(e => e.from);
+    const outside = stripFrom(cat);
+    for (const n of amounts) assert.ok(!outside.includes(String(n)) && !outside.includes(String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')), `an amount appears outside its price line`);
+    assert.ok(!/₱|\bPHP\b/.test(outside.replace(/<style id="page-css">[\s\S]*?<\/style>/, '')), 'a peso sign or PHP outside the price lines');
+    assert.equal((cat.match(/₱/g) || []).length, amounts.length, 'the peso sign must appear once per priced card and nowhere else');
+    // the QR data island and the server allowlist stay price-free (the data island holds no amount; the file holds ids only)
+    const island = JSON.parse(cat.match(/<script type="application\/json" id="qr-catalogue">([\s\S]*?)<\/script>/)[1]);
+    assert.ok(!FORMULA_RE.test(JSON.stringify(island)) && !/from|₱/.test(JSON.stringify(island)));
+    assert.ok(!FORMULA_RE.test(read('functions/qr-published.json')) && !/₱/.test(read('functions/qr-published.json')));
+  });
+
+  it('the price file is what the generator loads: valid, every id a card of the page, and a stray key, a fractional or a negative amount is refused', () => {
+    const tmp = (obj) => { const f2 = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fromp-')), 'p.json'); fs.writeFileSync(f2, JSON.stringify(obj)); return f2; };
+    const good = { _source: 'Test Price List', vat: 'ex-VAT', prices: { a: { from: 100 }, b: { perProject: true } } };
+    assert.deepEqual({ ...B.loadFromPrices({ file: tmp(good) }).prices }, { a: { from: 100 }, b: { perProject: true } });
+    assert.doesNotThrow(() => B.loadFromPrices({ file: B.FROM_PRICES_FILE, cardIds: new Set([...catBlock.matchAll(/data-(?:family|id|ask)="([^"]+)"/g)].map(m => m[1])) }));
+    for (const bad of [{ ...good, prices: { a: { from: 1.5 } } }, { ...good, prices: { a: { from: -5 } } }, { ...good, prices: { a: { from: 5, perProject: true } } }, { ...good, prices: { a: { from: 5, formula: 'x' } } },
+      { ...good, extra: 1 }, { ...good, vat: 'incl' }, { ...good, _source: 'private db' }, { ...good, prices: { 'a b': { from: 5 } } }]) assert.throws(() => B.loadFromPrices({ file: tmp(bad) }), /problem\(s\)/);
+    assert.throws(() => B.loadFromPrices({ file: tmp(good), cardIds: new Set(['a']) }), /b: not a card of the page/);
+    assert.throws(() => B.loadFromPrices({ file: tmp(good), cardIds: new Set(['a', 'b', 'c']) }), /c: a card of the page with no entry/);
+    assert.ok(!read('scripts/build-catalogue.js').includes("require('../products-database"), 'the generator must not read prices from the private master');
+  });
+
+  it('has EXACTLY the eight public groups of the owner\'s call in the ruled order — as sections, as nav links, and as deep-link slugs (the six older anchors still resolve)', () => {
     const slugs = [...catBlock.matchAll(/<section class="cat-group" id="cat-([a-z_]+)"/g)].map(m => m[1]);
-    assert.deepEqual(slugs, ['preparation', 'washing', 'cooking', 'ventilation', 'storage', 'refrigeration']);
+    assert.deepEqual(slugs, ['preparation', 'station', 'washing', 'ventilation', 'exhaust', 'cooking', 'storage', 'refrigeration']);
+    for (const old of ['preparation', 'washing', 'cooking', 'ventilation', 'storage', 'refrigeration']) assert.ok(cat.includes(`id="cat-${old}"`), `#cat-${old} no longer exists`);
     const nav = [...catBlock.matchAll(/<a class="cat-link" href="#cat-([a-z_]+)" data-cat="([a-z_]+)"><span class="cat-link-name">([^<]+)<\/span>/g)];
     assert.deepEqual(nav.map(m => [m[1], m[2], m[3]]), PUBLIC_CATEGORIES.map(c => [c.id, c.id, c.label]));
     assert.ok(!/id="cat-(prep_washing|cooking_line|exhaust_system|fresh_air_system|gas_line|fire_suppression|miscellaneous|baking)"/.test(cat), 'an old master category slug survives');
@@ -996,22 +1064,26 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     for (const id of pageIds) assert.ok(!/^(EX|FA|GL|FS)-/.test(id), `${id} is from an excluded category`);
     for (const id of Object.keys(pubJson.excludedProducts)) assert.ok(!pageIds.has(id), `${id} is excluded but on the page`);
     // the 20 exhaust products that are not hoods appear nowhere on the page (not on a card, not in a search keyword); the 7 hoods are the hood card's keywords
-    const ventilation = groups.find(g => g.includes('id="cat-ventilation"'));
+    const ventilation = slugOf('ventilation');
     assert.equal((ventilation.match(/<li class="cat-card/g) || []).length, 1);
     assert.ok(ventilation.includes('data-family="hood"'));
     for (const id of Object.keys(pubJson.excludedProducts).filter(i => i.startsWith('EX-'))) assert.ok(!cat.includes(id), `${id} (excluded exhaust product) leaked onto the page`);
     for (const id of ['EX-001', 'EX-002', 'EX-003', 'EX-018', 'EX-019', 'EX-020', 'EX-021']) assert.ok(ventilation.includes(`${id} `), `${id} is a keyword of the hood card`);
     // the page chrome (everything except the product cards) and the head no longer talk about the removed systems
+    // (2026-11-19: "Exhaust and fresh air" is a group of the page again, as a project card, so the block names it; gas lines and fire suppression stay out everywhere)
     const chrome = catBlock.replace(/<li class="cat-card[\s\S]*?<\/li>/g, '');
-    for (const [label, text] of [['block chrome', visibleText(chrome)], ['hand-written page', publicCopy(catHand)], ['head', attrText(catHead)]]) {
+    assert.ok(!/gas lines?|fire[- ]suppression/i.test(visibleText(chrome)), 'block chrome mentions gas lines or fire suppression');
+    for (const [label, text] of [['hand-written page', publicCopy(catHand)], ['head', attrText(catHead)]]) {
       assert.ok(!/exhaust|fresh[- ]air|gas lines?|fire[- ]suppression/i.test(text), `${label} still mentions a removed category`);
     }
+    // the exhaust group is ONE project card (no product code, no SKU): ducting and blowers are not listed one by one
+    assert.deepEqual(askCards, ['station', 'exhaust', 'trolley']);
     assert.match(catHead, /name="description" content="[^"]*range hoods/);   // the Ventilation category (added 2026-10-28) is in the description by its product: since the owner's shortening of 2026-10-28 the description names products, not the six categories
   });
 
-  it('every published product lands in EXACTLY ONE of the six public categories, as scripts/public-categories.json says (and nothing else is on the page)', () => {
-    const six = PUBLIC_CATEGORIES.map(c => c.id);
-    assert.ok(Object.values(pubJson.products).every(v => six.includes(v)), 'a product maps outside the six');
+  it('every published product lands in EXACTLY ONE of the eight public groups, as scripts/public-categories.json says (and nothing else is on the page)', () => {
+    const eight = PUBLIC_CATEGORIES.map(c => c.id);
+    assert.ok(Object.values(pubJson.products).every(v => eight.includes(v)), 'a product maps outside the eight');
     // every published SKU is a card of its own (fixed) OR absorbed by exactly one family — never both, never neither
     assert.deepEqual([...pageIds, ...absorbed].sort(), Object.keys(pubJson.products).sort(), 'the page, the families and the committed map disagree about which products are published');
     assert.equal(new Set(absorbed).size, absorbed.length, 'a SKU is absorbed by two families');
@@ -1020,14 +1092,14 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(!Object.keys(pubJson.products).some(id => id in pubJson.excludedProducts), 'a product is both published and excluded');
     for (const g of groups) {
       const slug = g.match(/^ id="cat-([a-z_]+)"/)[1];
-      for (const m of g.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)) assert.equal(pubJson.products[m[1]], slug, `${m[1]} sits in the wrong category`);
+      for (const m of g.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)) assert.equal(pubJson.products[m[1]], slug, `${m[1]} sits in the wrong category`);
     }
     assert.doesNotThrow(() => loadPublicCategories({ ids: [...Object.keys(pubJson.products), ...Object.keys(pubJson.excludedProducts)] }));
     assert.ok(Object.values(pubJson.excludedProducts).every(r => typeof r === 'string' && r.length > 10), 'an exclusion has no reason');
   });
 
-  it('carries no pricing language at all — not an amount, not the word "price" or "pricing" or "cost" or "markup"', () => {
-    assert.ok(!/pric(?:e|ing)|\bcosts?\b|markup/i.test(visibleText(catBlock) + attrText(catBlock)), 'a pricing word is on the page');
+  it('carries no pricing language but the price line — not an amount, not the word "price" or "pricing" or "cost" or "markup" anywhere else', () => {
+    assert.ok(!/pric(?:e|ing)|\bcosts?\b|markup/i.test(visibleText(stripFrom(catBlock)) + attrText(stripFrom(catBlock))), 'a pricing word is on the page');
   });
 
   it('shows every product: no folding, no "Show all"', () => {
@@ -1143,10 +1215,10 @@ function resolveMaster() {
   return null;
 }
 
-describe('product photos on the page (when scripts/product-photos.json exists)', () => {
+describe('product photos (the map stays valid, but since 2026-11-19 NO catalogue card shows a photo)', () => {
   const mapFile = path.join(ROOT, 'scripts/product-photos.json');
   const has = fs.existsSync(mapFile);
-  const ids = [...catBlock.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]);             // fixed cards
+  const ids = [...catBlock.matchAll(/<li class="cat-card" data-id="([^"]+)"/g)].map(m => m[1]);             // fixed cards
   const absorbedIds = new Set(Object.values(require('../js/qr-families.js').families).flatMap(f => Object.keys(f.absorbed)));
   const familiesSrc = JSON.parse(read('scripts/public-families.json'));
 
@@ -1166,24 +1238,11 @@ describe('product photos on the page (when scripts/product-photos.json exists)',
     for (const [fid, f] of Object.entries(familiesSrc.families)) assert.ok(f.photo === null || Object.prototype.hasOwnProperty.call(map, f.photo), `${fid}: its photo product ${f.photo} has no image in the map`);
   });
 
-  it('gives every mapped card the photo and the "Representative image" caption, and nobody else', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
+  it('shows NO photo on any card, mapped or not: a card is plain text (owner ruling 2026-11-19) — and the page references no product photo at all', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
     const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
-    const cardsAll = catBlock.split('<li class="cat-card').slice(1);
-    const cards = Object.fromEntries(cardsAll.filter(c => /<p class="cat-code">/.test(c)).map(c => [c.match(/<p class="cat-code">([^<]+)<\/p>/)[1], c]));
-    for (const [fid, f] of Object.entries(familiesSrc.families)) {                     // a family card shows its representative photo when its photo product has one
-      const card = cardsAll.find(c => c.includes(`data-family="${fid}"`));
-      const mapped = f.photo !== null && Object.prototype.hasOwnProperty.call(map, f.photo);
-      assert.equal(card.includes('<figure class="cat-photo">'), mapped, `${fid}: photo presence differs from its photo product`);
-      if (mapped) assert.ok(card.includes(`src="/${map[f.photo].replace(/\.webp$/, '-thumb.webp')}"`), `${fid}: wrong thumb`);
-    }
-    for (const id of ids) {
-      const mapped = Object.prototype.hasOwnProperty.call(map, id);
-      assert.equal(cards[id].includes('<figure class="cat-photo">'), mapped, `${id}: photo presence differs from the map`);
-      if (mapped) {
-        assert.ok(cards[id].includes(`src="/${map[id].replace(/\.webp$/, '-thumb.webp')}"`), `${id}: wrong thumb`);
-        assert.ok(cards[id].includes('<figcaption>Representative image</figcaption>'));
-      }
-    }
+    assert.ok(Object.keys(map).length > 0);
+    assert.ok(!/<figure|<img\b|Representative image|\/site\/img\/products\//.test(catBlock), 'a card carries a photo');
+    assert.ok(!/\/site\/img\/products\//.test(cat), 'the page still references a product photo');
   });
 
   it('every product image the page references exists on disk', () => {

@@ -962,16 +962,18 @@ describe('the options on each product page are the ones the configurators offer 
 
   it('ends every family\'s catalogue card with its own "Learn more" link to the page that sells it (FAMILY_PAGES in scripts/build-catalogue.js): one page per family, none missing', () => {
     for (const [slug, f] of Object.entries(FAMILIES)) {
-      const card = catalogue.match(new RegExp(`<li class="cat-card cat-card-family[^"]*" data-family="${f.fam}"[\\s\\S]*?</li>`));
+      const card = catalogue.match(new RegExp(`<li class="cat-card cat-card-family[^"]*" data-family="${f.fam}"[\\s\\S]*?<p class="cat-from`));   // up to the price line: the feature bullets are <li> too
       assert.ok(card, `${f.fam}: no card on the catalogue page`);
       assert.ok(card[0].includes(`<a class="link-arrow" href="/products/${slug}/">Learn more about `), `${f.fam}: the card does not link to /products/${slug}/`);
     }
   });
 
-  it('tags each hub card with the catalogue category of its family — Washing, Preparation, Cooking, Ventilation, Storage — in the words of the catalogue\'s own headings', () => {
+  it('tags each hub card with the catalogue category of its family — Washing, Preparation, Cooking, Ventilation, Storage — by the anchor the card links to (the catalogue was re-grouped on 2026-11-19 and its headings are longer now; the six older anchors, which the hub and every product page use, still exist and keep these one-word names)', () => {
     const hub = byPath('/products/').section('products-list');
+    const HUB_WORD = { preparation: 'Preparation', washing: 'Washing', cooking: 'Cooking', ventilation: 'Ventilation', storage: 'Storage' };
     for (const [slug, f] of Object.entries(FAMILIES)) {
-      const label = (catalogue.match(new RegExp(`<h2 id="cat-h-${f.cat.replace('cat-', '')}">([A-Za-z]+) <span`)) || [])[1];
+      assert.ok(catalogue.includes(`<h2 id="cat-h-${f.cat.replace('cat-', '')}">`), `${slug}: the catalogue has no ${f.cat} group`);
+      const label = HUB_WORD[f.cat.replace('cat-', '')];
       const card = hub.match(new RegExp(`<p class="pg-card-tag">([^<]+)</p>\\s*<h3><a href="/products/${slug}/">`));
       assert.ok(label && card && card[1] === label, `${slug}: the hub tag is "${card && card[1]}", the catalogue heading "${label}"`);
     }

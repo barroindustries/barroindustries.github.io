@@ -454,7 +454,10 @@ echo
 # ═══════════════════════════════════════════════════════════════════════
 # barroindustries.com is a PUBLIC website and this repo is public, so two owner rulings are
 # enforced here as well as in scripts/build-catalogue.js:
-#   R1  NO PRICES anywhere on the site. The product catalogue is baked into catalogue/index.html
+#   R1  NO PRICES anywhere on the site, with ONE exception (owner ruling 2026-11-19, /catalogue/ only): each catalogue card carries a single
+#       "From ₱x + VAT" line (or "Priced per project"), the amount coming only from scripts/public-from-prices.json. The exact from-price
+#       element is blanked before the token scan (CAT_FROM_STRIP) and is itself checked against that file below, so money anywhere else on
+#       the page, and every other page, still fails. The product catalogue is baked into catalogue/index.html
 #       between the CATALOGUE markers by build-catalogue.js, which strips every price field. This
 #       re-checks the committed page, so a hand edit or a build-script regression that lets a
 #       price (or a pricing-formula field name) through fails the build instead of shipping. The
@@ -475,6 +478,9 @@ CAT_TOKENS='basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|laborHours|
 # The <head> of a page carries the Google Fonts URL (opsz,wght@9..144,500..600), which is NOT a thousands-separated
 # number but would match that last pattern, so the head is scanned with the list minus it. The generated inline stylesheet (PAGE-CSS block, 2026-10-29) is css text, not page content: it is blanked out first.
 CAT_TOKENS_HEAD='basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|laborHours|ratePerDay|markup|₱|PHP ?[0-9]'
+# The exact from-price element (one line of generated markup; see FROM_LINE_RE in scripts/build-catalogue.js) is blanked, in place, before the scans. A hand-edited
+# element that is NOT the exact form is caught by the node check further down (it compares every card's line with scripts/public-from-prices.json).
+CAT_FROM_STRIP='s#<p class="cat-from[ "][^>]*>.*?</p>##g'
 BRAND_RE='brilliant[[:space:]]*steel'
 # Newlines folded to spaces first, so a name broken across two lines is still caught.
 # Separators ( - _ . / ) are folded to spaces too, so a hyphenated slug (brilliant-steel-range.webp) is caught.
@@ -504,7 +510,7 @@ else
         cat_fail=1
       else
         # CAT_TOKENS are the pricing FIELD names and amounts; the plain words price / pricing / cost are checked too.
-      cat_price_lines=$(printf '%s\n' "$cat_block" | grep -niE "$CAT_TOKENS|pric(e|ing)|[^a-z]costs?[^a-z]" | cut -d: -f1 | sort -un | head -10 | tr '\n' ' ')
+      cat_price_lines=$(printf '%s\n' "$cat_block" | perl -pe "$CAT_FROM_STRIP" | grep -niE "$CAT_TOKENS|pric(e|ing)|[^a-z]costs?[^a-z]" | cut -d: -f1 | sort -un | head -10 | tr '\n' ' ')
         if [ -n "$cat_price_lines" ]; then
           echo "FAIL: the public catalogue block matches the pricing-token list (block-relative line(s): $cat_price_lines)."
           echo "  Offending text withheld on purpose. NEVER hand-edit the block; fix the source note/override and re-run  node scripts/build-catalogue.js"
@@ -515,32 +521,32 @@ else
   fi
   # The hand-written parts of the page (header, call to action, footer) are public too.
   page_head_e=$(grep -nF -- '</head>' "$CAT_PAGE" | head -1 | cut -d: -f1)
-  page_price_lines=$( { sed -n "1,${page_head_e:-0}p" "$CAT_PAGE" | awk '/<!-- PAGE-CSS:START/{skip=1; print ""; next} /<!-- PAGE-CSS:END -->/{skip=0; print ""; next} skip{print ""; next} {print}' | grep -niE "$CAT_TOKENS_HEAD" | cut -d: -f1
-                        sed -n "$((${page_head_e:-0} + 1)),\$p" "$CAT_PAGE" | grep -niE "$CAT_TOKENS" | cut -d: -f1 | awk -v off="${page_head_e:-0}" '{print $1 + off}'; } | sort -un | head -10 | tr '\n' ' ')
+  page_price_lines=$( { sed -n "1,${page_head_e:-0}p" "$CAT_PAGE" | perl -pe "$CAT_FROM_STRIP" | awk '/<!-- PAGE-CSS:START/{skip=1; print ""; next} /<!-- PAGE-CSS:END -->/{skip=0; print ""; next} skip{print ""; next} {print}' | grep -niE "$CAT_TOKENS_HEAD" | cut -d: -f1
+                        sed -n "$((${page_head_e:-0} + 1)),\$p" "$CAT_PAGE" | perl -pe "$CAT_FROM_STRIP" | grep -niE "$CAT_TOKENS" | cut -d: -f1 | awk -v off="${page_head_e:-0}" '{print $1 + off}'; } | sort -un | head -10 | tr '\n' ' ')
   if [ -n "$page_price_lines" ]; then
     echo "FAIL: $CAT_PAGE matches the pricing-token list outside or inside the block (line(s): $page_price_lines). Offending text withheld on purpose."
     cat_fail=1
   fi
-  # Owner ruling 2026-10-21 ("just the equipment"): the public catalogue has EXACTLY these categories, in this
-  # order, and nothing from the excluded fresh-air / gas-line / fire-suppression categories (and, from the exhaust
-  # category, only the range hoods, as configurable cards in Ventilation: owner ruling 2026-10-28, CONFIGURATOR-FAMILIES-2-SPEC).
+  # Owner ruling 2026-11-19: the public catalogue has EXACTLY these eight groups, in this order (the configurators of the 17-18 Nov call;
+  # the older ids are kept so every #cat-… link still lands), and no product from the excluded fresh-air / gas-line / fire-suppression
+  # categories (nor, from the exhaust category, anything but the range hoods: owner rulings 2026-10-21 and 2026-10-28).
   cat_groups=$(grep -oE '<section class="cat-group" id="cat-[a-z_]+"' "$CAT_PAGE" | sed -E 's/.*id="cat-//; s/"$//' | tr '\n' ' ')
-  if [ "$cat_groups" != "preparation washing cooking ventilation storage refrigeration " ]; then
-    echo "FAIL: $CAT_PAGE must have exactly the six public categories (preparation washing cooking ventilation storage refrigeration), in that order — found: ${cat_groups:-none}"
+  if [ "$cat_groups" != "preparation station washing ventilation exhaust cooking storage refrigeration " ]; then
+    echo "FAIL: $CAT_PAGE must have exactly the eight public groups (preparation station washing ventilation exhaust cooking storage refrigeration), in that order — found: ${cat_groups:-none}"
     echo "  FIX: scripts/build-catalogue.js (PUBLIC_CATEGORIES) + scripts/public-categories.json, then re-run  node scripts/build-catalogue.js"
     cat_fail=1
   fi
-  if grep -qE '<p class="cat-code">(EX|FA|GL|FS)-' "$CAT_PAGE"; then
+  if grep -qE 'data-id="(EX|FA|GL|FS)-' "$CAT_PAGE"; then
     echo "FAIL: $CAT_PAGE publishes a product from an excluded category (exhaust / fresh air / gas line / fire suppression: codes EX- FA- GL- FS-). Add the category to EXCLUDED_CATEGORIES in scripts/build-catalogue.js and re-run it."
     cat_fail=1
   fi
-  # Every product photo the page references must exist (a missing file is a broken image in production).
-  for ph in $(grep -oE '/site/img/products/[A-Za-z0-9._-]+\.webp' "$CAT_PAGE" | sort -u); do
-    if [ ! -f ".$ph" ]; then
-      echo "FAIL: $CAT_PAGE references $ph but that file does not exist — fix scripts/product-photos.json, then re-run  node scripts/build-catalogue.js"
-      cat_fail=1
-    fi
-  done
+  # Owner ruling 2026-11-19: a catalogue card is plain text — no <img>, no figure, no placeholder tile inside the generated block — and carries EXACTLY ONE price line,
+  # which must be the generator's exact form and agree with scripts/public-from-prices.json (the amount, or "Priced per project"); a stray amount anywhere else fails above.
+  cat_card_problems=$(node scripts/check-catalogue-cards.js)
+  if [ -n "$cat_card_problems" ]; then
+    echo "$cat_card_problems" | sed 's/^/FAIL: /'
+    cat_fail=1
+  fi
   # The configurator preview photos (the owner's shot list): every file the manifest or the data island names must exist, as the image AND its
   # -thumb, under site/img/configurator/<family>/<key>.webp — and the island must carry exactly the manifest, so a hand edit of either cannot drift.
   # (The /site/img/ PRECACHE guard below already forbids precaching any of them.)

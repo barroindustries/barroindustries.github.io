@@ -139,23 +139,25 @@ describe('the mapping: every published SKU is absorbed by exactly one family or 
     const quotable = JSON.parse(read('functions/qr-published.json')).ids;
     for (const id of [...REMOVED, 'BA-008']) assert.ok(!quotable.includes(id), `${id} must be refused server-side`);
   });
-  it('OWNER RULING (b): Preparation, Washing, Ventilation and Storage show ONLY the configurable products; equipment that is not one of the eleven types stays a fixed item in its natural category', () => {
+  it('OWNER RULING (b) as re-grouped on 2026-11-19: the preparation, sink, hood and storage groups show ONLY the configurable products (plus the project cards); equipment that is not one of the eleven types stays a fixed item', () => {
     const page = read('catalogue/index.html');
     const secs = {};
     for (const m of page.matchAll(/<section[^>]*id="cat-([a-z]+)"[^>]*>([\s\S]*?)<\/section>/g)) secs[m[1]] = m[2];
-    const cards = (k) => [...(secs[k] || '').matchAll(/<li class="cat-card[^"]*" data-(family|id)="([^"]+)"/g)].map((x) => [x[1], x[2]]);
+    const cards = (k) => [...(secs[k] || '').matchAll(/<li class="cat-card[^"]*" data-(family|id|ask)="([^"]+)"/g)].map((x) => [x[1], x[2]]);
     assert.deepEqual(cards('preparation'), [['family', 'prep_table']]);
+    assert.deepEqual(cards('station'), [['ask', 'station']], 'the multi-purpose kitchen station is a project card (no configurator in the quote flow yet)');
     assert.deepEqual(cards('washing'), [['family', 'sink'], ['family', 'dish_table']]);
-    assert.deepEqual(cards('ventilation'), [['family', 'hood']], 'Ventilation holds the range hood and nothing else (ducting and blowers stay unpublished)');
-    assert.deepEqual(cards('storage'), [['family', 'cabinet'], ['family', 'wall_shelf'], ['family', 'rack']]);
+    assert.deepEqual(cards('ventilation'), [['family', 'hood']], 'the range hood group holds the hood and nothing else (ducting and blowers stay unpublished)');
+    assert.deepEqual(cards('exhaust'), [['ask', 'exhaust']], 'exhaust and fresh air is ONE project card, never the ducting and blowers one by one');
+    assert.deepEqual(cards('storage'), [['family', 'cabinet'], ['family', 'wall_shelf'], ['family', 'rack'], ['ask', 'trolley']]);
     const cooking = cards('cooking');
-    assert.deepEqual(cooking.slice(0, 4), [['family', 'stove'], ['family', 'wok_range'], ['family', 'cooking_line'], ['family', 'deck_oven']], 'the four cooking families lead Cooking, in the family order');
+    assert.deepEqual(cooking.slice(0, 4), [['family', 'stove'], ['family', 'wok_range'], ['family', 'cooking_line'], ['family', 'deck_oven']], 'the four cooking families lead Chef Mode, in the family order');
     assert.ok(cooking.slice(4).every(([k]) => k === 'id'));
-    // the meat grinder and slicer moved to Cooking; the proofers, steamer, warmers and the salamander oven stay fixed (the fryers, griddles and deck ovens are families now)
-    for (const id of ['MS-015', 'MS-016', 'BA-006', 'BA-011', 'CE-011', 'CE-024', 'CE-030', 'CE-031']) assert.ok(cooking.some(([, x]) => x === id), `${id} should be a fixed Cooking card`);
+    // the steamer, the warmers and the salamander oven stay fixed Chef Mode cards; the meat grinder and slicer and the proofers are "other equipment" (the fryers, griddles and deck ovens are families)
+    for (const id of ['CE-011', 'CE-024', 'CE-030', 'CE-031']) assert.ok(cooking.some(([, x]) => x === id), `${id} should be a fixed Chef Mode card`);
     for (const id of ['CE-007', 'CE-009', 'CE-010', 'CE-012', 'CE-016', 'CE-019', 'CE-020', 'CE-021', 'CE-022', 'CE-023', 'CE-026', 'CE-028']) assert.ok(!cooking.some(([, x]) => x === id), `${id} is absorbed: no card of its own`);
-    assert.deepEqual(cards('refrigeration').map(([, x]) => x), ['RF-001', 'RF-002', 'RF-003', 'RF-004', 'RF-005', 'RF-006']);
-    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 25);
+    assert.deepEqual(cards('refrigeration').map(([, x]) => x), ['RF-001', 'RF-002', 'RF-003', 'RF-004', 'RF-005', 'RF-006', 'BA-006', 'BA-011', 'MS-015', 'MS-016']);
+    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 28);
     // and the families' own categories are the ones the ruling names
     assert.deepEqual(ORDER.map((f) => FAMS.families[f].category), CATEGORY_OF);
   });
@@ -345,36 +347,33 @@ describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
     assert.ok(/"l":"Centre"/.test(all));
     assert.ok(!/\b(color|gray|meter|catalog)\b/i.test(all));
   });
-  it('the family cards are the wide FEATURED card: the "Configurable" tag, the name, the description, then a labelled Specifications list — and sizes read "Made to your length, width and height"', () => {
-    const html = B.renderFamilyCard(FAMS.families.sink, { id: 'washing' }, null, 'PW-004 SS Wash Sink');
-    assert.match(html, /<li class="cat-card cat-card-family cat-card-feature" data-family="sink" data-kw="PW-004 SS Wash Sink">/);
-    assert.match(html, /<div class="cat-head"><p class="cat-code cat-tag">Configurable<\/p><h3>Sink<\/h3><p class="cat-lead">Stainless steel sink table\./);
-    assert.match(html, /<div class="cat-body"><p class="cat-label">Specifications<\/p><dl class="cat-specs">/);
-    assert.match(html, /<dt>Sinks<\/dt><dd>1 \/ 2 \/ 3 \/ 4<\/dd>/);
-    assert.match(html, /<dt>Size<\/dt><dd>Made to your length, width and height<\/dd>/);
-    // the material line is the owner's own homepage statement, last in the list
-    assert.ok(html.endsWith(`<div><dt>Material</dt><dd>${B.FAMILY_MATERIAL}</dd></div></dl><p class="cat-learn"><a class="link-arrow" href="/products/stainless-steel-sinks/">Learn more about stainless steel sinks</a></p></div></li>`), 'the Material row is not last, or the "Learn more" link is not after it');
-    // a family with no product page yet simply has no link (a new family needs its page first)
-    const nopage = B.renderFamilyCard({ ...FAMS.families.sink, id: 'no_page_yet' }, { id: 'washing' }, null, '');
-    assert.ok(nopage.endsWith(`</dd></div></dl></div></li>`) && !nopage.includes('cat-learn'));
-    // the size line names the axes the family really has: wall shelving has no height
-    const shelf = B.renderFamilyCard(FAMS.families.wall_shelf, { id: 'storage' }, null, '');
-    assert.match(shelf, /<dt>Size<\/dt><dd>Made to your length and depth<\/dd>/);
-    assert.ok(!/height/i.test(shelf.slice(shelf.indexOf('<dt>Size'))), 'wall shelving must not promise a height');
+  it('the family cards are TEXT cards (2026-11-19): the "Configurable" tag, the name, one line, the feature bullets, "Learn more", the price line — and no option table, no Size / Construction / Material rows', () => {
+    const copy = { desc: 'One line.', features: ['One', 'Two', 'Three'] };
+    const html = B.renderFamilyCard(FAMS.families.sink, copy, { from: 20500 }, 'PW-004 SS Wash Sink');
+    assert.equal(html, '<li class="cat-card cat-card-family" data-family="sink" data-kw="PW-004 SS Wash Sink"><div class="cat-head"><p class="cat-tag">Configurable</p><h3>Sink</h3><p class="cat-lead">One line.</p></div>' +
+      '<ul class="cat-feat"><li>One</li><li>Two</li><li>Three</li></ul><p class="cat-learn"><a class="link-arrow" href="/products/stainless-steel-sinks/">Learn more about stainless steel sinks</a></p>' +
+      '<p class="cat-from">From <data value="20500">₱20,500</data> <span class="cat-vat">+ VAT</span></p></li>');
+    assert.ok(!/<dt>|<dl|Specifications|Construction|Material|Made to your/.test(html));
+    // a family with no product page yet simply has no link (a new family needs its page first), and no copy / no price still renders a safe card
+    const nopage = B.renderFamilyCard({ ...FAMS.families.sink, id: 'no_page_yet' }, null, null, '');
+    assert.ok(!nopage.includes('cat-learn') && nopage.endsWith('<p class="cat-from cat-from-ask">Priced per project</p></li>'));
+    // the words of every family come from scripts/catalogue-cards.js and say only what its configurator offers (the size line names the axes the family has)
+    const WORDS = require('../scripts/catalogue-cards.js').CARD_COPY;
     for (const f of ORDER) {
+      const text = WORDS[f].features.join(' | ');
       const axes = ['W', 'D', 'H'].filter((k) => fam(f).dims[k]).length;
-      const card = B.renderFamilyCard(fam(f), { id: fam(f).category }, null, '');
-      assert.equal(/Made to your [a-z]+, [a-z]+ and [a-z]+</.test(card), axes === 3, f);
+      assert.ok(!/height/i.test(text) || axes === 3, `${f}: promises a height it does not offer`);
     }
-    const stove = B.renderFamilyCard(FAMS.families.stove, { id: 'cooking' }, null, '');
-    assert.match(stove, /Up to 6 burners, each chosen one by one/);
-    assert.match(stove, /<dt>Add-ons<\/dt><dd>Griller \/ Griddle \/ Oven \/ Fryer<\/dd>/);
+    assert.ok(!/height/i.test(WORDS.wall_shelf.features.join(' ')), 'wall shelving must not promise a height');
+    assert.ok(WORDS.stove.features.some((t) => /Wok, high-pressure, low-pressure or soup burners/.test(t)) && WORDS.stove.features.some((t) => /griller, griddle, oven or fryer/.test(t)));
   });
   it('a family card escapes everything and never carries a price word', () => {
-    const evil = { ...FAMS.families.sink, label: 'A <b>&"\'', description: 'x <script>' };
-    const html = B.renderFamilyCard(evil, { id: 'washing' }, null, 'k"><x');
-    assert.ok(!/<b>|<script|"><x/.test(html));
-    for (const f of ORDER) assert.ok(!/pric(?:e|ing)|\bcosts?\b|markup|₱/i.test(B.renderFamilyCard(fam(f), { id: fam(f).category }, null, '')), f);
+    const evil = { ...FAMS.families.sink, label: 'A <b>&"\'' };
+    const html = B.renderFamilyCard(evil, { desc: 'x <script>', features: ['<i>a</i>', 'b', 'c'] }, null, 'k"><x');
+    assert.ok(!/<b>|<script|<i>|"><x/.test(html));
+    // with no price entry the only price-like text is the "Priced per project" line; with the real words no family card carries a price word or an amount
+    const WORDS = require('../scripts/catalogue-cards.js').CARD_COPY;
+    for (const f of ORDER) assert.ok(!/pric(?:e|ing)|\bcosts?\b|markup|₱/i.test(B.stripFromLines(B.renderFamilyCard(fam(f), WORDS[f], { from: 12345 }, ''))), f);
   });
 });
 
@@ -1138,12 +1137,10 @@ describe('js/qr-preview.js — the live preview image (placeholder + photo), run
     assert.match(page, /Math\.max\(3800, 1800 \+ String\(msg\)\.length \* 40\)/);
     assert.match(page, /if \(pendingToast && !sheet\.kind\)/);
   });
-  it('CATALOGUE LAYOUT (css): one column and the compact card on a phone; a configurable card is the stacked full-width card there, a wide featured row from 720px, and a row of cards where a category holds several (the full layout pins live in tests/catalogue-layout.test.mjs)', () => {
+  it('CATALOGUE LAYOUT (css, 2026-11-19): one auto-fitting grid of text cards — cards at least 250px wide, so one column on a phone and two or three on a desktop; the layout itself is pinned in tests/catalogue-layout.test.mjs', () => {
     const css = read('css/catalogue.css');
-    assert.match(css, /#site \.cat-grid\{display:grid;grid-template-columns:minmax\(0,1fr\);gap:10px\}/);
-    assert.match(css, /#site \.cat-card-feature\{grid-column:1 \/ -1;display:flex;flex-direction:column\}/);
-    assert.match(css, /#site \.cat-card-feature\{grid-column:1 \/ -1;display:grid;grid-template-columns:minmax\(0,45fr\) minmax\(0,55fr\)/);
-    assert.match(css, /#site \.cat-grid-multi\{grid-template-columns:repeat\(auto-fit,minmax\(240px,1fr\)\)/);
+    assert.match(css, /#site \.cat-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(min\(250px,100%\),1fr\)\);gap:12px\}/);
+    assert.ok(!/cat-card-feature|cat-grid-multi|cat-photo|cat-tile/.test(css), 'a layout of the old photo cards is back');
   });
   it('the CSS switches the cross-fade off under prefers-reduced-motion, and uses no inline style or 4-digit z-index', () => {
     const css = read('css/quote-request.css');
@@ -1996,16 +1993,15 @@ describe('when / maxDimWhen — conditional options and upper limits (spec §4, 
     assert.deepEqual(PF.cells(fam('wok_range')).filter((c) => !c.baseline).map((c) => `${c.group}:${c.value}`), ['grade:316', 'holes:2', 'holes:3', 'rear:true', 'faucet:swan', 'top:1.2']);
   });
 
-  it('the catalogue card: a conditional option\'s row ends with its condition, the row count is still one per public group', () => {
-    const card = B.renderFamilyCard(ck, { id: 'cooking' }, null, '');
-    assert.match(card, /<dt>Burners<\/dt><dd>1 \/ 2 \/ 3 \(Type is Griddle or Lava-rock griller\)<\/dd>/);
-    assert.match(card, /<dt>Fry baskets<\/dt><dd>1 \/ 2 \/ 3 \(Type is Fryer\)<\/dd>/);
-    assert.match(card, /<dt>Type<\/dt><dd>Griddle \/ Lava-rock griller \/ Fryer \/ Griller \+ griddle<\/dd>/);
-    assert.equal((card.match(/<dt>/g) || []).length, PF.publicGroups(ck).length + 3, 'groups + Size + Construction + Material');
-    assert.match(B.renderFamilyCard(dish, { id: 'washing' }, null, ''), /<dt>Pre-rinse sink<\/dt><dd>None \/ With pre-rinse sink and spray faucet \(Side is Soiled\)<\/dd>/);
-    assert.match(B.renderFamilyCard(deck, { id: 'cooking' }, null, ''), /<dt>Size<\/dt><dd>Made to your width<\/dd>/);
-    assert.match(B.renderFamilyCard(hood, { id: 'ventilation' }, null, ''), /<dt>Size<\/dt><dd>Made to your length and depth<\/dd>/);
-    assert.ok(!/\(Type is/.test(B.renderFamilyCard(fam('sink'), { id: 'washing' }, null, '')), 'no condition on a family that has none');
+  it('the catalogue card no longer lists option rows (2026-11-19), so no condition text sits on it; the condition is still on the configurator sheet (PF.whenText) and the card keeps its bullets', () => {
+    const WORDS = require('../scripts/catalogue-cards.js').CARD_COPY;
+    for (const f of [ck, dish, deck, hood]) {
+      const card = B.renderFamilyCard(f, WORDS[f.id], null, '');
+      assert.ok(!/\(Type is|\(Side is|<dt>/.test(card), `${f.id}: a condition or an option row is on the card`);
+      assert.ok((card.match(/<ul class="cat-feat">/g) || []).length === 1);
+    }
+    assert.ok(WORDS.cooking_line.features.some((t) => /One to three fry baskets on a fryer/.test(t)), 'the bullet says the baskets belong to a fryer');
+    assert.ok(PF.whenText(ck, ck.groups.find((g) => g.key === 'burners')).length > 0, 'the condition text is still produced for the sheet');
   });
 
   describe('the build (scripts/build-catalogue.js checkFamily) refuses a malformed `when`', () => {

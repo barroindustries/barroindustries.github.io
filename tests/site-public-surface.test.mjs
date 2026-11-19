@@ -520,7 +520,7 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     assert.equal(list.name, 'Commercial kitchen equipment catalogue');
     const sections = catalogue.html.split('<section class="cat-group" id="cat-').slice(1).map((g) => ({
       id: g.match(/^([a-z_]+)"/)[1],
-      cards: [...g.matchAll(/<li class="cat-card[^"]*"[^>]*>([\s\S]*?)<\/li>/g)].map((m) => ({
+      cards: [...g.matchAll(/<li class="cat-card[^"]*"[^>]*>([\s\S]*?)<p class="cat-from/g)].map((m) => ({         // up to the price line (the feature bullets are <li> too)
         name: decode(m[1].match(/<h3>([^<]*)<\/h3>/)[1]),
         learn: (m[1].match(/<p class="cat-learn"><a class="link-arrow" href="(\/products\/[a-z0-9-]+\/)"/) || [])[1] || null,   // the "Learn more" page of a configurable family
       })),
@@ -528,8 +528,8 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     // a family with its own /products/ page points there (the target of its card's "Learn more" link); every other item points at its category anchor
     const expected = sections.flatMap((s) => s.cards.map((c) => ({ name: c.name, url: c.learn ? `https://barroindustries.com${c.learn}` : `${catalogue.url}#cat-${s.id}` })));
     assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 11, 'all eleven configurable families point at their product page');
-    assert.equal(expected.length, 25, 'the page shows 25 products: the eleven configurable families first in their categories, then the 14 fixed items');
-    assert.equal(list.numberOfItems, 25);
+    assert.equal(expected.length, 28, 'the page shows 28 cards: the eleven configurable families first in their groups, then the 14 fixed items and the three project cards (2026-11-19)');
+    assert.equal(list.numberOfItems, 28);
     assert.deepEqual(list.itemListElement.map((i) => ({ name: i.name, url: i.url })), expected);
     list.itemListElement.forEach((item, i) => {
       assert.deepEqual(Object.keys(item), ['@type', 'position', 'name', 'url']);
@@ -539,7 +539,7 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
       else assert.match(item.url, /^https:\/\/barroindustries\.com\/products\/[a-z0-9-]+\/$/);
     });
     assert.deepEqual([...allKeys(list)].sort(), ['@context', '@type', 'itemListElement', 'name', 'numberOfItems', 'position', 'url']);
-    assert.deepEqual(sections.map((s) => s.id), ['preparation', 'washing', 'cooking', 'ventilation', 'storage', 'refrigeration']);
+    assert.deepEqual(sections.map((s) => s.id), ['preparation', 'station', 'washing', 'ventilation', 'exhaust', 'cooking', 'storage', 'refrigeration']);
   });
 
   it('(local only) is exactly what a fresh build produces from the private master', { skip: (() => { try { return resolveMaster() ? false : 'the private master (products-database.json) is not present'; } catch (_) { return 'no master'; } })() }, () => {
@@ -1181,8 +1181,9 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     assert.ok(proofSub.replace('SS304 / SS316', '').trim().length <= 56, `the proof-bar sub-line is ${proofSub.length} characters: it would run to three lines`);
     for (const k of ['description', 'og:description', 'twitter:description']) for (const p of [home, catalogue]) assert.ok(/SS304/.test(p.meta(k)) && /SS316/.test(p.meta(k)) && p.meta(k).indexOf('SS304') < p.meta(k).indexOf('SS316'), `${p.file}: ${k}`);
     assert.ok(catText.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
-    assert.equal(materialRows.length, 11, 'one Material row per configurable card (eleven families)');
-    for (const r of materialRows) assert.equal(r, 'SS304 food-grade (standard) or SS316 laboratory-grade · hairline finish as standard, brushed, mirror or satin on request');
+    // 2026-11-19: a card is text with feature bullets, no specification list, so the per-card Material row is gone; the standard grade is still a bullet of the preparation card and the lede says both grades
+    assert.equal(materialRows.length, 0, 'a Material row is back on a card');
+    assert.ok(catalogue.html.includes('<li>Food-grade SS304, SS316 on request</li>'));
     for (const t of [homeText, catText]) { assert.ok(t.includes('SS304') && t.includes('SS316')); assert.ok(t.indexOf('SS304') < t.indexOf('SS316'), 'SS304 must come first'); }
   });
 
@@ -1191,9 +1192,8 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     assert.equal(fab, 'Built to order in SS304 or SS316, finished hairline as standard, with seams welded and ground smooth.');
     assert.ok(homeText.includes('Our standard finish is hairline, with brushed, mirror or satin on request.'), 'the homepage fabrication block lacks the standard-finish sentence');
     for (const f of ['hairline', 'brushed', 'mirror', 'satin']) assert.ok(homeText.includes(f), `the homepage lacks "${f}"`);
-    for (const f of ['hairline', 'brushed', 'mirror', 'satin']) assert.ok(materialRows.every((r) => r.includes(f)), `a card lacks "${f}"`);
     assert.ok(!/No\.?4/.test(homeText), 'the homepage still says No.4');
-    assert.ok(!materialRows.some((r) => /No\.?4/.test(r)));
+    assert.ok(!/No\.?4/.test(catText), 'the catalogue says No.4');
     assert.ok(!/No\.?4/.test(read('index.html').match(/<meta name="description"[^>]*>/)[0]));
   });
 
@@ -1274,6 +1274,6 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
   it('leaves the master\'s own product notes alone: every fixed card still carries exactly the note the generator takes from the master (the "(local only)" fresh-build test in catalogue-public.test.mjs), and the generator\'s display overrides name no grade', () => {
     for (const [id, v] of Object.entries(B.NOTE_OVERRIDES)) assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(v)), `NOTE_OVERRIDES ${id}`);
     for (const [id, v] of Object.entries(B.TEXT_FIXES)) assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(v)), `TEXT_FIXES ${id}`);
-    assert.equal(B.FAMILY_MATERIAL, 'SS304 food-grade (standard) or SS316 laboratory-grade · hairline finish as standard, brushed, mirror or satin on request');
+    assert.equal(B.FAMILY_MATERIAL, undefined, 'the per-card Material line was withdrawn on 2026-11-19');
   });
 });
