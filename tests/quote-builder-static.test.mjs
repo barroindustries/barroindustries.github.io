@@ -252,60 +252,64 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 49: the newest What\'s New entry is version 49 (the timeline rule, quotations "as issued", the printed page tail), dated; entry 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
+  it('TUTORIAL_VERSION is 50: the newest What\'s New entry is version 50 (Preview\'s Back to the form stays on screen, owner Q70), dated; entry 49 (the timeline rule, quotations "as issued", the printed page tail), 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 49);
+    assert.equal(b.run('TUTORIAL_VERSION'), 50);
     const wn = b.plain('WHATS_NEW');
-    assert.equal(wn[0].ver, 49);
-    assert.equal(wn[1].ver, 48, '48 stays as history: this change is a new entry');
-    assert.equal(wn[2].ver, 47, '47 stays as history');
-    assert.equal(wn[3].ver, 46, '46 stays as history');
-    assert.equal(wn[4].ver, 45, '45 stays as history');
-    assert.equal(wn[5].ver, 44, '44 stays as history');
-    assert.equal(wn[6].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
-    assert.equal(wn[0].date, '2026-11-05');
+    assert.equal(wn[0].ver, 50);
+    assert.equal(wn[0].date, '2026-11-19');
+    assert.equal(wn[0].items.length, 1, 'one bullet: the Back to the form button');
+    assert.ok(wn[0].items[0].includes('✎ Back to the form button now stays on screen'), 'What\'s New 50 names the fix in user language');
+    assert.equal(wn[1].ver, 49, '49 stays as history: this change is a new entry');
+    assert.equal(wn[2].ver, 48, '48 stays as history: this change is a new entry');
+    assert.equal(wn[3].ver, 47, '47 stays as history');
+    assert.equal(wn[4].ver, 46, '46 stays as history');
+    assert.equal(wn[5].ver, 45, '45 stays as history');
+    assert.equal(wn[6].ver, 44, '44 stays as history');
+    assert.equal(wn[7].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
     assert.equal(wn[1].date, '2026-11-05');
-    assert.match(wn[2].date, /^2026-10-\d\d$/);
+    assert.equal(wn[2].date, '2026-11-05');
+    assert.match(wn[3].date, /^2026-10-\d\d$/);
     assert.deepEqual(wn.map((e) => e.ver), [...wn.map((e) => e.ver)].sort((x, y) => y - x), 'newest first');
     // 49 — the owner's timeline ruling and the as-issued rule, in plain user language: one bullet per change
-    const t49 = wn[0].items.join(' ');
+    const t49 = wn[1].items.join(' ');
     for (const must of ['at least 25 working days (Sundays not counted)', 'Barro Kitchens and Barro Industries quotations', '12 working days plus 3 for every ₱20,000 of materials, if that is longer', 'estimated completion date', 'priority-order threshold',
       'the printed timeline note says so', 'Brilliant Steel is unchanged', 'filed before the warranty plan existed', 'keeps the warranty and site-requirements wording and the timeline it was issued with', '“As issued”', 'Pick a Warranty plan',
       'bottom margin of every page', 'close the “Our standard” page']) {
       assert.ok(t49.includes(must), `What's New 49 does not say: ${must}`);
     }
-    assert.equal(wn[0].items.length, 3, 'three bullets: the timeline rule, quotations as issued, the printed page tail');
+    assert.equal(wn[1].items.length, 3, 'three bullets: the timeline rule, quotations as issued, the printed page tail');
     // 48 — QB-SELLING-QUOTE-SPEC Phase 1, in plain user language: one bullet per change
-    const t48 = wn[1].items.join(' ');
+    const t48 = wn[2].items.join(' ');
     for (const must of ['spec sheet', 'dimension legend', 'one-line summary', 'Details ▸', 'hairline is the standard', 'brushed, mirror, satin', 'Includes, Not included', '25 working days minimum, from downpayment and approved drawings',
       '“Our standard” page', 'Warranty plan', '6-month service warranty', 'Full kitchen', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'The Warranty term now states the 6-month service warranty',
       'names the company that is quoting', 'no size, no specs, no finish, no photo', 'Quote strength', 'will not file a made-to-order line that has no size', 'PREP_WASHING', 'current quote number', 'Brilliant Steel quotes are unchanged']) {
       assert.ok(t48.includes(must), `What's New 48 does not say: ${must}`);
     }
-    assert.equal(wn[1].items.length, 6, 'six bullets: the sheet, Details, Our standard, the warranty plan, the chips and the check, the small fixes');
-    const t47 = wn[2].items.join(' ');
+    assert.equal(wn[2].items.length, 6, 'six bullets: the sheet, Details, Our standard, the warranty plan, the chips and the check, the small fixes');
+    const t47 = wn[3].items.join(' ');
     assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b|\d\s?%|\bper cent\b/i.test(t47), false, 'the What\'s New entry states no figure');
-    assert.deepEqual(wn[2].items, ['The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.']);
-    const t46 = wn[3].items.join(' ');
+    assert.deepEqual(wn[3].items, ['The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.']);
+    const t46 = wn[4].items.join(' ');
     for (const must of ['Configured lines now carry a proper name on the quote', '"SS Range Stove"', '"SS Range Stove Combination (Griller, Fryer)"', '"SS Griddle"', '"SS Lava-Rock Griller"', '"Gas Deck Oven"',
       'the name updates when you re-configure the line', 'Every configured product starts with a Material row', 'Stainless Steel 304 Food Grade as standard', 'Stainless Steel 316 Laboratory Grade',
       'a staff-only choice (the website never offers it)', 'shows "Priced after review" until Finance enters the 316 percentage for that product in Inventory › Family pricing']) {
       assert.ok(t46.includes(must), `What's New 46 does not say: ${must}`);
     }
     assert.equal(/316 amount/.test(wn.map((e) => e.items.join(' ')).join(' ')), false, 'no What\'s New entry still calls the 316 premium an amount');
-    assert.equal(wn[3].items.length, 2, 'two bullets: the line names, and the Material row');
-    const t45 = wn[4].items.join(' ');
+    assert.equal(wn[4].items.length, 2, 'two bullets: the line names, and the Material row');
+    const t45 = wn[5].items.join(' ');
     for (const must of ['Five more products can be configured right in the builder', 'dish tables, wok ranges, griddles / grillers / fryers, gas deck ovens and range hoods', 'an option Finance has not priced yet asks you for a price instead of guessing',
       '"⚙ convert to configured"', 'Some choices only show when they apply', 'fry baskets for a fryer', 'pre-rinse sink on the soiled side of a dish table', 'a size an option does not allow is flagged as you type', '"Use N mm"',
       'a slim hood is at most 500 mm deep', 'a deck oven\'s width follows its trays per deck']) {
       assert.ok(t45.includes(must), `What's New 45 does not say: ${must}`);
     }
-    assert.equal(wn[4].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
-    const t44 = wn[5].items.join(' ');
+    assert.equal(wn[5].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
+    const t44 = wn[6].items.join(' ');
     for (const must of ['partner portal is retired', 'Brilliant Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
       assert.ok(t44.includes(must), `What's New 44 does not say: ${must}`);
     }
-    const text = wn[6].items.join(' ');
+    const text = wn[7].items.join(' ');
     for (const must of ['Configure a sink, prep table, stove, cabinet, wall shelf or rack', 'Priced after review', 'Apply cost-based to all', 'estimate range', 'links it back', 'hello@barroindustries.com']) {
       assert.ok(text.includes(must), `What's New 43 does not say: ${must}`);
     }
