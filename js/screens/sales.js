@@ -644,6 +644,25 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
 // firestore.rules → settings); falls back to DEFAULT_SALES_SOP when no doc exists.
 // Body text supports lightweight **bold** markup; everything is escaped first.
 const SALES_SOP_ORANGE = '#e65100';
+// Quotes list (2026-11-20, owner "complete the whole system"): the card title used to prepend the company code to
+// every number, so a number that already carries it read "BK-BKLUFB261119-003R1". Prefix only when it is missing.
+window.quoteDisplayNo = function (q) {
+  const co = String((q && q.company) || 'BK');
+  const no = String((q && q.quoteNumber) || (q && q.id ? String(q.id).slice(-6).toUpperCase() : ''));
+  return no.toUpperCase().startsWith(co.toUpperCase()) ? no : co + '-' + no;
+};
+// The approval state of a FILED quote, in the Approvals screen's words. Before this the card said "Filed" for an approved
+// quote. Returns null when the normal status badge should stay (not filed, already ordered, or no approval state).
+window.quoteApprovalBadge = function (q) {
+  if (!q || q.salesOrderId || q.status !== 'filed') return null;
+  return ({
+    approved:       { cls: 'badge-green',  label: 'Approved' },
+    pending_review: { cls: 'badge-orange', label: 'Pending approval' },
+    pending:        { cls: 'badge-orange', label: 'Pending approval' },
+    needs_revision: { cls: 'badge-orange', label: 'Returned' },
+    rejected:       { cls: 'badge-red',    label: 'Rejected' },
+  })[q.approvalStatus] || null;
+};
 const DEFAULT_SALES_SOP = {
   // Version 2 = the flow of 2026-11-19 (Record payment -> the President confirms -> Sales generates). A SAVED SOP without this is the older flow.
   sopVersion: 2,
@@ -1294,7 +1313,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
     return `
       <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap${superseded?';opacity:.6':(q.status==='lost'?';opacity:.7':'')}">
         <div style="flex:1;min-width:160px">
-          <div class="item-title" style="font-size:13px">${escHtml(qco)}-${escHtml(q.quoteNumber||q.id.slice(-6).toUpperCase())} — ${escHtml(q.clientName||'Unnamed')}${coTag}${superseded?' <span class="badge badge-gray" style="font-size:9px">superseded</span>':''}</div>
+          <div class="item-title" style="font-size:13px">${escHtml(window.quoteDisplayNo(q))} — ${escHtml(q.clientName||'Unnamed')}${coTag}${superseded?' <span class="badge badge-gray" style="font-size:9px">superseded</span>':''}</div>
           <div class="item-meta" style="margin-top:4px">
             <span>${escHtml(q.scope||'Custom')}</span>
             <span>${escHtml(q.agentName||'—')}</span>
@@ -1304,7 +1323,9 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         </div>
         <div style="text-align:right">
           <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0)}</div>
-          <span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>
+          ${(() => { const ab = window.quoteApprovalBadge(q); return ab
+            ? `<span class="badge ${ab.cls}" style="margin-top:4px">${ab.label}</span>`
+            : `<span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>`; })()}
           ${(q.sentAt || q.status==='sent')?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">Sent${q.sentDate ? ' · ' + escHtml(q.sentDate) : ''}</span>`:''}
           ${q.status==='lost'?`<div style="font-size:10px;color:var(--text-muted)">${escHtml(q.lostReasonLabel||'')}${q.lostNote ? ' — ' + escHtml(q.lostNote) : ''}</div>`:''}
           ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🗑',10)} del req</span>`:''}
