@@ -121,7 +121,7 @@ describe('the page — static: the loaders, the shim, the gate, the stamp, what 
     for (const type of ['QB_READY', 'QUOTE_FILED', 'QUOTE_UPDATE', 'QUOTE_APPROVAL_REQUESTED', 'QUOTE_DRAFT', 'QUOTE_SAVE_DRAFT', 'QUOTE_SAVE_TEMPLATE', 'QUOTE_REQUEST_TEMPLATES', 'QUOTE_STATE', 'QB_OPEN_SOURCE']) {
       assert.ok(new RegExp(`window\\.parent\\.postMessage\\(\\s*\\{\\s*type:'${type}'`).test(SCRIPT), `${type} is posted with window.parent.postMessage`);
     }
-    assert.equal((code.match(/window\.parent\s*===\s*window/g) || []).length, 3, 'the three "open the builder from the app" guards (open source, save draft, and since the Fable review F2 also file)');
+    assert.equal((code.match(/window\.parent\s*===\s*window/g) || []).length, 4, 'the four "open the builder from the app" guards (open source, save draft, file (Fable F2) and the standalone "Preview only" banner (Finalize 1.2))');
     assert.match(SCRIPT, /fetch\('products-database\.json'/, 'the live fallback to products-database.json is still there');
     assert.match(SCRIPT, /localStorage\.setItem\('bkqb_items'/);
     assert.match(SCRIPT, /'qbTutSeenVer'/);
@@ -990,5 +990,18 @@ describe('Fable review F13 (2026-11-20): Help and the tour say what the page pri
     assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
     assert.equal(wn[0].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
+  });
+});
+
+describe('owner Finalize Step 1 (2026-11-20): the standalone banner and the "every quote needs approval" switch', () => {
+  it('the standalone page shows a "Preview only" banner (only when the page is its own parent)', () => {
+    const code = stripComments(SCRIPT);
+    assert.match(code, /if\(window\.parent===window && !document\.getElementById\('qbStandaloneBar'\)\)\{[^}]*b\.textContent='Preview only: quotes filed here are not saved\. Open the builder from Sales › Quote Builder\.'/);
+  });
+  it('Pricing settings has a President-only "Every quote needs the President\'s approval" checkbox that saves approveAll through KCLive.saveSwitch', () => {
+    const A = fs.readFileSync(path.join(ROOT, 'qb/kc/admin-d7.js'), 'utf8');
+    assert.match(A, /<input type="checkbox" data-approveall \$\{approveAllNow\(\)\?'checked':''\}/);
+    assert.match(A, /await viaLive\('saveSwitch', \{ approveAll: !!on \}\);/);
+    assert.match(A, /if\('approveall' in d\) return setApproveAll\(!!el\.checked\);/);
   });
 });

@@ -2996,6 +2996,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // instead of the parent blindly guessing with a fixed setTimeout (the old
   // 450ms race — deleted in app.js renderQuoteBuilderIframe).
   try{ window.parent.postMessage({type:'QB_READY'}, window.location.origin); }catch(e){}
+  // Owner Finalize Step 1.2 (2026-11-20): opened on its own (not inside the app), say so up front — filing and draft saving need the app.
+  try{ if(window.parent===window && !document.getElementById('qbStandaloneBar')){ const b=document.createElement('div'); b.id='qbStandaloneBar'; b.className='no-print'; b.setAttribute('role','status'); b.style.cssText='position:sticky;top:0;z-index:2000;background:#FFF4E5;color:#8A4B00;border-bottom:1px solid #F0C27B;padding:8px 14px;font:600 13px/1.35 inherit;text-align:center'; b.textContent='Preview only: quotes filed here are not saved. Open the builder from Sales › Quote Builder.'; document.body.insertBefore(b, document.body.firstChild); } }catch(e){}
   // F15 — the Manila date, not the UTC one (before 8 AM in Manila the UTC date is still yesterday)
   document.getElementById('quoteDate').value = manilaToday();
   setCompany(bootCompany());
