@@ -41,6 +41,16 @@
                     non-iOS-standalone; on iOS standalone shows a toast instead
                     (navigator.share needs a user gesture, so autoPrint alone
                     can't drive the share sheet there)
+   ADDITIVE (SALES-FLOW-SPEC-2026-11-19 §9.4 — the forms engine, js/forms.js). With none of these three passed the toolbar and every code
+   path below are exactly what they were:
+     downloadPdf  - true → the toolbar is  Download PDF (primary) · Print · Save as JPEG.  Download PDF hands the sheet to window.FormsPdf
+                    (js/forms-pdf.js — the ONE standalone PDF path, shared with the quote builder): capture, cut into A4 pages at row / block
+                    boundaries, a real .pdf, then the share sheet on a touch device or a file save. Print is still window.print() (on the
+                    iPhone home-screen app it produces the same PDF, since window.print() is a no-op there).
+     fileName     - the exact file name for the PDF (and, .jpg, the JPEG), used as given — a forms number like SO-0012-R1 keeps its hyphens.
+     pdfQuality   - JPEG quality of the PDF's page images, 0–1 (default 0.85 for Download PDF).
+   window.exportPrintableDocPdf(opts) is the same Download PDF WITHOUT showing the panel (Forms.downloadPdf): it lays the sheet out off-screen
+   and returns { ok, fileName, error? }.
    Returns the panel element (openPage's return value) — truthy. The old
    contract returned Window | null; no caller ever reads the return value or
    depends on the popup-blocked-toast/null branch (verified against every
@@ -288,9 +298,9 @@
     });
   }
 
-  function _canvasToJpegBlob(canvas) {
+  function _canvasToJpegBlob(canvas, quality) {
     return new Promise((resolve, reject) => {
-      canvas.toBlob(b => b ? resolve(b) : reject(new Error('Could not render the image.')), 'image/jpeg', 0.92);
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('Could not render the image.')), 'image/jpeg', quality || 0.92);
     });
   }
 
@@ -329,7 +339,7 @@
     if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
     try {
       const { blob } = await _captureDocJpeg(panel, o);
-      const fname = `${_sanitizeDocName(o.title)}.jpg`;
+      const fname = o.fileName ? String(o.fileName).replace(/\.pdf$/i, '') + '.jpg' : `${_sanitizeDocName(o.title)}.jpg`;
       const file = new File([blob], fname, { type: 'image/jpeg' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
@@ -357,6 +367,11 @@
   // sheets are ~794px, landscape ~1123px), page-slices long documents into
   // one PDF page per slice via pdf-lite's array form + its new landscape flag.
   async function _shareDocPDF(o, panel) {
+    if (o.downloadPdf) {   // forms: the one PDF path (js/forms-pdf.js): page-aware cuts, the exact o.fileName, share sheet on the phone
+      const res = await _formsPdf(o, panel);
+      if (!res.ok) throw new Error(res.error || 'please try again.');
+      return;
+    }
     await _ensurePdfLite();
     const pageId = o.pageId || 'pd-page';
     const sheet = (panel.querySelector && panel.querySelector('#' + CSS.escape(pageId)))
@@ -423,7 +438,7 @@
       ? window.jpegToPdf(pages[0].bytes, pages[0].pxW, pages[0].pxH, pages[0].landscape)
       : window.jpegToPdf(pages);
 
-    const fname = `${_sanitizeDocName(o.title)}.pdf`;
+    const fname = o.fileName ? _pdfFileName(o) : `${_sanitizeDocName(o.title)}.pdf`;
     const file = new File([pdfBytes], fname, { type: 'application/pdf' });
     if (!(navigator.canShare && navigator.canShare({ files: [file] }))) {
       const e = new Error('SHARE_UNAVAILABLE'); e.code = 'SHARE_UNAVAILABLE'; throw e;
@@ -462,6 +477,68 @@
       if (btn) { btn.disabled = false; btn.innerHTML = origLabel || `${window.emojiIcon ? emojiIcon('🖨', 16) : '🖨'} Print / Save PDF`; }
     }
   }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Download PDF — ADDITIVE (SALES-FLOW-SPEC-2026-11-19 §9.4). Reached only through the `downloadPdf` option or window.exportPrintableDocPdf.
+  //  The PDF itself is made by js/forms-pdf.js (window.FormsPdf) — ONE standalone PDF path, shared with the quote builder: capture → cut into A4
+  //  pages at row / block boundaries → jpegToPdf → share sheet on a touch device, a file save otherwise. It is loaded on demand (and precached).
+  // ═══════════════════════════════════════════════════════════
+  // Toolbar labels collapse to icons on a phone so three buttons fit beside the title. Appended to the <style> only in downloadPdf mode.
+  const DL_CSS = `
+@media (max-width:640px){
+  .pd-host .pd-tb2 .pd-lbl{display:none}
+}`;
+
+  function _pdfFileName(o) {
+    const n = String(o.fileName || '');
+    return /\.pdf$/i.test(n) ? n : n + '.pdf';
+  }
+
+  // → FormsPdf's { ok, fileName, error? }. The app's scroll lock is released around the capture (see _captureDocCanvas), as for the JPEG export.
+  async function _formsPdf(o, root) {
+    try {
+      await window.ensureScript('js/forms-pdf.js');
+      const pageId = o.pageId || 'pd-page';
+      const sheet = (root.querySelector && root.querySelector('#' + CSS.escape(pageId))) || (root.querySelector && root.querySelector('.pd-print'));
+      if (!sheet) return { ok: false, error: 'Could not find the document content to capture.' };
+      const run = window.ScrollLock?.withUnlocked?.bind(window.ScrollLock) || ((fn) => fn());
+      return await run(() => window.FormsPdf.download(sheet, o.fileName ? _pdfFileName(o) : _sanitizeDocName(o.title), {
+        quality: (o.pdfQuality > 0 && o.pdfQuality <= 1) ? o.pdfQuality : 0.85, scale: o.scale || 2, title: o.title }));
+    } catch (err) {
+      return { ok: false, error: 'Could not load the PDF export — ' + (err && err.message ? err.message : 'please try again.') };
+    }
+  }
+
+  async function _downloadDocPdf(o, panel, btn) {
+    const origLabel = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+    try {
+      const res = await _formsPdf(o, panel);
+      if (!res.ok) {
+        console.error('openPrintableDoc: PDF download failed', res.error);
+        if (window.Notifs && Notifs.showToast) Notifs.showToast(res.error || 'Could not generate the PDF — please try again.', 'error');
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = origLabel || 'Download PDF'; }
+    }
+  }
+
+  // The same PDF WITHOUT showing the panel (Forms.downloadPdf): the sheet is laid out off-screen, with its CSS, and captured from there.
+  window.exportPrintableDocPdf = async function (opts) {
+    const o = opts || {};
+    const pageId = o.pageId || 'pd-page';
+    const host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;left:-99999px;top:0;width:210mm;background:#fff;pointer-events:none;';
+    host.innerHTML = `<style>\n${BASE_CSS}\n${o.pageCss || ''}\n</style><div class="pd-stage"><div class="page pd-print" id="${esc(pageId)}">${o.bodyHtml || ''}</div></div>`;
+    document.body.appendChild(host);
+    try {
+      const res = await _formsPdf(o, host);
+      return { ok: !!res.ok, fileName: res.fileName, error: res.error };
+    } finally {
+      host.remove();
+    }
+  };
 
   // ═══════════════════════════════════════════════════════════
   //  §5 — generalized scale-to-fit. hr.js's fitA4Sheet hardcodes 794px
@@ -577,7 +654,7 @@
 <style>
 ${BASE_CSS}
 ${o.pageCss || ''}
-${PRINT_CSS}
+${PRINT_CSS}${o.downloadPdf ? '\n' + DL_CSS : ''}
 </style>
 <div class="pd-stage" style="--pd-accent:${accent}">
   <div class="page pd-print" id="${esc(pageId)}">
@@ -588,7 +665,12 @@ ${PRINT_CSS}
 
     const printIcon = window.emojiIcon ? emojiIcon('🖨', 16) : '🖨';
     const jpegIcon = window.emojiIcon ? emojiIcon('📷', 16) : '📷';
-    const headerRightHTML = `
+    const dlIcon = window.emojiIcon ? emojiIcon('⬇️', 16) : '⬇️';
+    const headerRightHTML = o.downloadPdf ? `
+    <button class="btn-primary btn-sm" id="pd-pdf-btn">${dlIcon} Download PDF</button>
+    <button class="btn-secondary btn-sm pd-tb2" id="pd-print-btn" aria-label="Print" title="Print">${printIcon}<span class="pd-lbl"> Print</span></button>
+    <button class="btn-secondary btn-sm pd-tb2" id="pd-jpeg-btn" aria-label="Save as JPEG" title="Save as JPEG">${jpegIcon}<span class="pd-lbl"> Save as JPEG</span></button>
+    ${o.extraButtons || ''}` : `
     <button class="btn-primary btn-sm" id="pd-print-btn">${printIcon} Print / Save PDF</button>
     <button class="btn-secondary btn-sm" id="pd-jpeg-btn">${jpegIcon} Save as JPEG</button>
     ${o.extraButtons || ''}`;
@@ -602,6 +684,7 @@ ${PRINT_CSS}
 
     panel.querySelector('#pd-print-btn')?.addEventListener('click', (e) => _handleDocPrintOrPdf(o, panel, e.currentTarget));
     panel.querySelector('#pd-jpeg-btn')?.addEventListener('click', (e) => _downloadDocJPEG(o, panel, e.currentTarget));
+    if (o.downloadPdf) panel.querySelector('#pd-pdf-btn')?.addEventListener('click', (e) => _downloadDocPdf(o, panel, e.currentTarget));
 
     if (window.lucide) lucide.createIcons({ nodes: [panel] });
     fitCleanup = _fitDocSheet(panel);
