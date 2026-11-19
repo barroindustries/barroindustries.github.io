@@ -1140,7 +1140,7 @@ describe('js/qr-preview.js — the live preview image (placeholder + photo), run
   it('CATALOGUE LAYOUT (css, 2026-11-19): one auto-fitting grid of text cards — cards at least 250px wide, so one column on a phone and two or three on a desktop; the layout itself is pinned in tests/catalogue-layout.test.mjs', () => {
     const css = read('css/catalogue.css');
     assert.match(css, /#site \.cat-grid\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(min\(250px,100%\),1fr\)\);gap:12px\}/);
-    assert.ok(!/cat-card-feature|cat-grid-multi|cat-photo|cat-tile/.test(css), 'a layout of the old photo cards is back');
+    assert.ok(!/cat-card-feature|cat-grid-multi|cat-tile/.test(css), 'a layout of the old photo cards is back');
   });
   it('the CSS switches the cross-fade off under prefers-reduced-motion, and uses no inline style or 4-digit z-index', () => {
     const css = read('css/quote-request.css');

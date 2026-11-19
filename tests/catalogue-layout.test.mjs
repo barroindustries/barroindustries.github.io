@@ -108,7 +108,7 @@ const cardOf = (html, id) => html.split('<li class="cat-card').slice(1).find((c)
 const CARDS = require('../scripts/catalogue-cards.js');
 const cardsOnPage = block.split('<li class="cat-card').slice(1).map((c) => c.split('</li>\n')[0] + '</li>');
 
-describe('every card is plain text: a name, one line, three to five feature bullets, one price line (owner rulings 2026-11-19)', () => {
+describe('every card is text plus (when mapped) its product photo: photo, a name, one line, three to five feature bullets, one price line (owner rulings 2026-11-19)', () => {
   it('each card on the real page is  head (tag?, name, one line)  then  feature list  then (configurable cards) a "Learn more" link  then the price line — in that order, and nothing else', () => {
     assert.equal(cardsOnPage.length, 28);
     for (const c of cardsOnPage) {
@@ -117,8 +117,13 @@ describe('every card is plain text: a name, one line, three to five feature bull
       assert.ok(i[0] > 0 && i[0] < i[1] && i[1] < i[2], `${key}: head, features, price line must come in that order`);
       const learn = c.indexOf('<p class="cat-learn">');
       if (learn >= 0) assert.ok(i[1] < learn && learn < i[2], `${key}: "Learn more" belongs between the features and the price`);
-      // only these elements may appear inside a card
-      const tags = new Set([...c.matchAll(/<([a-z0-9]+)\b/g)].map((m) => m[1]));
+      // the product photo (owner 2026-11-19 later: photos back) may only be the exact captioned figure, first in the card; otherwise only these elements
+      const fig = c.match(/<figure class="cat-photo">[\s\S]*?<\/figure>/);
+      if (fig) {
+        assert.match(fig[0], /^<figure class="cat-photo"><img src="\/site\/img\/products\/[a-z0-9-]+-thumb\.webp" [^>]*alt="[^"]+" loading="lazy" decoding="async"><figcaption>Representative image<\/figcaption><\/figure>$/, `${key}: the photo is not the captioned product figure`);
+        assert.ok(c.indexOf(fig[0]) < i[0], `${key}: the photo must come before the head`);
+      }
+      const tags = new Set([...c.replace(fig ? fig[0] : '', '').matchAll(/<([a-z0-9]+)\b/g)].map((m) => m[1]));
       for (const t of tags) assert.ok(['div', 'p', 'h3', 'ul', 'li', 'a', 'data', 'span'].includes(t), `${key}: unexpected <${t}> in a card`);
     }
   });
@@ -213,8 +218,9 @@ describe('css/catalogue.css — compact text cards that never overflow', () => {
     }
   });
 
-  it('the pieces of the old cards are gone from the stylesheets: image well, tile, spec list, notes, labels, code, featured and side-by-side layouts', () => {
-    for (const gone of ['.cat-photo', '.cat-tile', '.cat-ic', '.cat-specs', '.cat-notes', '.cat-label', '.cat-meta', '.cat-code', '.cat-body', '.cat-card-feature', '.cat-grid-multi', '.has-photo', '--cat-well', 'figcaption'])
+  it('the pieces of the old cards are gone from the stylesheets: tile, spec list, notes, labels, code, featured and side-by-side layouts (the photo is back, full-bleed on top)', () => {
+    assert.match(css, /#site \.cat-photo\{[^}]*aspect-ratio:4\/3/);
+    for (const gone of ['.cat-tile', '.cat-ic', '.cat-specs', '.cat-notes', '.cat-label', '.cat-meta', '.cat-code', '.cat-body', '.cat-card-feature', '.cat-grid-multi', '.has-photo', '--cat-well'])
       assert.ok(!css.includes(gone) && !qrCss.includes(gone), `the stylesheets still mention ${gone}`);
   });
 
@@ -391,7 +397,8 @@ describe('search finds every card — the configurable ones included — by runn
     assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 28);
     assert.equal((block.match(/data-kw="/g) || []).length, 28);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
-    assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head")/.test(block), 'a card starts with something other than its head');
+    assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head"|figure class="cat-photo")/.test(block), 'a card starts with something other than its photo or its head');
+    assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 12, 'the 12 cards with a mapped photo (7 configurable, 3 fixed, trolleys, exhaust)');
   });
 });
 

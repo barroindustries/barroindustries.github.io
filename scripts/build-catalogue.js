@@ -1139,9 +1139,13 @@ function loadFromPrices(opts) {
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────
-// OWNER RULINGS 2026-11-19 (they replace the 2026-10-21 "photo / notes in full / no prices" cards): a card is PLAIN TEXT — no photo, no drawing, no placeholder tile —
+// OWNER RULINGS 2026-11-19 (they replace the 2026-10-21 "notes in full / no prices" cards): no drawing and no placeholder tile; a card shows its product PHOTO on top when
+// scripts/product-photos.json has one (owner, 2026-11-19 later: "put the photos back"; captioned "Representative image" as before), then
 // holding the name, one line of description, three to five short feature bullets and ONE price line; the long specification tables are gone. The words come from
 // scripts/catalogue-cards.js, the starting amounts from scripts/public-from-prices.json. The layout lives in css/catalogue.css.
+const PHOTO_SIZES = '(min-width:1024px) 300px, (min-width:720px) 45vw, calc(100vw - 34px)';
+const PHOTO_FIGURE = (photo, name) => photo ?
+  `<figure class="cat-photo"><img src="/${esc(photo.thumb)}" srcset="/${esc(photo.thumb)} ${photo.width}w, /${esc(photo.src)} ${photo.mainWidth}w" sizes="${PHOTO_SIZES}" width="${photo.width}" height="${photo.height}" alt="${esc(name)}" loading="lazy" decoding="async"><figcaption>Representative image</figcaption></figure>` : '';
 const SEARCH_ICON = '<svg class="cat-search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>';
 
 // The price line (owner ruling 2026-11-19, replacing "no prices anywhere" for /catalogue/ ONLY): the one place a peso amount may be printed. Its exact form is fixed here and
@@ -1180,16 +1184,16 @@ const learnLink = (page) => page ? `<p class="cat-learn"><a class="link-arrow" h
 // The card of a CONFIGURABLE family: the "Configurable" tag, the name, one line, the feature bullets, "Learn more", the price line; the "Configure & add" button is
 // added at run time by js/quote-request.js (like "Add to quote" on a fixed item), so the card needs no script to read. data-kw carries the names/codes of the SKUs the family
 // absorbed (live search only — never shown).
-function renderFamilyCard(fam, copy, price, keywords) {
-  return `<li class="cat-card cat-card-family" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` +
+function renderFamilyCard(fam, copy, price, keywords, photo) {
+  return `<li class="cat-card cat-card-family" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` + PHOTO_FIGURE(photo, fam.label) +
     `<div class="cat-head"><p class="cat-tag">Configurable</p><h3>${esc(fam.label)}</h3>${copy && copy.desc ? `<p class="cat-lead">${esc(copy.desc)}</p>` : ''}</div>` +
     featList(copy) + learnLink(has(FAMILY_PAGES, fam.id) ? FAMILY_PAGES[fam.id] : null) + priceLine(price) +
     `</li>`;
 }
 
 // A FIXED card (a ready-made product): name, one line, features, price; "Add to quote" is appended at run time by js/quote-request.js. The product code is searchable only (data-kw).
-function renderCard(p, copy, price) {
-  return `<li class="cat-card" data-id="${esc(p.id)}" data-kw="${esc(p.id)}">` +
+function renderCard(p, copy, price, photo) {
+  return `<li class="cat-card" data-id="${esc(p.id)}" data-kw="${esc(p.id)}">` + PHOTO_FIGURE(photo, p.name) +
     `<div class="cat-head"><h3>${esc(p.name)}</h3>${copy && copy.desc ? `<p class="cat-lead">${esc(copy.desc)}</p>` : ''}</div>` +
     featList(copy) + priceLine(price) +
     `</li>`;
@@ -1197,8 +1201,8 @@ function renderCard(p, copy, price) {
 
 // A PROJECT card (scripts/catalogue-cards.js PROJECT_CARDS): no SKU and no configurator in the quote flow, so its button is a plain link to the "Request a quote" section
 // (nothing the server does not know can be added to a quote).
-function renderProjectCard(pc, price) {
-  return `<li class="cat-card cat-card-project" data-ask="${esc(pc.id)}" data-kw="${esc(pc.id)}">` +
+function renderProjectCard(pc, price, photo) {
+  return `<li class="cat-card cat-card-project" data-ask="${esc(pc.id)}" data-kw="${esc(pc.id)}">` + PHOTO_FIGURE(photo, pc.name) +
     `<div class="cat-head">${pc.tag ? `<p class="cat-tag">${esc(pc.tag)}</p>` : ''}<h3>${esc(pc.name)}</h3><p class="cat-lead">${esc(pc.desc)}</p></div>` +
     featList(pc) + learnLink(pc.learn || null) + priceLine(price) +
     `<a class="cat-ask" href="#request-quote">Request a quote</a>` +
@@ -1232,6 +1236,8 @@ function renderCatalogue(db, opts) {
   const excludedCats = new Set(opts.excludedCategories || EXCLUDED_CATEGORIES);
   const copyOf = (id) => (has(cardCopy, id) ? cardCopy[id] : null);
   const priceOf = (id) => (has(prices, id) ? prices[id] : null);
+  const photos = opts.photos || {};
+  const photoFor = (id) => (id && has(photos, id) ? photos[id] : null);
 
   if (!db || !Array.isArray(db.categories) || !Array.isArray(db.products)) {
     throw new Error('master JSON must have "categories" and "products" arrays');
@@ -1372,9 +1378,9 @@ function renderCatalogue(db, opts) {
     lines.push(`<h2 id="cat-h-${esc(g.id)}">${esc(g.label)} <span class="cat-count">${n}</span></h2>`);
     // one responsive grid of equal text cards per group (css/catalogue.css); inside a group: the configurable cards, the fixed items, then the project cards
     lines.push('<ul class="cat-grid">');
-    for (const f of g.familyCards) lines.push(renderFamilyCard(f, copyOf(f.id), priceOf(f.id), keywordsOf(f.id)));
-    for (const p of g.products) lines.push(renderCard(p, copyOf(p.id), priceOf(p.id)));
-    for (const pc of g.projectCards) lines.push(renderProjectCard(pc, priceOf(pc.id)));
+    for (const f of g.familyCards) lines.push(renderFamilyCard(f, copyOf(f.id), priceOf(f.id), keywordsOf(f.id), photoFor(fams && fams.photoOf[f.id])));
+    for (const p of g.products) lines.push(renderCard(p, copyOf(p.id), priceOf(p.id), photoFor(p.id)));
+    for (const pc of g.projectCards) lines.push(renderProjectCard(pc, priceOf(pc.id), photoFor(pc.photo)));
     lines.push('</ul>');
     lines.push('</section>');
   }
@@ -1416,7 +1422,7 @@ function renderCatalogue(db, opts) {
     }
   }
   report.droppedMaterialKeys = droppedMaterialKeys;
-  report.photos = 0;                                                                              // no card carries an image any more (owner ruling 2026-11-19)
+  report.photos = groups.reduce((n, g) => n + g.familyCards.filter(f => photoFor(fams && fams.photoOf[f.id])).length + g.products.filter(p => photoFor(p.id)).length + g.projectCards.filter(pc => photoFor(pc.photo)).length, 0);
   report.projects = groups.flatMap(g => g.projectCards.map(pc => ({ id: pc.id, category: g.id })));
   const everyCard = [...report.families.map(x => x.id), ...report.published.map(x => x.id), ...report.projects.map(x => x.id)];
   report.cardIds = everyCard;
@@ -1608,7 +1614,8 @@ function main(argv) {
   const pub = loadPublicCategories({ ids });              // throws on a bad category map
   const published = publishedProductIds(db, pub);
   const fams = loadPublicFamilies({ published, master: db });   // throws unless every published SKU is absorbed or fixed, exactly once
-  const photoMap = loadPhotoMap({ ids, skipIds: ids.filter(id => !published.has(id)) });   // throws on a bad photo map; {} when the file is absent
+  const projectPhotoIds = new Set(CARDS.PROJECT_CARDS.map(pc => pc.photo).filter(Boolean));   // a project card may borrow an unpublished product's photo (the trolley)
+  const photoMap = loadPhotoMap({ ids, skipIds: ids.filter(id => !published.has(id) && !projectPhotoIds.has(id)) });   // throws on a bad photo map; {} when the file is absent
   const previewMap = loadPreviewManifest({ families: fams });                              // throws on a bad preview manifest; {} when none yet
   const projectCards = CARDS.PROJECT_CARDS;
   const cardCopy = CARDS.CARD_COPY;
@@ -1671,7 +1678,7 @@ function main(argv) {
   if (report.droppedMaterialKeys.length) {
     console.log(`  WARN: material key(s) not on the allowlist were dropped: ${report.droppedMaterialKeys.join(', ')}`);
   }
-  console.log('  product photos: none on the cards (owner ruling 2026-11-19: a card is plain text); scripts/product-photos.json is still validated');
+  console.log(`  product photos: ${report.photos} card(s) show a photo (scripts/product-photos.json)`);
   console.log(`  catalogue/index.html: ${changed ? 'catalogue block / data island / item list updated' : 'already up to date'} (${Buffer.byteLength(block)} bytes of markup, ${Buffer.byteLength(island)} bytes of "Add to quote" data, ${report.total} products in the JSON-LD item list)`);
   console.log(`  functions/qr-published.json: ${idsChanged ? 'updated' : 'already up to date'} (${quotable.size} fixed product ids — the plain lines the quote-request callables accept)`);
   console.log(`  js/qr-families.js + functions/qr-families.js: ${famChanged ? 'updated' : 'already up to date'} (${fams.order.length} families, ${fams.absorbedIds.size} absorbed SKUs)`);

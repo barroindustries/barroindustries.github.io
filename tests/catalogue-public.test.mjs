@@ -571,17 +571,19 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     assert.ok(!/cat-more|is-open|Show all|Show fewer/.test(big));
   });
 
-  it('a card is PLAIN TEXT (owner ruling 2026-11-19): the name, no size line, no note, no material rows, no image, figure or tile — and the master\'s ad-hoc option lists never appear', () => {
+  it('a card with no photo is PLAIN TEXT (owner ruling 2026-11-19): the name, no size line, no note, no material rows, no image, figure or tile — and the master\'s ad-hoc option lists never appear', () => {
     assert.ok(html.includes('<h3>Test Sink</h3>'));
     for (const gone of ['W 800', 'per pc', 'Basin Depth', '250mm', 'LP burner', 'cat-specs', 'cat-notes', 'cat-meta', 'cat-code', 'cat-label']) assert.ok(!html.includes(gone), `a card still carries "${gone}"`);
     assert.ok(!/<img\b|<figure\b|cat-tile|cat-photo|cat-ic/.test(html));
   });
 
-  it('a photo map is ignored: no card carries an image any more, whatever the build is given', () => {
+  it('a mapped photo is shown on top of its card only, captioned "Representative image" (owner 2026-11-19 later: photos back)', () => {
     const photos = { 'T-001': { src: 'site/img/products/alpha.webp', thumb: 'site/img/products/alpha-thumb.webp', width: 400, height: 300, mainWidth: 800 } };
     const out = render(PRODUCTS, { photos });
-    assert.equal(out, html, 'the photo map changed the markup');
-    assert.ok(!/<img\b|webp|Representative image/.test(out));
+    assert.ok(out.includes('<li class="cat-card" data-id="T-001" data-kw="T-001"><figure class="cat-photo"><img src="/site/img/products/alpha-thumb.webp" srcset="/site/img/products/alpha-thumb.webp 400w, /site/img/products/alpha.webp 800w"'));
+    assert.ok(out.includes('<figcaption>Representative image</figcaption></figure><div class="cat-head">'));
+    assert.equal((out.match(/<figure/g) || []).length, 1, 'only the mapped card has a photo');
+    assert.equal(out.replace(/<figure class="cat-photo">[\s\S]*?<\/figure>/, ''), html, 'the photo changes nothing else');
   });
 
   it('a fixed card is  <li class="cat-card" data-id data-kw>  with its name, then the words (one line + 3-5 bullets) when scripts/catalogue-cards.js has them, then ONE price line', () => {
@@ -993,11 +995,12 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
   it('escapes everything: every ampersand starts an entity, and no raw angle bracket sits in a text or attribute value', () => {
     assert.ok(!/&(?!(?:amp|lt|gt|quot|#39);)/.test(catBlock), 'an unescaped ampersand');
     assert.ok(!/(?:alt|placeholder|aria-label|data-[a-z-]+|href|src)="[^"]*[<>]/.test(catBlock), 'a raw angle bracket in an attribute');
-    assert.ok(!/<(?!\/?(?:section|div|p|h[1-3]|ul|li|nav|a|span|data|form|label|input|button|svg|circle|path)\b)[a-z]/i.test(catBlock), 'an unexpected tag');
+    assert.ok(!/<(?!\/?(?:section|div|p|h[1-3]|ul|li|nav|a|span|data|form|label|input|button|svg|circle|path|figure|figcaption|img)\b)[a-z]/i.test(catBlock), 'an unexpected tag');
   });
 
-  it('every card is PLAIN TEXT (owner ruling 2026-11-19): no <img>, no figure, no tile, no placeholder icon, no specification list, no notes block, no product code on view', () => {
-    assert.ok(!/<img\b|<figure\b|<figcaption\b|<svg\b[^>]*cat-ic|cat-photo|cat-tile|cat-specs|cat-notes|cat-meta|cat-code|cat-label|Representative image|\.webp/.test(catBlock.replace(/<svg class="cat-search-icon"[\s\S]*?<\/svg>/, '')));
+  it('every card is TEXT plus at most its captioned product photo (owner rulings 2026-11-19): no tile, no placeholder icon, no specification list, no notes block, no product code on view', () => {
+    const bare = catBlock.replace(/<svg class="cat-search-icon"[\s\S]*?<\/svg>/, '').replace(/<figure class="cat-photo"><img [^>]*><figcaption>Representative image<\/figcaption><\/figure>/g, '');
+    assert.ok(!/<img\b|<figure\b|<figcaption\b|<svg\b[^>]*cat-ic|cat-photo|cat-tile|cat-specs|cat-notes|cat-meta|cat-code|cat-label|Representative image|\.webp/.test(bare));
     const cards = catBlock.split('<li class="cat-card').slice(1);
     for (const c of cards) {
       assert.ok(/<h3>[^<]+<\/h3>/.test(c), 'a card has no name');
@@ -1238,11 +1241,16 @@ describe('product photos (the map stays valid, but since 2026-11-19 NO catalogue
     for (const [fid, f] of Object.entries(familiesSrc.families)) assert.ok(f.photo === null || Object.prototype.hasOwnProperty.call(map, f.photo), `${fid}: its photo product ${f.photo} has no image in the map`);
   });
 
-  it('shows NO photo on any card, mapped or not: a card is plain text (owner ruling 2026-11-19) — and the page references no product photo at all', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
+  it('shows the mapped product photos again (owner 2026-11-19 later), each captioned "Representative image" and lazy-loaded, and only from scripts/product-photos.json', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
     const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
-    assert.ok(Object.keys(map).length > 0);
-    assert.ok(!/<figure|<img\b|Representative image|\/site\/img\/products\//.test(catBlock), 'a card carries a photo');
-    assert.ok(!/\/site\/img\/products\//.test(cat), 'the page still references a product photo');
+    const figs = catBlock.match(/<figure class="cat-photo">[\s\S]*?<\/figure>/g) || [];
+    assert.equal(figs.length, 12);
+    const mapped = new Set(Object.entries(map).filter(([k]) => k[0] !== '_').map(([, v]) => '/' + v.replace(/\.webp$/, '-thumb.webp')));
+    for (const f of figs) {
+      assert.ok(f.includes('<figcaption>Representative image</figcaption>') && f.includes('loading="lazy"'));
+      assert.ok(mapped.has(f.match(/<img src="([^"]+)"/)[1]), 'a photo that is not in scripts/product-photos.json');
+    }
+    assert.ok(!/\bAI\b|generated|ChatGPT/i.test(figs.join('')), 'a caption names how the image was made');
   });
 
   it('every product image the page references exists on disk', () => {
