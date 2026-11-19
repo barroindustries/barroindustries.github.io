@@ -77,6 +77,8 @@ const FAMILIES = {                       // product page -> the configurable fam
 };
 const PRODUCT_SLUGS = Object.keys(FAMILIES);
 const CARD_SLUGS = PRODUCT_SLUGS;   // the gas deck oven keeps its page but has no catalogue card or Configure button (owner 2026-11-19)
+// Product pages added 2026-11-20 (owner, SEO — Owner Answers Q4): checked by their own suite, tests/seo-products-2026-11-20.test.mjs.
+const LATER_PRODUCT_SLUGS = ['pugon-pandesal-oven', 'teppanyaki-grill', 'inasal-charcoal-grill', 'rear-pitch-range-hood'];
 // owner ruling 2026-11-19: the /products/ hub is retired (a noindex forward to /catalogue/, pinned in tests/product-alignment.test.mjs); these are the eleven product pages and the fresh-air page
 const PAGE_PATHS = [...PRODUCT_SLUGS.map((s) => `/products/${s}/`), '/services/fresh-air-systems/'];
 const kindOf = (p) => (p === '/products/' ? 'hub' : p.startsWith('/products/') ? 'product' : 'service');
@@ -249,7 +251,7 @@ describe('the 13 pages exist, in their own folders, with their own images', () =
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) (e.isDirectory() ? walk(`${d}/${e.name}`) : files.push(`${d}/${e.name}`)); };
     walk('products');
-    assert.deepEqual(files.sort(), ['products/index.html', 'products/gas-deck-ovens/index.html', ...PRODUCT_SLUGS.map((s) => `products/${s}/index.html`)].sort());
+    assert.deepEqual(files.sort(), ['products/index.html', 'products/gas-deck-ovens/index.html', ...[...PRODUCT_SLUGS, ...LATER_PRODUCT_SLUGS].map((s) => `products/${s}/index.html`)].sort());
     assert.ok(exists('services/fresh-air-systems/index.html'));
     assert.deepEqual(fs.readdirSync(path.join(ROOT, 'services/fresh-air-systems')), ['index.html']);
   });
