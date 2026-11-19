@@ -110,7 +110,7 @@ const cardsOnPage = block.split('<li class="cat-card').slice(1).map((c) => c.spl
 
 describe('every card is text plus (when mapped) its product photo: photo, a name, one line, three to five feature bullets, one price line (owner rulings 2026-11-19)', () => {
   it('each card on the real page is  head (tag?, name, one line)  then  feature list  then (configurable cards) a "Learn more" link  then the price line — in that order, and nothing else', () => {
-    assert.equal(cardsOnPage.length, 28);
+    assert.equal(cardsOnPage.length, 30);
     for (const c of cardsOnPage) {
       const key = (c.match(/data-(?:family|id|ask)="([^"]+)"/) || [])[1];
       const i = [c.indexOf('<div class="cat-head">'), c.indexOf('<ul class="cat-feat">'), c.indexOf('<p class="cat-from')];
@@ -143,7 +143,7 @@ describe('every card is text plus (when mapped) its product photo: photo, a name
 
   it('every word on a card comes from scripts/catalogue-cards.js: one line of description (not a paragraph), three to five bullets of at most 70 characters, no price word, no staff-only text', () => {
     const entries = [...Object.entries(CARDS.CARD_COPY), ...CARDS.PROJECT_CARDS.map((p) => [p.id, p])];
-    assert.equal(entries.length, 28);
+    assert.equal(entries.length, 30);
     for (const [id, c] of entries) {
       assert.ok(c.desc && c.desc.length <= 90 && !/[.!?]\s+\S/.test(c.desc), `${id}: the description is not one short line`);
       assert.ok(c.features.length >= 3 && c.features.length <= 5, `${id}: ${c.features.length} bullets`);
@@ -163,8 +163,8 @@ describe('every card is text plus (when mapped) its product photo: photo, a name
     for (const c of cardsOnPage) assert.ok(!/NSF|ISO ?\d|certified|warranty|guarantee/i.test(stripTags(c)), 'an unverifiable claim sits on a card');
   });
 
-  it('the live search placeholder, status and counts count the cards of the page (28 in 8 groups)', () => {
-    assert.ok(block.includes('placeholder="Search 28 products"') && block.includes('>28 products in 8 categories</p>'));
+  it('the live search placeholder, status and counts count the cards of the page (30 in 8 groups)', () => {
+    assert.ok(block.includes('placeholder="Search 30 products"') && block.includes('>30 products in 8 categories</p>'));
   });
 });
 
@@ -340,7 +340,7 @@ describe('search finds every card — the configurable ones included — by runn
   const ALL = env.cards.map(env.idOf);
 
   it('starts with every card shown, and a blank query restores them all', () => {
-    assert.equal(ALL.length, 28);
+    assert.equal(ALL.length, 30);
     assert.deepEqual(env.search(''), ALL);
   });
 
@@ -394,8 +394,8 @@ describe('search finds every card — the configurable ones included — by runn
 
   it('js/catalogue.js reads the name, the one line and the bullets (its haystack selector) and the page keeps the data-cat / data-id / data-family hooks it and js/quote-request.js use', () => {
     assert.match(catJs, /querySelectorAll\('h3, \.cat-lead, \.cat-feat'\)/);
-    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 28);
-    assert.equal((block.match(/data-kw="/g) || []).length, 28);
+    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 30);
+    assert.equal((block.match(/data-kw="/g) || []).length, 30);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
     assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head"|figure class="cat-photo")/.test(block), 'a card starts with something other than its photo or its head');
     assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 12, 'the 12 cards with a mapped photo (7 configurable, 3 fixed, trolleys, exhaust)');

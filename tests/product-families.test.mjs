@@ -152,12 +152,13 @@ describe('the mapping: every published SKU is absorbed by exactly one family or 
     assert.deepEqual(cards('storage'), [['family', 'cabinet'], ['family', 'wall_shelf'], ['family', 'rack'], ['ask', 'trolley']]);
     const cooking = cards('cooking');
     assert.deepEqual(cooking.slice(0, 4), [['family', 'stove'], ['family', 'wok_range'], ['family', 'cooking_line'], ['family', 'deck_oven']], 'the four cooking families lead Chef Mode, in the family order');
-    assert.ok(cooking.slice(4).every(([k]) => k === 'id'));
+    assert.ok(cooking.slice(4, -2).every(([k]) => k === 'id'));
+    assert.deepEqual(cooking.slice(-2), [['ask', 'noodle_boiler'], ['ask', 'combi_stove']], 'the noodle boiler and combi stove (price list only, not in the master) close Chef Mode as quote-request cards (owner 2026-11-19)');
     // the steamer, the warmers and the salamander oven stay fixed Chef Mode cards; the meat grinder and slicer and the proofers are "other equipment" (the fryers, griddles and deck ovens are families)
     for (const id of ['CE-011', 'CE-024', 'CE-030', 'CE-031']) assert.ok(cooking.some(([, x]) => x === id), `${id} should be a fixed Chef Mode card`);
     for (const id of ['CE-007', 'CE-009', 'CE-010', 'CE-012', 'CE-016', 'CE-019', 'CE-020', 'CE-021', 'CE-022', 'CE-023', 'CE-026', 'CE-028']) assert.ok(!cooking.some(([, x]) => x === id), `${id} is absorbed: no card of its own`);
     assert.deepEqual(cards('refrigeration').map(([, x]) => x), ['RF-001', 'RF-002', 'RF-003', 'RF-004', 'RF-005', 'RF-006', 'BA-006', 'BA-011', 'MS-015', 'MS-016']);
-    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 28);
+    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 30);
     // and the families' own categories are the ones the ruling names
     assert.deepEqual(ORDER.map((f) => FAMS.families[f].category), CATEGORY_OF);
   });

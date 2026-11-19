@@ -528,8 +528,8 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     // a family with its own /products/ page points there (the target of its card's "Learn more" link); every other item points at its category anchor
     const expected = sections.flatMap((s) => s.cards.map((c) => ({ name: c.name, url: c.learn ? `https://barroindustries.com${c.learn}` : `${catalogue.url}#cat-${s.id}` })));
     assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 11, 'all eleven configurable families point at their product page');
-    assert.equal(expected.length, 28, 'the page shows 28 cards: the eleven configurable families first in their groups, then the 14 fixed items and the three project cards (2026-11-19)');
-    assert.equal(list.numberOfItems, 28);
+    assert.equal(expected.length, 30, 'the page shows 30 cards: the eleven configurable families first in their groups, then the 14 fixed items and the five project cards (2026-11-19)');
+    assert.equal(list.numberOfItems, 30);
     assert.deepEqual(list.itemListElement.map((i) => ({ name: i.name, url: i.url })), expected);
     list.itemListElement.forEach((item, i) => {
       assert.deepEqual(Object.keys(item), ['@type', 'position', 'name', 'url']);

@@ -1080,7 +1080,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
       assert.ok(!/exhaust|fresh[- ]air|gas lines?|fire[- ]suppression/i.test(text), `${label} still mentions a removed category`);
     }
     // the exhaust group is ONE project card (no product code, no SKU): ducting and blowers are not listed one by one
-    assert.deepEqual(askCards, ['station', 'exhaust', 'trolley']);
+    assert.deepEqual(askCards, ['station', 'exhaust', 'noodle_boiler', 'combi_stove', 'trolley']);
     assert.match(catHead, /name="description" content="[^"]*range hoods/);   // the Ventilation category (added 2026-10-28) is in the description by its product: since the owner's shortening of 2026-10-28 the description names products, not the six categories
   });
 
