@@ -1164,7 +1164,7 @@ describe('header and footer: the same on every page as /services/ (aria-current 
   it('has the nav Services · Products · Our work · Areas we serve · Catalogue · Guides · FAQ · Contact, then "Get a quote" to the intake, then the menu button', () => {
     each((p) => {
       const nav = p.header.match(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/)[1];
-      assert.deepEqual(nav.match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), ['<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">Guides</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
+      assert.deepEqual(nav.match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), ['<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">The Kitchen Guide</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(!/login/i.test(p.header));
@@ -1181,7 +1181,7 @@ describe('header and footer: the same on every page as /services/ (aria-current 
   it('has the footer links Home, Services, Products, Our work, Areas we serve, FAQ, Catalogue, Facebook, "Message us", "Get a quote" and the discreet "Team portal" last', () => {
     each((p) => {
       const row = p.footer.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
-      assert.deepEqual([...row.replace(/<svg[\s\S]*?<\/svg>/g, '').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]), [['/', 'Home'], ['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/guides/', 'Guides'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']], p.path);
+      assert.deepEqual([...row.replace(/<svg[\s\S]*?<\/svg>/g, '').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]), [['/', 'Home'], ['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/guides/', 'The Kitchen Guide'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']], p.path);
       assert.ok(row.endsWith('Team portal</a></p>'));
     });
   });
@@ -1427,7 +1427,7 @@ describe('guides and downloads: the footer of every public page, sitemap.xml, ro
       assert.ok(brand.includes(`</ul>\n      ${FILES_ROW}\n    </div>`), `${f}: the PDF row is not the last thing in .foot-brand, written as the shared markup`);
       assert.equal(foot.split('class="foot-files"').length, 2, `${f}: more than one PDF row`);
       const row = foot.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
-      assert.ok(row.includes('<a href="/faq/">FAQ</a><a href="/guides/">Guides</a>'), `${f}: "Guides" is not right after FAQ`);
+      assert.ok(row.includes('<a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a>'), `${f}: "Guides" is not right after FAQ`);
       assert.equal(row.split('href="/guides/"').length, 2, `${f}: more than one Guides link`);
       assert.ok(/<a class="foot-portal" href="\/#login"[^>]*>Team portal<\/a><\/p>$/.test(row), `${f}: "Team portal" is not last`);   // the homepage's carries id="site-team-portal"
       assert.ok(!foot.includes('download='), `${f}: a download attribute`);

@@ -329,7 +329,7 @@ describe('JSON-LD: the 13 areas served, the verified Google Maps place, and noth
     assert.ok(!/La\s*Union|San\s*Fernando/i.test(outsideMap), 'La Union / San Fernando appears in #site outside the map section and the projects');
     // in #projects it is the DMMMSU description and nothing else: not the ISPSC entry, a heading, a photo's alt text or a tag
     assert.equal((projects.match(/La\s*Union/gi) || []).length, 1, 'La Union appears more than once in #projects');
-    assert.ok(projects.includes('<p>Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).</p>'));
+    assert.ok(projects.includes('<p>Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).</p>'));
     assert.equal((projects.match(/<section\b/g) || []).length, 1, 'a nested <section> would break the La Union guard');
     const headNoAreas = homeHead.replace(/"areaServed":\[[^\]]*\],?/, '');
     assert.ok(!/La\s*Union|San\s*Fernando/i.test(headNoAreas), 'La Union / San Fernando appears in the head outside areaServed');

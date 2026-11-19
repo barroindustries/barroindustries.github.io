@@ -51,7 +51,7 @@ function build() {
       <thead><tr><th>Project</th><th>Where</th><th>Completed</th><th>Work</th></tr></thead>
       <tbody>
         <tr><td>ISPSC 2026<br><span class="xs muted" style="font-family:var(--sans);font-weight:500">Ilocos Sur Polytechnic State College</span></td><td>Ilocos Sur</td><td>March 2026</td><td>Laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods</td></tr>
-        <tr><td>DMMMSU 2022–2023<br><span class="xs muted" style="font-family:var(--sans);font-weight:500">Don Mariano Marcos Memorial State University</span></td><td>La Union</td><td>March 2023 – December 2025</td><td>Stainless-steel equipment delivered and installed on campus</td></tr>
+        <tr><td>DMMMSU 2022–2023<br><span class="xs muted" style="font-family:var(--sans);font-weight:500">Don Mariano Marcos Memorial State University</span></td><td>La Union</td><td>2022–2023</td><td>Stainless-steel equipment delivered and installed on campus</td></tr>
         <tr><td>Restaurant kitchen<br><span class="xs muted" style="font-family:var(--sans);font-weight:500">Shown without its client’s name</span></td><td>Bulacan</td><td>2026</td><td>A commercial restaurant kitchen, shown in photographs</td></tr>
       </tbody>
     </table>
@@ -93,9 +93,9 @@ function build() {
   // 5 — DMMMSU (1)
   pages.push(projectPage({
     kicker: 'Project 02 · Government · University', title: 'DMMMSU 2022–2023', sub: 'Don Mariano Marcos Memorial State University (DMMMSU)',
-    lead: 'Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).',
+    lead: 'Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).',
     body: 'The photographs show a finished commercial kitchen with a range, hood and work tables, a room installed with stainless-steel tables, racks and shelving, and a close-up of a stainless-steel rack.',
-    facts: [['Client', 'Don Mariano Marcos Memorial State University (DMMMSU)'], ['Location', 'La Union'], ['Dates', 'March 2023 – December 2025'], ['Work', 'Stainless-steel equipment delivered and installed on campus']],
+    facts: [['Client', 'Don Mariano Marcos Memorial State University (DMMMSU)'], ['Location', 'La Union'], ['Dates', '2022–2023'], ['Work', 'Stainless-steel equipment delivered and installed on campus']],
     heroKey: 'dmmmsu-01', heroPos: '50% 55%', pair: ['dmmmsu-02', 'dmmmsu-03'],
   }));
 

@@ -168,7 +168,7 @@
     on(mb, 'click', function () { menu(!(nav && nav.classList.contains('is-open'))); });
     on(nav, 'click', function (e) { if (up(e, 'a')) menu(false); });
     on(d, 'keydown', function (e) { if (e.key === 'Escape') menu(false); });
-    on(window, 'resize', function () { if (window.innerWidth >= 1100) menu(false); });
+    on(window, 'resize', function () { if (window.innerWidth >= 1280) menu(false); });
 
     // ── Header: transparent with white text while the page is at the very top (over the hero), solid
     // the moment it has scrolled a little, so it never floats over copy it cannot be read against.

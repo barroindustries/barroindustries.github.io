@@ -10,7 +10,7 @@
      data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu, project photo lightbox, map highlight) and /js/late-fonts.js.
      Not in the service worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD and visible breadcrumb
      in step: tests/seo-pages.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-Fab3JFeX1HfGbp/S9+HQ7Z0/68uKSmMXuEP36tzyve8=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-yswRdaZs1h0s7XwlCeF2hDP17mJ4GCHP6qyPXkMxmcM=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Stainless Steel Fabrication Manila, Quezon City | Barro Industries</title>
 <meta name="description" content="Stainless steel fabrication in Manila from our Quezon City shop: tables, sinks, hoods and racks in SS304 or SS316, by Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/services/stainless-steel-fabrication/">
@@ -621,19 +621,19 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .foot-links{justify-content:flex-end}
   #site .foot-legal{grid-column:1/-1}
 }
-@media (min-width:900px) and (max-width:1099px){
-  /* below 1100px the eight header links (Guides added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
+@media (min-width:900px) and (max-width:1279px){
+  /* below 1280px the eight header links ("The Kitchen Guide" added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
   #site .site-brand-name{font-size:20px}
 }
-@media (min-width:1100px){
+@media (min-width:1280px){
   #site #site-menu-btn{display:none}
   #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
   #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px;white-space:nowrap}
   #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
 }
-@media (min-width:1100px) and (max-width:1279px){
+@media (min-width:1280px) and (max-width:1439px){
   /* eight links, the button and the wordmark share one row: a little less room between the links keeps them on one line */
-  #site #site-nav{gap:20px;margin-right:6px}
+  #site #site-nav{gap:22px;margin-right:6px}
 }
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -913,7 +913,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <a href="/work/">Our work</a>
       <a href="/areas-we-serve/">Areas we serve</a>
       <a href="/catalogue/">Catalogue</a>
-      <a href="/guides/">Guides</a>
+      <a href="/guides/">The Kitchen Guide</a>
       <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
@@ -1214,7 +1214,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">Guides</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>
