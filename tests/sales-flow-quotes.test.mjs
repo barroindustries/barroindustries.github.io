@@ -90,7 +90,8 @@ describe('the BK quote card (§5.1)', () => {
     assert.ok(c.includes('badge badge-blue') && c.includes('Sent · 2026-11-18'));
     assert.ok(!c.includes('bk-sent-btn'));
     assert.ok(c.includes('bk-lost-btn') && c.includes('bk-share-btn') && c.includes('bk-so-btn'), 'Sent is a stamp: Share, Record payment and Lost all still apply');
-    assert.ok(c.includes('Filed'), 'the status badge still says Filed');
+    // 2026-11-20: a filed quote's badge shows its approval state (this fixture is approved), and Sent still does not replace it.
+    assert.ok(c.includes('>Approved<'), 'the status badge still shows the approval state, not Sent');
   });
   it('a legacy status:"sent" quote shows Sent and can be lost, but cannot be marked sent or paid from here', async () => {
     const { body } = await run();
