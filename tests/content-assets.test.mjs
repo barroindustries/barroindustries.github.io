@@ -433,12 +433,12 @@ describe('guides: the pages exist (the index and fifteen articles), nothing else
 });
 
 describe('guides: <head> — title, description, canonical, robots, Open Graph, Twitter, CSP, fonts', () => {
-  it('has one title of 45-65 characters ending "| Barro Industries", and every title is different', () => {
+  it('has one title of 45-65 characters ending "| Barro Kitchens" (brand ruling 2026-11-20, SEO — Update 5 Q8a), and every title is different', () => {
     each((p) => {
       assert.equal(p.S.elements.filter((e) => e.tag === 'title').length, 1, `${p.path}: title count`);
       assert.ok(p.title.length >= 45 && p.title.length <= 65, `${p.path}: title is ${p.title.length} characters`);
-      assert.ok(p.title.endsWith(' | Barro Industries'));
-      assert.ok(!/Barro Kitchens/i.test(p.title), 'the brand is not put in a title (owner ruling 2026-10-22: the pages keep their own titles)');
+      assert.ok(p.title.endsWith(' | Barro Kitchens'));
+      assert.ok(!/Barro Industries/i.test(p.title), 'the public brand leads the title; the company name is not repeated there (owner 2026-11-20)');
     });
     assert.equal(new Set(PAGES.map((p) => p.title)).size, PAGES.length);
   });
@@ -486,7 +486,7 @@ describe('guides: <head> — title, description, canonical, robots, Open Graph, 
   it('has Open Graph and Twitter large-card tags that agree with the title and the description, and a real 1200 x 630 photo at an absolute URL from the existing pages\' images', () => {
     each((p) => {
       assert.equal(p.meta('og:type'), p.kind === 'article' ? 'article' : 'website');
-      assert.equal(p.meta('og:site_name'), 'Barro Industries');
+      assert.equal(p.meta('og:site_name'), 'Barro Kitchens');
       assert.equal(p.meta('og:locale'), 'en_PH');
       assert.equal(p.meta('og:title'), p.title);
       assert.equal(p.meta('og:description'), p.meta('description'));
@@ -661,7 +661,7 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
     });
   });
 
-  it('gives each article an Article: the H1 as headline, its own datePublished (22 October for the first two guides, 28 October for the two newer ones), an existing image, and the business as author AND publisher (an Organization named "Barro Industries", alternateName "Barro Kitchens", a logo)', () => {
+  it('gives each article an Article: the H1 as headline, its own datePublished (22 October for the first two guides, 28 October for the two newer ones), an existing image, and the business as author AND publisher (an Organization named "Barro Kitchens", legalName "Barro Industries OPC", alternateName "Barro Industries", a logo)', () => {
     for (const p of articles) {
       const a = p.node('Article');
       assert.equal(a.length, 1, `${p.path}: Article count`);
@@ -676,8 +676,9 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
       assert.deepEqual(n.image, [p.meta('og:image')]);
       for (const who of [n.author, n.publisher]) {
         assert.equal(who['@type'], 'Organization');
-        assert.equal(who.name, 'Barro Industries');
-        assert.ok(who.alternateName.includes('Barro Kitchens'));
+        assert.equal(who.name, 'Barro Kitchens');
+        assert.equal(who.legalName, 'Barro Industries OPC');
+        assert.ok(who.alternateName.includes('Barro Industries'));
         assert.equal(who.url, BASE + '/');
       }
       assert.equal(n.publisher.logo.url, BASE + '/icons/barro-kitchens.png');
@@ -723,7 +724,7 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
         assert.equal(item.name, visible[i][0]);
         assert.equal(item.acceptedAnswer.text, visible[i][1]);
         assert.match(item.name, /^[A-Z][^?]*\?$/);
-        assert.ok(!/\b[A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+/.test(item.name.replace(/Barro Industries|SS304|SS316/g, 'x')), `a Title Case question: ${item.name}`);
+        assert.ok(!/\b[A-Z][a-z]+ [A-Z][a-z]+ [A-Z][a-z]+/.test(item.name.replace(/Barro Industries|Barro Kitchens|SS304|SS316/g, 'x')), `a Title Case question: ${item.name}`);
         assert.ok(item.acceptedAnswer.text.length > 60);
       });
       assert.equal(new Set(q.map((x) => x.name)).size, q.length);
@@ -741,7 +742,7 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
     assert.deepEqual(list.itemListElement.map((i) => i.url), articles.map((a) => a.url));
     assert.deepEqual(list.itemListElement.map((i) => i.name), articles.map((a) => a.headings.find((h) => h.level === 1).text));
     for (const i of list.itemListElement) assert.ok(ix.html.includes(`href="${i.url.replace(BASE, '')}"`));
-    assert.equal(cp[0].publisher.name, 'Barro Industries');
+    assert.equal(cp[0].publisher.name, 'Barro Kitchens');
   });
 });
 
@@ -801,7 +802,7 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
       const notice = [...p.html.matchAll(/<p class="art-copy[^"]*">([\s\S]*?)<\/p>/g)].map((m) => visibleText(m[1]));
       assert.deepEqual(notice, ['© 2026 Barro Industries OPC. All rights reserved. All text, photographs and designs on this page are our own work and may not be copied or reused without written permission.'], `${p.path}: the visible copyright notice`);
       assert.ok(/© <span id="site-year">2026<\/span> Barro Industries OPC/.test(p.footer) && /may not be copied or reused without written permission/.test(p.footer), `${p.path}: the footer's own copyright line`);
-      const holder = (n) => { assert.equal(n.copyrightHolder['@type'], 'Organization'); assert.equal(n.copyrightHolder.name, 'Barro Industries'); assert.deepEqual(n.copyrightHolder.alternateName, ['Barro Kitchens', 'Barro Kitchens by Barro Industries']); assert.equal(n.copyrightYear, 2026); };
+      const holder = (n) => { assert.equal(n.copyrightHolder['@type'], 'Organization'); assert.equal(n.copyrightHolder.name, 'Barro Kitchens'); assert.equal(n.copyrightHolder.legalName, 'Barro Industries OPC'); assert.deepEqual(n.copyrightHolder.alternateName, ['Barro Industries', 'Barro Kitchens by Barro Industries']); assert.equal(n.copyrightYear, 2026); };
       if (p.kind === 'article') { const n = p.node('Article')[0]; holder(n); assert.equal(n.copyrightNotice, '© 2026 Barro Industries OPC. All rights reserved.'); }
       else holder(p.node('CollectionPage')[0]);
     });
@@ -818,20 +819,13 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
     });
   });
 
-  it('keeps "Barro Kitchens" in the permanent places only: the header span (once, bare, the swap point of a rename), the footer\'s copyright notice (a bare data-brand-legacy span, what a rename keeps), the meta descriptions and the JSON-LD alternateName — never in a title, an alt or an aria-label', () => {
+  it('names Barro Kitchens as the maker (brand ruling 2026-11-20): the byline, "How Barro Kitchens can help", the JSON-LD author; Barro Industries only as the legal company (Barro Industries OPC), the descriptions\' "(Barro Industries)" and the JSON-LD alternateName — never "Barro Industries" in a title or the article text', () => {
     each((p) => {
-      const count = (s) => (String(s).match(/Barro\s+Kitchens/gi) || []).length;
-      const visible = p.S.texts.filter((t) => count(t.text));
-      assert.equal(visible.length, 2, `${p.path}: visible mentions`);
-      assert.deepEqual(visible[0].chain[visible[0].chain.length - 1].attrs, { 'data-brand': '' });
-      assert.equal(visible[0].text, 'Barro Kitchens');
-      assert.deepEqual(visible[1].chain[visible[1].chain.length - 1].attrs, { 'data-brand-legacy': '' });   // owner 2026-10-22: "© 2026 Barro Industries OPC (Barro Kitchens). All photos, designs and content …"
-      assert.equal(visible[1].text, 'Barro Kitchens');
-      for (const k of ['og:title', 'twitter:title', 'og:site_name', 'og:image:alt', 'twitter:image:alt']) assert.ok(!count(p.meta(k)), `${p.path}: ${k}`);
-      for (const k of ['description', 'og:description', 'twitter:description']) assert.equal(count(p.meta(k)), 1);
-      assert.deepEqual(p.S.attrs.filter((a) => count(a.value)).map((a) => `${a.tag}[${a.name}]`), ['meta[content]', 'meta[content]', 'meta[content]']);
-      assert.ok(p.S.comments.every((c) => !count(c.text)));
-      for (const n of p.graph) if (n.author) assert.deepEqual(n.author.alternateName, ['Barro Kitchens', 'Barro Kitchens by Barro Industries']);
+      for (const k of ['og:title', 'twitter:title', 'og:site_name']) assert.ok(!/Barro Industries/.test(p.meta(k)), `${p.path}: ${k}`);
+      const main = visibleText((p.html.match(/<main[\s\S]*?<\/main>/) || [''])[0]);
+      assert.ok(!/Barro Industries(?! OPC)/.test(main.replace(/\(Barro Industries\)/g, '')), `${p.path}: "Barro Industries" named as the maker in the page text`);
+      for (const n of p.graph) if (n.author) { assert.equal(n.author.name, 'Barro Kitchens'); assert.deepEqual(n.author.alternateName, ['Barro Industries', 'Barro Kitchens by Barro Industries']); }
+      if (p.kind === 'article') { assert.ok(p.html.includes('<span>By Barro Kitchens</span>'), `${p.path}: byline`); assert.ok(p.html.includes('How Barro Kitchens can help'), `${p.path}: help heading`); }
     });
   });
 });
@@ -854,7 +848,7 @@ describe('guides: the articles — length, structure, and what each one says (an
       const toc = [...p.html.match(/<nav class="art-toc"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="#([^"]+)">([^<]+)<\/a>/g)].map((m) => m[1]);
       assert.ok(toc.length >= 6);
       for (const id of toc) assert.ok(new RegExp(`<section id="${id}"`).test(p.article), `${p.path}: the contents entry #${id} has no section`);
-      assert.ok(p.html.includes(`<time datetime="${p.published}">${longDate(p.published)}</time>`) && p.html.includes('By Barro Industries'), `${p.path}: the byline date`);
+      assert.ok(p.html.includes(`<time datetime="${p.published}">${longDate(p.published)}</time>`) && p.html.includes('<span>By Barro Kitchens</span>'), `${p.path}: the byline date`);
     }
   });
 
