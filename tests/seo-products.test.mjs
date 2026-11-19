@@ -948,7 +948,7 @@ describe('the options on each product page are the ones the configurators offer 
   });
 
   it('shows a product picture only where the product exists in the picture: the griddle, griller and fryer page and the hood page do; the dish table, wok range and deck oven pages (no photograph of those) use the text hero and show none', () => {
-    for (const [s, n] of [['commercial-griddles-grillers-and-fryers', 3], ['stainless-steel-range-hoods', 1]]) {
+    for (const [s, n] of [['commercial-griddles-grillers-and-fryers', 3], ['stainless-steel-range-hoods', 5]]) {   // the hood page gained four product renders (owner's image set, 2026-11-19)
       const p = byPath(`/products/${s}/`);
       assert.equal((p.html.match(/<span>Representative image<\/span>/g) || []).length, n, s);
       assert.ok(!p.main.includes('pg-hero-plain'), `${s}: a project photograph leads the page`);   // (the inline stylesheet names the class too: look in <main>)
