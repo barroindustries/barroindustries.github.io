@@ -7237,7 +7237,16 @@ html.light .notif-btn { color: var(--text-primary); }
 .topbar-hlogo { display: block; height: 40px; width: auto; max-width: 100%; object-fit: contain; object-position: left center; }
 html:not(.light) .topbar-hlogo { filter: brightness(0) invert(1); }
 @media (max-width: 768px) { .topbar-hlogo { height: 32px; } }
-@media (min-width: 769px) { .tn-hlogo { display: none; } }   /* desktop: the logo sits top left only; the centre strip stays empty */
+@media (min-width: 769px) { .tn-hlogo { display: none; } }
+/* "Operating System" beside the logo (owner 2026-11-20): a thin divider, then the small caps label */
+.topbar-os-label { padding-left: 10px; margin-left: 2px; border-left: 1px solid rgba(255,255,255,0.25); line-height: 1.2; white-space: nowrap; }
+html.light .topbar-os-label { border-left-color: rgba(0,0,0,0.15); }
+#tn-tabs .tn-brand-stack { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+#tn-tabs .tn-hlogo { height: 26px; }
+#tn-tabs .tn-os-label { font-size: 0.55rem; }
+.tn-os-label { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.62); padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.25); white-space: nowrap; }
+html.light .tn-os-label { color: rgba(0,0,0,0.52); border-left-color: rgba(0,0,0,0.15); }
+@media (min-width: 769px) { .tn-os-label { display: none; } }   /* desktop: the logo sits top left only; the centre strip stays empty */
 
 /* Hide sub-label on very small screens, keep brand name */
 @media (max-width: 360px) {
