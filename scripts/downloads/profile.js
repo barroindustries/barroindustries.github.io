@@ -9,10 +9,9 @@ const DOC = 'Company profile';
 const SHOW_LEADERSHIP = true;
 // The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, four finishes"
 // (and of the catalogue PDF's materials page). tests/content-assets.test.mjs pins them together.
-const CONSTRUCTION_NOTE = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
 // the PDF's document information (scripts/downloads/pdf-meta.js writes it, with the copyright, after Chrome has printed the file)
 const META = {
-  title: `Company profile | ${CO.name}`,
+  title: `Company profile | ${CO.brand}`,
   subject: `${CO.brand} by ${CO.name}: company profile, 2026 edition.`,
   keywords: `${CO.name}, ${CO.brand}, stainless-steel kitchens, commercial kitchens, company profile, Quezon City, Philippines`,
 };
@@ -32,16 +31,16 @@ function build() {
   // 1 — cover
   pages.push(L.cover({
     photo: 'ispsc-01.jpg', edition: '2026 edition', kicker: 'Company profile',
-    title: 'Premium <span class="nowrap">stainless-steel</span> kitchens, built to order in Metro Manila.',
-    sub: `${CO.legal}, well known as ${CO.brand}. Designed, fabricated, delivered and installed by one team, for restaurants, hotels, schools and government institutions.`,
+    title: '<span class="nowrap">Stainless-steel</span> kitchens, built to order by our own team.',
+    sub: `${CO.brand}, by ${CO.legal}. Designed, fabricated, delivered and installed by one team, for restaurants, hotels, schools and government institutions.`,
     footLeft: `<b>23 years</b> in business`, footRight: `<b>${CO.site}</b>`, photoPos: '50% 40%',
   }));
 
   // 2 — at a glance
   pages.push(L.page({ doc: DOC, label: 'At a glance', body: `
     <p class="eyebrow">At a glance</p>
-    <h1 class="h1">${CO.name} at a glance</h1>
-    <p class="lead">${CO.legal} is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.</p>
+    <h1 class="h1">${CO.brand} at a glance</h1>
+    <p class="lead">${CO.brand} is the brand of ${CO.legal}, an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.</p>
     <div class="mt3">${L.proofBar()}</div>
     <div class="cols c32 gap8 mt4 top">
       <div><p class="h4">Contents</p><div class="mt1">${toc()}</div></div>
@@ -52,7 +51,7 @@ function build() {
           <li><b>One team, end to end.</b> We design, fabricate, deliver and install, then commission on site.</li>
           <li><b>Made to order.</b> Your exact dimensions, SS304 or SS316, with a standard hairline finish (brushed, mirror or satin on request).</li>
           <li><b>Finished with care.</b> Seams welded and ground smooth, surfaces polished to a professional finish.</li>
-          <li><b>Here after handover.</b> A 6-month service warranty, and 12 months of preventive maintenance with KitchenShield™ on full-kitchen projects.</li>
+          <li><b>Here after handover.</b> A 6-month warranty on workmanship, and 12 months of preventive maintenance with KitchenShield™ on full-kitchen projects.</li>
         </ul>
         <p class="h4 mt3">Companion documents</p>
         <p class="sm mt1"><b>Product catalogue</b><br>${CO.site}/downloads/barro-industries-catalogue.pdf</p>
@@ -65,7 +64,7 @@ function build() {
   pages.push(L.page({ doc: DOC, label: 'Who we are', body: `
     <p class="eyebrow">01 · Who we are</p>
     <h1 class="h1">Who we are</h1>
-    <p class="lead">${CO.legal}, well known as ${CO.brand}, designs, fabricates, delivers and installs premium stainless-steel kitchens from its base in Quezon City, Metro Manila.</p>
+    <p class="lead">${CO.brand}, by ${CO.legal}, designs, builds, delivers and installs stainless-steel kitchens from its base in Quezon City, Metro Manila.</p>
     <div class="cols ${SHOW_LEADERSHIP ? 'c32' : ''} gap8 mt3 top">
       <div>
         <p>The company began as a family business in Baguio City and La Union and has been in business for 23 years. Our kitchens have long been known as ${CO.brand}.</p>
@@ -74,7 +73,7 @@ function build() {
       </div>
       ${SHOW_LEADERSHIP ? `<div class="card paper">
         <p class="h4">Leadership</p>
-        <div class="person mt2"><div class="pt"><img src="${img('own-president.jpg')}" alt="Narciso Neil Barro"></div><div><b>Narciso Neil Barro</b><span>President</span></div></div>
+        <div class="person mt2"><div class="pt"><img src="${img('own-president.jpg')}" alt="Narciso Neil Barro"></div><div><b>Narciso Neil Barro</b><span>President, ${CO.legal}</span></div></div>
       </div>` : ''}
     </div>
     <p class="h4 mt4">Our story</p>
@@ -92,7 +91,7 @@ function build() {
     <p class="lead">Excellence · Integrity · People first · Growth. Four values shape how we build and how we work with you.</p>
     <div class="cols c2 gap4 mt3 stretch">
       <div class="card"><div class="num">01</div><div class="h3">Excellence</div><p>Every piece is built to order. Seams are welded and ground smooth, and surfaces are polished to a professional finish.</p></div>
-      <div class="card"><div class="num">02</div><div class="h3">Integrity</div><p>We build to your specifications and tell you plainly what we will deliver: your equipment, your sizes, your grade and finish, and a 6-month service warranty on our equipment and work.</p></div>
+      <div class="card"><div class="num">02</div><div class="h3">Integrity</div><p>We build to your specifications and tell you plainly what we will deliver: your equipment, your sizes, your grade and finish, and a 6-month warranty on workmanship.</p></div>
       <div class="card"><div class="num">03</div><div class="h3">People first</div><p>One team carries your project from the first consultation and site visit to after-sales support. Full-kitchen projects include 12 months of preventive maintenance service with KitchenShield™.</p></div>
       <div class="card"><div class="num">04</div><div class="h3">Growth</div><p>A family business that began in Baguio City and La Union, now a Quezon City manufacturer with projects across Luzon, built on a commitment to long-term growth.</p></div>
     </div>
@@ -104,7 +103,7 @@ function build() {
   pages.push(L.page({ doc: DOC, label: 'What we do', body: `
     <p class="eyebrow">03 · What we do</p>
     <h1 class="h1">What we do</h1>
-    <p class="lead">The same high-quality build runs through every service: seams welded and ground smooth, surfaces polished to a professional finish, and every piece built to order.</p>
+    <p class="lead">The same careful build runs through every service: seams welded and ground smooth, surfaces polished to a professional finish, and every piece built to order.</p>
     <div class="cols c2 gap4 mt3 stretch">
       ${svc('01', 'flame', 'Commercial &amp; commissary kitchen fit-outs', 'Design-build from concept to completion: cooking lines, preparation and washing stations, baking equipment, exhaust hoods and ducting, fresh-air systems, gas lines and fire suppression. One contractor, from drawings to commissioning.')}
       ${svc('02', 'layers', 'Custom stainless &amp; metal fabrication', 'Work tables, sinks, cabinets, shelving and racks in stainless steel, plus railings, gates, structural and sheet-metal work fabricated to your drawing, in stainless or mild steel, for commercial and residential sites.')}
@@ -147,8 +146,7 @@ function build() {
       <div><div class="sw satin"></div><div class="h3 mt1">Satin</div><p class="sm muted">A soft, low-sheen finish between brushed and mirror, with a smoother, more even look.</p></div>
     </div>
     <p class="xs muted mt1">The swatches are illustrations. Ask to see a sample before you decide.</p>
-    <div class="note mt3">${L.esc(CONSTRUCTION_NOTE)}</div>
-    <div class="note mt2">Need SS316? Say so when you send a project brief or message us, and we will confirm it for your project.</div>
+    <div class="note mt3">Need SS316? Say so when you send a project brief or message us, and we will confirm it for your project.</div>
     <div class="fill">${fig('ispsc-02.jpg', 'ISPSC 2026 — rows of stainless-steel work tables in the school room', 'Rows of stainless-steel work tables in a school room.', 'fill')}</div>` }));
 
   // 8 — built to order

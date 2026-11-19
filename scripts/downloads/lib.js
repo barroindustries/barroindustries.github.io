@@ -40,8 +40,7 @@ const CO = {
 };
 
 // ───────────────────────────── images ─────────────────────────────
-// Photographs are converted to JPEG (Chrome embeds a JPEG as it is, a WebP as raw pixels, which would triple the size). Sources: the site's project and product
-// photographs and the logo. The images named own-* and restaurant-* were extracted ONCE from the owner's 2026-10-10 PDFs and are committed as they are (the build
+// Photographs are converted to JPEG (Chrome embeds a JPEG as it is, a WebP as raw pixels, which would triple the size). Sources: the site's project photographs and the logo (no product pictures: the PDFs carry none, owner 2026-11-20). The images named own-* and restaurant-* were extracted ONCE from the owner's 2026-10-10 PDFs and are committed as they are (the build
 // does not touch them); the restaurant photographs are shown without the client's name, and the one photograph of that set that carries an AI-tool watermark is not kept.
 function photoManifest() {
   const m = [];
@@ -49,8 +48,6 @@ function photoManifest() {
   for (const n of ['02', '03', '04', '05', '06', '07']) m.push([`ispsc-${n}.jpg`, `site/img/projects/ispsc/${n}.webp`, 1400, 74]);
   for (const n of ['01', '02', '03', '04', '05', '06']) m.push([`dmmmsu-${n}.jpg`, `site/img/projects/dmmmsu/${n}.webp`, 1400, 74]);
   m.push(['logo.jpg', 'icons/barro-kitchens.png', 480, 92]);
-  const pdir = path.join(ROOT, 'site', 'img', 'products');
-  if (fs.existsSync(pdir)) for (const f of fs.readdirSync(pdir).sort()) if (/\.webp$/.test(f) && !/-thumb\.webp$/.test(f)) m.push([`prod-${f.replace(/\.webp$/, '.jpg')}`, `site/img/products/${f}`, 800, 86]);
   return m;
 }
 function prepareImages({ force = false } = {}) {
@@ -146,13 +143,13 @@ const STEPS = [
 const stepsHtml = (cls = '') => `<ol class="steps ${cls}">${STEPS.map(([, t, d], i) => `<li><span class="n">${i + 1}</span><div><b>${t}</b><p>${d}</p></div></li>`).join('')}</ol>`;
 const proofBar = () => `<ul class="proof" aria-label="Key facts">
   <li><b><em>23</em> years</b><span>in business</span></li>
-  <li><b>SS304 / SS316</b><span>High-quality, food-grade and laboratory-grade</span></li>
-  <li><b>Made to order</b><span>Built to your exact dimensions</span></li>
-  <li><b>End-to-end</b><span>Design · fabricate · deliver · install</span></li>
+  <li><b>Built by our own team</b><span>Design, build, deliver and install</span></li>
+  <li><b>SS304 food grade</b><span>SS316 laboratory grade on request</span></li>
+  <li><b>6-month warranty</b><span>on workmanship</span></li>
 </ul>`;
 const regs = (cls = '') => `<div class="pills ${cls}">${['PhilGEPS-registered', 'SEC-registered', 'VAT-registered'].map((t) => `<span class="pill">${ic('shield')}${t}</span>`).join('')}</div>`;
 const warranty = () => `<div class="cols c2 gap4">
-  <div class="card paper"><div class="fig4"><b>6</b><span>months</span></div><div class="h3">Service warranty</div><p>A 6-month service warranty on our equipment and work.</p></div>
+  <div class="card paper"><div class="fig4"><b>6</b><span>months</span></div><div class="h3">Workmanship warranty</div><p>6-month warranty on workmanship, on every piece we build and install.</p></div>
   <div class="card paper"><div class="fig4"><b>12</b><span>months</span></div><div class="h3">Preventive maintenance</div><p>Full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™.</p></div>
 </div>`;
 const link = (href, text) => `<a href="${href}">${text}</a>`;
@@ -178,16 +175,16 @@ const projCap = (k) => PROJ_ALT[k].replace(/^(ISPSC 2026|DMMMSU) — /, (m) => m
 
 // ───────────────────────────── pages ─────────────────────────────
 function runningHeader(docName) {
-  return `<header class="rh"><span class="brand"><img src="${img('logo.jpg')}" alt=""><span class="bn"><b>${CO.name}</b><i>${CO.brand}™</i></span></span><span class="dn">${esc(docName)}</span></header>`;
+  return `<header class="rh"><span class="brand"><img src="${img('logo.jpg')}" alt=""><span class="bn"><b>${CO.brand}</b><i>By ${CO.legal}</i></span></span><span class="dn">${esc(docName)}</span></header>`;
 }
 const runningFooter = () => `<footer class="rf"><span>${CO.footerCopy}</span><span class="pn"></span></footer>`;
 function page({ doc, cls = '', body, label }) {
   return `<section class="page ${cls}"${label ? ` data-label="${esc(label)}"` : ''}>${runningHeader(doc)}<div class="pc">${body}</div>${runningFooter()}</section>`;
 }
 function cover({ photo, edition, kicker, title, sub, footLeft, footRight, photoPos = 'center' }) {
-  return `<section class="page cover" data-label="Cover">
-  <div class="cv-photo"><img src="${img(photo)}" alt="" style="object-position:${photoPos}"></div>
-  <div class="cv-top"><div class="cv-brand"><img src="${img('logo.jpg')}" alt=""><div><b>${CO.name}</b><i>${CO.brand}™</i></div></div><span class="cv-ed">${esc(edition)}</span></div>
+  return `<section class="page cover${photo ? '' : ' nophoto'}" data-label="Cover">
+  ${photo ? `<div class="cv-photo"><img src="${img(photo)}" alt="" style="object-position:${photoPos}"></div>` : '<div class="cv-photo plain"></div>'}
+  <div class="cv-top"><div class="cv-brand"><img src="${img('logo.jpg')}" alt=""><div><b>${CO.brand}</b><i>By ${CO.legal}</i></div></div><span class="cv-ed">${esc(edition)}</span></div>
   <div class="cv-body">
     <p class="eyebrow">${esc(kicker)}</p>
     <h1 class="cv-title">${title}</h1>
@@ -220,7 +217,7 @@ function contactPage({ doc, lead, label = 'Contact', photo = 'ispsc-01.jpg', pho
     <div class="card"><div class="num">02</div><div class="h3">Send a project brief</div><p>For a larger project (a hospital, school, hotel or commissary), tell us about it before our site visit.<br>${link(CO.briefUrl, 'Project brief')}</p></div>
     <div class="card"><div class="num">03</div><div class="h3">Message us</div><p>Ask a question on Messenger, or call or email us. We will come back with a quotation.<br>${link(CO.messenger, CO.messengerText)}</p></div>
   </div>
-  <div class="fill"><figure class="fig"><div class="ph-box"><img src="${img(photo)}" alt="${esc(photoAlt)}" style="object-position:${photoPos}"></div></figure></div>
+  ${photo ? `<div class="fill"><figure class="fig"><div class="ph-box"><img src="${img(photo)}" alt="${esc(photoAlt)}" style="object-position:${photoPos}"></div></figure></div>` : '<div class="fill"></div>'}
   <div class="mt3">
     ${regs()}
     <p class="xs mt2" style="color:rgba(255,255,255,.72)">© 2026 ${CO.legal}. ${CO.brand} is a brand of ${CO.legal}. ${CO.address}</p>

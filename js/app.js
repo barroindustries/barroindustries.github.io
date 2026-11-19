@@ -777,7 +777,7 @@ window._wantLogin = window._wantLogin || false;   // the head script may already
 function _setView(v) { try { document.documentElement.setAttribute('data-view', v); } catch (_) {} }
 function _isStandalone() { return document.documentElement.hasAttribute('data-standalone'); }
 // Byte-identical to the static <title> in index.html (app.js must not depend on site.js).
-const SITE_TITLE = 'Stainless Steel Kitchen Equipment | Barro Kitchens by Barro Industries';
+const SITE_TITLE = 'Stainless Steel Kitchen Equipment | Barro Kitchens';
 function showSite() {
   hideSplash();
   _setView('site');

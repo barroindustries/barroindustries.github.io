@@ -530,7 +530,7 @@ else
   # Owner ruling 2026-11-19: the public catalogue has EXACTLY these eight groups, in this order (the configurators of the 17-18 Nov call;
   # the older ids are kept so every #cat-… link still lands), and no product from the excluded fresh-air / gas-line / fire-suppression
   # categories (nor, from the exhaust category, anything but the range hoods: owner rulings 2026-10-21 and 2026-10-28).
-  cat_groups=$(grep -oE '<section class="cat-group" id="cat-[a-z_]+"' "$CAT_PAGE" | sed -E 's/.*id="cat-//; s/"$//' | tr '\n' ' ')
+  cat_groups=$(grep -oE '<section class="cat-group" data-cat="[a-z_]+"' "$CAT_PAGE" | sed -E 's/.*data-cat="//; s/"$//' | tr '\n' ' ')
   if [ "$cat_groups" != "preparation station washing ventilation exhaust cooking storage refrigeration " ]; then
     echo "FAIL: $CAT_PAGE must have exactly the eight public groups (preparation station washing ventilation exhaust cooking storage refrigeration), in that order — found: ${cat_groups:-none}"
     echo "  FIX: scripts/build-catalogue.js (PUBLIC_CATEGORIES) + scripts/public-categories.json, then re-run  node scripts/build-catalogue.js"
@@ -721,7 +721,7 @@ fi
 # options." (the hub and the eleven product pages carry it in their estimate block and in their first FAQ answer) is taken out of the body before the plain
 # words are scanned, so the word appears nowhere else on them; the fresh-air page has no allowance at all. The head (JSON-LD included) is scanned with the
 # full token list. FAIL output carries line numbers only. tests/seo-products.test.mjs pins the rest of their content.
-PRODUCT_PAGES='products/index.html products/stainless-steel-sinks/index.html products/stainless-steel-dish-tables/index.html products/stainless-steel-work-tables/index.html products/commercial-gas-stoves/index.html products/commercial-wok-ranges/index.html products/commercial-griddles-grillers-and-fryers/index.html products/gas-deck-ovens/index.html products/stainless-steel-range-hoods/index.html products/stainless-steel-cabinets/index.html products/stainless-steel-shelving/index.html products/stainless-steel-racks/index.html services/fresh-air-systems/index.html'
+PRODUCT_PAGES='products/index.html products/stainless-steel-sinks/index.html products/stainless-steel-dish-tables/index.html products/stainless-steel-work-tables/index.html products/commercial-gas-stoves/index.html products/commercial-wok-ranges/index.html products/commercial-griddles-grillers-and-fryers/index.html products/gas-deck-ovens/index.html products/stainless-steel-range-hoods/index.html products/stainless-steel-cabinets/index.html products/stainless-steel-shelving/index.html products/stainless-steel-racks/index.html products/pugon-pandesal-oven/index.html products/teppanyaki-grill/index.html products/inasal-charcoal-grill/index.html products/rear-pitch-range-hood/index.html services/fresh-air-systems/index.html'
 prod_fail=0
 prod_body() {  # $1 = page, $2 = its first body line
   # /products/ and its eleven pages (owner ruling 2026-11-19, later): the exact starting-price element (the catalogue's own CAT_FROM_STRIP form) is blanked as well; it is checked

@@ -75,13 +75,13 @@ describe('the homepage shows the three registrations where a visitor sees them w
   });
 
   it('has the badges in the footer, under the address, in the brand block', () => {
-    assert.match(homeFooter, /<div class="foot-brand">\s*<p class="foot-name">Barro Industries OPC<\/p>\s*<p>21 Capricorn St\.[^<]*<\/p>\s*<ul class="regs regs-foot" aria-label="Registrations">/);
+    assert.match(homeFooter, /<div class="foot-brand">\s*<p class="foot-name">Barro Kitchens<\/p>\s*<p>by Barro Industries OPC<br>21 Capricorn St\.[^<]*<\/p>\s*<p>[\s\S]*?<\/p>\s*<ul class="regs regs-foot" aria-label="Registrations">/);
     assert.equal(visibleText(homeLists[2].whole), BADGES.join(' '));
   });
 
-  it('keeps the About sentence exactly as it was', () => {
+  it('keeps the About sentence as it was, led by the brand (owner 2026-11-20)', () => {
     const about = visibleText(homeSite.match(/<section id="about"[\s\S]*?<\/section>/)[0]);
-    assert.ok(about.includes('Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
+    assert.ok(about.includes('Barro Kitchens is the brand of Barro Industries OPC, an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
   });
 });
 
@@ -89,7 +89,7 @@ describe('the /catalogue/ footer carries the same three badges — and only the 
   it('has one list, in the footer\'s brand block, identical to the homepage footer\'s', () => {
     assert.equal(catLists.length, 1);
     assert.equal(catLists[0].cls, 'regs regs-foot');
-    assert.match(catFooter, /<div class="foot-brand">\s*<p class="foot-name">Barro Industries OPC<\/p>\s*<p>21 Capricorn St\.[^<]*<\/p>\s*<ul class="regs regs-foot" aria-label="Registrations">/);
+    assert.match(catFooter, /<div class="foot-brand">\s*<p class="foot-name">Barro Kitchens<\/p>\s*<p>by Barro Industries OPC<br>21 Capricorn St\.[^<]*<\/p>\s*<p>[\s\S]*?<\/p>\s*<ul class="regs regs-foot" aria-label="Registrations">/);
     assert.equal(catLists[0].whole, homeLists[2].whole, 'the two footers differ');
     assert.equal(visibleText(catLists[0].whole), BADGES.join(' '));
   });

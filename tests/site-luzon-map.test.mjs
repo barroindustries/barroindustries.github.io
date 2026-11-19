@@ -344,14 +344,14 @@ describe('No project-count claim (owner, 2026-10-21: "500+ projects" removed, it
   const proof = homeSite.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0];
   const items = [...proof.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(m => visibleText(m[1]));
 
-  it('keeps the four original proof items, 23 years first and End-to-end restored', () => {
-    assert.deepEqual(items.map(t => t.split(' ')[0]), ['23', 'SS304', 'Made', 'End-to-end']);
+  it('has exactly the owner\'s four proof points (2026-11-19), 23 years first', () => {
+    assert.deepEqual(items, ['23 years in business', 'Built by our own team', 'SS304 food grade', '6-month warranty on workmanship']);
   });
 
   it('About keeps the family-business line and the SEC-registered wording, with no project count', () => {
     const t = visibleText(about);
     assert.ok(t.includes('The company began as a family business in Baguio City and La Union.'));
-    assert.ok(t.includes('Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
+    assert.ok(t.includes('Barro Kitchens is the brand of Barro Industries OPC, an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
   });
 
   it('states no number of projects, clients or customers anywhere a visitor or crawler reads', () => {
@@ -416,9 +416,9 @@ describe('How we work: six numbered steps, no durations', () => {
 describe('Warranty & after-sales: the owner\'s two facts, exactly', () => {
   const cards = [...warranty.matchAll(/<article class="wcard[^"]*">([\s\S]*?)<\/article>/g)].map(m => m[1]);
 
-  it('has two cards: the 6-month service warranty and the 12 months of PMS with KitchenShield™', () => {
+  it('has two cards: the 6-month warranty on workmanship and the 12 months of PMS with KitchenShield™', () => {
     assert.equal(cards.length, 2);
-    assert.ok(visibleText(cards[0]).includes('A 6-month service warranty on our equipment and work.'));
+    assert.ok(visibleText(cards[0]).includes('A 6-month warranty on workmanship.'));
     assert.ok(visibleText(cards[1]).includes('Full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™.'));
     assert.match(warranty, /<h2 id="warranty-h">Warranty &amp; after-sales<\/h2>/);
   });
@@ -429,11 +429,11 @@ describe('Warranty & after-sales: the owner\'s two facts, exactly', () => {
     assert.ok(!/\b(lifetime|guarantee[ds]?|parts|labou?r|free|unlimited|replacement|on[- ]site|24\/7|hours?|days?|years?|extended|full coverage)\b/i.test(t), 'a term the owner did not give is in the warranty section');
   });
 
-  it('keeps the ™ on KitchenShield exactly once, and the page has just two marks (the header brand and KitchenShield)', () => {
+  it('keeps the ™ on KitchenShield exactly once, and it is the only mark on the page (the header lockup carries none since 2026-11-20)', () => {
     assert.equal((homeSite.match(/KitchenShield™/g) || []).length, 1);
     assert.equal((homeSite.match(/KitchenShield/g) || []).length, 1);
-    assert.equal((visibleText(homeSite).match(/™/g) || []).length, 2);
-    assert.ok(homeSite.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'));
+    assert.equal((visibleText(homeSite).match(/™/g) || []).length, 1);
+    assert.ok(homeSite.includes('<span class="site-brand-sub">by Barro Industries OPC</span>'));
   });
 
   it('comes after How we work, before About, as two navy cards', () => {

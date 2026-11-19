@@ -3,7 +3,7 @@
  * catalogue-cards.js — the WORDS on the public catalogue cards. Owner rulings 2026-11-19, as set out in "Barro Kitchens – Website Notes (Nov 19, 2026)" (they supersede the
  * earlier "name, one line and feature bullets only" ruling): a card is plain text — its name, an optional product CODE on its own small line, ONE sentence on what the product
  * is for (`desc`), an optional "Standard size" line (`size`), three or four short key specs (`specs`: material, size and the main feature), an optional "Options" line
- * (`options`) — then the price line and the button. No panel gauges, no part lists, no costs, no hype words ("premium", "world-class", "high quality"). Short plain
+ * (`options`) — then the price line and the button. No panel gauges, no part lists, no costs, no hype words. Short plain
  * sentences, millimetres, SS304. A number never carries a thousands comma (1200, not 1,200: the money scan would refuse it). This file holds those words and nothing else:
  * scripts/build-catalogue.js reads it (CARD_COPY, PROJECT_CARDS) and the build REFUSES a card that has no entry here, so a new product forces a deliberate wording.
  *
@@ -61,12 +61,6 @@ const CARD_COPY = Object.freeze({
     specs: ['12 mm griddle plate', 'Grease trough and drawer', 'Same depth and height as the cooking line'],
     options: 'Griddle 600 or 900 mm, fryer with 1 or 2 vats, lava-rock griller',
   },
-  deck_oven: {
-    desc: 'Gas deck oven for bakeries.',
-    size: 'Trays of 40 × 60 cm',
-    specs: ['Gas-fired', 'One to three decks', 'Three or six trays per deck'],
-    options: 'Heavy-duty stand',
-  },
   cabinet: {
     code: 'PS-CBW-900', desc: 'Stainless steel storage cabinet, floor-standing or wall-hung.',
     size: '900 × 350 × 600 mm',
@@ -109,14 +103,14 @@ const CARD_COPY = Object.freeze({
 // before the configurable cards of its group (the three featured hero products). Their starting amounts are in scripts/public-from-prices.json.
 const PROJECT_CARDS = Object.freeze([
   {
-    id: 'station', group: 'station', image: 'site/img/products/render-15-commercial-station-183-cabinet-trash.webp', name: 'Multi-purpose kitchen station', tag: 'Made to order',
+    id: 'station', group: 'station', name: 'Multi-purpose kitchen station', tag: 'Made to order',
     desc: 'Multi-purpose kitchen station built around your layout.',
     size: 'Built to your layout',
     specs: ['SS304 stainless steel', 'Cabinets, drawers, sink and open bays in one run', 'Worktop with backsplash'],
     options: 'Layout, length and modules agreed with you',
   },
   {
-    id: 'exhaust', group: 'exhaust', image: 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
+    id: 'exhaust', group: 'exhaust', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
     desc: 'Exhaust and fresh-air system, designed and installed by our team.',
     size: 'Designed per kitchen',
     specs: ['Exhaust ducting and blowers', 'Fresh-air supply and ceiling diffusers', 'Designed around your hood'],
@@ -126,10 +120,11 @@ const PROJECT_CARDS = Object.freeze([
   // the three featured hero products come FIRST in the Chef Mode group
   {
     id: 'pugon', group: 'cooking', first: true, code: 'BK-PG-1', name: 'Pugon pandesal oven', tag: 'Featured',
-    desc: 'Steel deck oven built for pandesal and everyday bread.',
+    desc: 'Steel oven built for pandesal and everyday bread.',
     size: '4 trays of 40 × 60 cm per deck',
     specs: ['SS304 interior, insulated body', 'H-type burner with needle valve and gauge', 'Counterweighted door that stays where you put it'],
     options: '1 deck (4 trays) or 2 decks (8 trays)',
+    learn: { path: '/products/pugon-pandesal-oven/', about: 'the Pugon pandesal oven' },
   },
   {
     id: 'teppanyaki', group: 'cooking', first: true, code: 'CK-TP-900', name: 'Teppanyaki grill', tag: 'Featured',
@@ -137,6 +132,7 @@ const PROJECT_CARDS = Object.freeze([
     size: '900 × 750 × 850 mm',
     specs: ['12 mm cooking plate', 'Grease trough and drawer', '150 mm backsplash'],
     options: '900 or 1200 mm wide',
+    learn: { path: '/products/teppanyaki-grill/', about: 'the teppanyaki grill' },
   },
   {
     id: 'inasal', group: 'cooking', first: true, code: 'GR-CH-900', name: 'Inasal charcoal grill', tag: 'Featured',
@@ -144,6 +140,7 @@ const PROJECT_CARDS = Object.freeze([
     size: '900 mm long',
     specs: ['5/16 in stainless grill bars', 'Pull-out charcoal bin', 'Stainless frame with adjustable feet'],
     options: '900, 1200 or 1500 mm long',
+    learn: { path: '/products/inasal-charcoal-grill/', about: 'the inasal charcoal grill' },
   },
   {
     id: 'noodle_boiler', group: 'cooking', code: 'CK-NB-6', name: 'Noodle boiler', tag: 'Chef Mode',
