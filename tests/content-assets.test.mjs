@@ -1510,7 +1510,7 @@ describe('downloads: the pictures that only the PDFs use are copyright-marked (o
       for (const n of ['xmpRights:Marked="True"', 'Barro Industries OPC', 'barroindustries.com']) assert.ok(t.includes(n), `${f} lacks ${n}`);
     }
     const lib = read('scripts/downloads/lib.js');
-    assert.ok(/site\/img\/projects\/ispsc\/\$\{n\}\.webp/.test(lib) && /site\/img\/products\//.test(lib), 'the site photographs come from site/img');
+    assert.ok(/site\/img\/projects\/ispsc\/\$\{n\}\.webp/.test(lib) && !/site\/img\/products/.test(lib), 'the site project photographs come from site/img, and no product picture is converted for any PDF (owner 2026-11-20)');
     assert.ok(!/Desktop|Downloads/.test(lib), 'a photograph is taken from outside the repository');
   });
 
@@ -1528,7 +1528,7 @@ describe('the PDF text extractor reads what Chrome writes', () => {
   it('returns the text of every page, in order, with the footer address and the page number last', () => {
     const pages = pdfPages(path.join(ROOT, 'downloads/barro-industries-company-profile.pdf'));
     assert.ok(pages.length >= 10);
-    assert.ok(compact(pages[0]).includes('premiumstainlesssteelkitchensbuilttoorderinmetromanila'), 'the cover headline (inline spans start new text runs, so compare without spaces)');
+    assert.ok(compact(pages[0]).includes('stainlesssteelkitchensbuilttoorderbyourownteam'), 'the cover headline (inline spans start new text runs, so compare without spaces)');
     assert.ok(/Who we are/.test(pages[2]));
     assert.equal(compact('Brilliant\nSteel'), compact('brilliant-steel'));
   });
@@ -1538,9 +1538,9 @@ describe('the PDF text extractor reads what Chrome writes', () => {
 const MAX_BYTES = 8 * 1024 * 1024;
 const DOCS = [
   { key: 'company profile', file: 'downloads/barro-industries-company-profile.pdf', pages: [10, 14], title: 'Company profile | Barro Industries',
-    must: ['Premium stainless-steel kitchens, built to order in Metro Manila.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'hairline', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens', HUB_CONSTRUCTION] },
-  { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [22, 25], title: 'Product catalogue | Barro Industries',
-    must: ['Stainless-steel kitchen equipment, made to order.', 'Preparation table', 'Sink', 'Dish table', 'Stove', 'Wok range', 'Griddle, griller or fryer', 'Gas deck oven', 'Range hood', 'Cabinet', 'Wall shelving', 'Rack', 'Layouts at a glance', 'Ventilation', 'Eleven products you set up yourself', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Default sizes are in millimetres', 'food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline', HUB_CONSTRUCTION] },
+    must: ['Stainless-steel kitchens, built to order by our own team.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'hairline', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens', HUB_CONSTRUCTION] },
+  { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [10, 14], title: 'Product catalogue | Barro Industries',
+    must: ['Stainless-steel kitchen equipment, built to your sizes.', '32 products in 8 groups', 'Featured', 'Standard size', 'Options', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Sizes are in millimetres', 'We serve Luzon', 'food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', '23 years', 'Built by our own team', 'SS304 food grade'] },
   { key: 'portfolio', file: 'downloads/barro-industries-portfolio.pdf', pages: [8, 12], title: 'Portfolio | Barro Industries',
     must: ['Completed kitchens and stainless-steel installations.', 'ISPSC 2026', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026).', 'DMMMSU 2022–2023', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).', 'Restaurant kitchen, Bulacan', 'Shown without the client’s name', 'La Union', 'Bulacan', 'KitchenShield™'] },
 ];
@@ -1645,7 +1645,7 @@ for (const d of DOCS) {
       for (const m of d.must) assert.ok(comp.includes(compact(m)), `the ${d.key} does not say "${m}"`);
     });
 
-    if (d.key !== 'portfolio') {
+    if (d.key === 'company profile') {
       it('says the standard construction on its "Two grades, four finishes" page, as the website\'s FAQ does (owner ruling 2026-10-28; the /products/ hub that said it verbatim is retired), scoped to made-to-order pieces', () => {
         const faq = visibleText(read('faq/index.html'));   // the /products/ hub that said it word for word is retired (owner 2026-11-19): the FAQ says the same facts
         for (const fact of ['1.5 mm (16 gauge) top plate', '1.2 mm bodies and shelving', 'square-tube posts with adjustable bullet feet']) assert.ok(faq.includes(fact), `the website FAQ no longer says what this PDF repeats: ${fact}`);
@@ -1659,87 +1659,121 @@ for (const d of DOCS) {
   });
 }
 
-describe('catalogue PDF: the website\'s products, notes and specifications in full (the owner: product notes and specifications are very important — always show them in full)', { skip: 'SKIPPED 2026-11-19 (owner ruling: catalogue cards are text with feature bullets, no notes or specification lists): scripts/downloads/catalogue.js still parses the old cards (code, size line, notes, specifications) and the committed PDF was not regenerated. OWNER DECISION NEEDED: what the PDF catalogue should show now; then migrate the generator and restore these pins.' }, () => {
-  const dec = (t) => String(t || '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+describe('catalogue PDF: the website\'s products in the website\'s groups and order, text only, no prices (owner rulings 2026-11-19 / 2026-11-20)', () => {
+  const dec = (x) => String(x || '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').trim();
   const page = read('catalogue/index.html');
   const block = page.slice(page.indexOf('<!-- CATALOGUE:START'), page.indexOf('<!-- CATALOGUE:END'));
-  const cards = [...block.matchAll(/<li class="cat-card([^"]*)"([^>]*)>([\s\S]*?)<\/li>(?=\s*(?:<li class="cat-card|<\/ul>))/g)].map((c) => {
-    const body = c[3];
-    const get = (re) => { const m = re.exec(body); return m ? dec(m[1]) : ''; };
-    return { family: (/data-family="([^"]+)"/.exec(c[2]) || [])[1], code: get(/<p class="cat-code[^"]*">([^<]*)<\/p>/), name: get(/<h3>([^<]*)<\/h3>/), meta: get(/<p class="cat-meta">([^<]*)<\/p>/), notes: get(/<p class="cat-notes">([^<]*)<\/p>/), lead: get(/<p class="cat-lead">([^<]*)<\/p>/), specs: [...body.matchAll(/<dt>([^<]*)<\/dt><dd>([^<]*)<\/dd>/g)].map((m) => [dec(m[1]), dec(m[2])]) };
-  });
+  // an independent read of the website cards (the generator has its own parser): the groups in order, each card's name, code, sentence, size, specs and options
+  const groups = [...block.matchAll(/<section class="cat-group" data-cat="([a-z_]+)"[^>]*>([\s\S]*?)<\/section>/g)].map((g) => ({
+    title: dec(/<h2[^>]*>([^<]*)/.exec(g[2])[1]),
+    cards: g[2].split('<li class="cat-card').slice(1).map((b) => {
+      const one = (re) => { const m = re.exec(b); return m ? dec(m[1]) : ''; };
+      return { name: one(/<h3>([^<]*)<\/h3>/), code: one(/<p class="cat-code">([^<]*)</), lead: one(/<p class="cat-lead">([^<]*)</), size: one(/<p class="cat-size"><span>[^<]*<\/span>([^<]*)</), options: one(/<p class="cat-options"><span>[^<]*<\/span>([^<]*)</),
+        specs: [...(/<ul class="cat-feat">([\s\S]*?)<\/ul>/.exec(b) || [, ''])[1].matchAll(/<li>([^<]*)<\/li>/g)].map((m) => dec(m[1])), featured: /cat-tag cat-tag-featured|class="cat-tag[^"]*">Featured</.test(b) };
+    }),
+  }));
   const pdf = path.join(ROOT, 'downloads/barro-industries-catalogue.pdf');
-  const comp = fs.existsSync(pdf) ? compact(pdfPages(pdf).join('\n')) : '';
+  const pages = fs.existsSync(pdf) ? pdfPages(pdf) : [];
+  const comp = compact(pages.join('\n'));
+  const flat = pages.join('\n').replace(/\s+/g, ' ');
+  const ORDER = ['Preparation tables', 'Multi-purpose kitchen stations', 'Sinks and dish tables', 'Range hoods', 'Exhaust and fresh air', 'Chef Mode cooking equipment', 'Storage, racks and trolleys', 'Refrigeration and other equipment'];
 
-  it('reads the website\'s catalogue: eleven configurable products and the fixed equipment', () => {
-    assert.equal(cards.filter((c) => c.family).length, 11);
-    assert.equal(cards.filter((c) => !c.family).length, 14, 'the fixed equipment: 25 cards in all, 11 of them configurable (26 fixed items, 6 families, before the five new families of 2026-10-28 absorbed 12 of them and the Ventilation category was added)');
+  it('reads the website\'s catalogue: eight groups in the owner\'s order and 32 products', () => {
+    assert.deepEqual(groups.map((g) => g.title), ORDER);
+    assert.equal(groups.reduce((a, g) => a + g.cards.length, 0), 32);
+    for (const c of groups.flatMap((g) => g.cards)) assert.ok(c.name && c.lead && c.specs.length >= 3 && c.specs.length <= 4, `${c.name}: a card without its sentence or its 3 to 4 specifications`);
   });
 
-  it('shows the name, description and every option line of each of the eleven configurable products', () => {
-    for (const c of cards.filter((x) => x.family)) {
-      assert.ok(comp.includes(compact(c.name)), `the PDF lacks the product "${c.name}"`);
-      assert.ok(comp.includes(compact(c.lead)), `the PDF lacks the description of ${c.name}`);
-      for (const [k, v] of c.specs) { if (k === 'Size') continue; assert.ok(comp.includes(compact(k)) && comp.includes(compact(v)), `${c.name}: the option "${k}: ${v}" is missing`); }
-    }
-  });
-
-  it('shows the Construction row of each of the eleven configurable products on the product\'s own page — the website card\'s own words, in full, the family\'s construction line at its defaults — between its Size and Material rows', () => {
-    const PFm = require(path.join(ROOT, 'js/product-families.js'));
-    const QFm = require(path.join(ROOT, 'js/qr-families.js'));
-    const pages = fs.existsSync(pdf) ? pdfPages(pdf).map(compact) : [];
-    assert.equal(cards.filter((c) => c.family).length, 11);
-    for (const c of cards.filter((x) => x.family)) {
-      const fam = QFm.families[c.family];
-      const row = c.specs.find(([k]) => k === 'Construction');
-      assert.ok(row, `${c.name}: the website card has no Construction row`);
-      assert.equal(row[1], PFm.constructionLine(fam, PFm.defaultConfig(fam)), `${c.name}: the card's Construction row`);
-      const page = pages.find((p) => p.includes('configurableproduct') && p.includes(compact(c.lead)));
-      assert.ok(page, `the PDF has no page for ${c.name}`);
-      const at = page.indexOf(compact('Construction' + row[1]));
-      assert.ok(at > 0, `${c.name}: the Construction row is not shown in full on its page`);
-      assert.ok(page.indexOf(compact('Size' + 'Made to your')) > 0 && page.indexOf(compact('Size' + 'Made to your')) < at, `${c.name}: Size comes before Construction`);
-      const material = c.specs.find(([k]) => k === 'Material')[1];
-      assert.ok(page.indexOf(compact('Material' + material)) > at, `${c.name}: Material comes after Construction`);
-    }
-  });
-
-  it('shows an option that applies only to some choices WITH its condition, line for line as the website card does — "Fry baskets: 1 / 2 / 3 (Type is Fryer)", "Pre-rinse sink: … (Side is Soiled)" — on the product\'s own page (CONFIGURATOR-FAMILIES-2-SPEC §4.1)', () => {
-    const pages = fs.existsSync(pdf) ? pdfPages(pdf).map(compact) : [];
-    const gated = [];
-    for (const c of cards.filter((x) => x.family)) for (const [k, v] of c.specs) if (/\((Type|Side) is /.test(v)) gated.push([c, k, v]);
-    assert.ok(gated.length >= 3, `the website cards carry ${gated.length} conditional rows (Burners and Fry baskets of the griddle, griller or fryer, the dish table\'s Pre-rinse sink)`);
-    for (const [c, k, v] of gated) {
-      const page = pages.find((p) => p.includes('configurableproduct') && p.includes(compact(c.lead)));
-      assert.ok(page && page.includes(compact(k + v)), `${c.name}: the row "${k}: ${v}" is not shown with its condition on its page`);
-    }
-  });
-
-  it('keeps Construction out of the "You choose" column of the materials table: it is how a piece is built, not something the buyer chooses', () => {
-    const page = (fs.existsSync(pdf) ? pdfPages(pdf) : []).find((p) => compact(p).includes('theelevenconfigurableproductsataglance'));
-    assert.ok(page, 'no materials page');
-    assert.ok(compact(page).includes(compact('sinks, sink position, undershelf, upper shelf, faucet')), 'the sink row of the table');
-    assert.ok(!/,\s*construction\b/i.test(page) && !/^construction\b/im.test(page), 'Construction is listed as a choice');
-  });
-
-  it('shows every fixed item with ITS OWN code, name, size line, notes (in full) and specification lines — checked inside the item\'s own block of the PDF, so a note that two items share cannot hide a change to one of them', () => {
-    const items = cards.filter((x) => !x.family);
-    // each item's block runs from its header (code + name, in the page's own order) to the next item's header
+  it('lists every product of /catalogue/ in the same groups and the same order: the group headings, then each product\'s name in sequence', () => {
     let from = 0;
-    const heads = items.map((c) => { const i = comp.indexOf(compact(c.code + c.name), from); assert.ok(i >= 0, `the PDF lacks ${c.code} ${c.name}, or lists it out of the website's order`); from = i + 1; return i; });
-    items.forEach((c, k) => {
-      const block = comp.slice(heads[k], k + 1 < items.length ? heads[k + 1] : heads[k] + 4000);
-      if (c.meta) assert.ok(block.includes(compact(c.meta)), `${c.code}: the size line "${c.meta}"`);
-      if (c.notes) assert.ok(block.includes(compact(c.notes)), `${c.code}: the notes are not shown in full: "${c.notes}"`);
-      for (const [k2, v] of c.specs) assert.ok(block.includes(compact(k2)) && block.includes(compact(v)), `${c.code}: the specification "${k2}: ${v}"`);
-    });
+    for (const g of groups) {
+      const h = comp.indexOf(compact(g.title), from);
+      assert.ok(h >= 0, `the PDF lacks the group "${g.title}", or has it out of order`);
+      from = h + 1;
+      for (const c of g.cards) {
+        const i = comp.indexOf(compact(c.name + (c.code ? c.code : '') + c.lead), from);
+        assert.ok(i >= 0, `the PDF lacks "${c.name}" (${c.code || 'no code'}) in the group "${g.title}", or lists it out of the website's order`);
+        from = i + 1;
+      }
+    }
   });
 
-  it('shows no product the website\'s catalogue does not list (the codes in the PDF are exactly the catalogue\'s)', () => {
-    const text = fs.existsSync(pdf) ? pdfPages(pdf).join('\n') : '';
-    const inPdf = new Set(text.match(/\b(?:CE|BA|MS|RF|PW|EX|FA|GL|FS)-\d{3}\b/g) || []);
-    const inSite = new Set(cards.filter((c) => !c.family).map((c) => c.code));
-    assert.deepEqual([...inPdf].filter((c) => !inSite.has(c)).sort(), [], 'codes in the PDF that are not on the catalogue page');
-    assert.deepEqual([...inSite].filter((c) => !inPdf.has(c)).sort(), [], 'codes on the catalogue page that the PDF lacks — rebuild with: node scripts/build-downloads.js catalogue');
+  it('shows, inside each product\'s own block, its code, its one sentence, its Standard size, its 3 to 4 key specifications and its Options — exactly the website card\'s words', () => {
+    const all = groups.flatMap((g) => g.cards);
+    let from = 0;
+    const heads = all.map((c) => { const i = comp.indexOf(compact(c.name + (c.code || '') + c.lead), from); from = i + 1; return i; });
+    all.forEach((c, k) => {
+      const blk = comp.slice(heads[k], k + 1 < all.length ? heads[k + 1] : heads[k] + 4000);
+      if (c.code) assert.ok(blk.includes(compact(c.code)), `${c.name}: the code ${c.code}`);
+      if (c.size) assert.ok(blk.includes(compact('Standard size' + c.size)), `${c.name}: Standard size ${c.size}`);
+      for (const s of c.specs) assert.ok(blk.includes(compact(s)), `${c.name}: the specification "${s}"`);
+      if (c.options) assert.ok(blk.includes(compact('Options' + c.options)), `${c.name}: Options ${c.options}`);
+    });
+    assert.ok(all.filter((c) => c.code).length >= 15, 'the product codes of the website cards');
   });
+
+  it('marks exactly the four hero products Featured (Pugon pandesal oven, teppanyaki grill, inasal charcoal grill, rear-pitch range hood), as the website does', () => {
+    const feat = groups.flatMap((g) => g.cards).filter((c) => c.featured).map((c) => c.name).sort();
+    assert.deepEqual(feat, ['Inasal charcoal grill', 'Pugon pandesal oven', 'Range hood', 'Teppanyaki grill']);
+    assert.equal((flat.match(/\bFeatured\b/gi) || []).length >= 4, true);
+    for (const n of feat) assert.ok(compact(pages.join('\n')).includes(compact('Featured' + n)), `${n} is not marked Featured`);
+  });
+
+  it('has no price of any kind: no peso sign or amount, no "From", no "+ VAT" line, no "priced per project", no pricing word', () => {
+    assert.ok(!RE.money.test(flat) && !RE.priceWords.test(flat), 'a price or pricing word');
+    assert.ok(!/\bFrom\s+[\d₱]/.test(flat) && !/\+\s*VAT|\bpriced?\b/i.test(flat), 'a price line');
+    assert.ok(!/priced per project/i.test(comp.replace(/\s/g, ' ')) && !comp.includes('pricedperproject'));
+  });
+
+  it('embeds no product photograph, design image or drawing: the only picture is the 480 x 480 logo (a JPEG), the source has no image but the logo, and no site/img file is named', () => {
+    const raw = fs.readFileSync(pdf, 'latin1');
+    const jpegs = [...raw.matchAll(/\/Subtype\s*\/Image[\s\S]{0,400}?\/Filter\s*\/DCTDecode/g)];
+    const dims = (s) => { const w = /\/Width\s+(\d+)/.exec(s), h = /\/Height\s+(\d+)/.exec(s); return [Number(w && w[1]), Number(h && h[1])]; };
+    assert.equal(jpegs.length, 1, 'a photograph (a JPEG) is embedded: only the logo may be');
+    assert.deepEqual(dims(jpegs[0][0]), [480, 480], 'the one JPEG is not the logo');
+    for (const m of raw.matchAll(/\/Subtype\s*\/Image[\s\S]{0,300}?\/Length/g)) assert.ok(dims(m[0])[0] <= 600, `an image ${dims(m[0]).join(' x ')} px wide is embedded`);
+    const src = read('downloads/src/catalogue.html');
+    assert.deepEqual([...new Set([...src.matchAll(/<img[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]))], ['img/logo.jpg']);
+    assert.ok(!/<svg[^>]*viewBox="(?:20|52) 52/.test(src) && !/class="pv"/.test(src), 'a configurator line drawing');
+    assert.ok(!/Representative image|Illustration|site\/img|render-\d\d|prod-/.test(src), 'a picture caption or a product image name');
+    assert.ok(!/img\/(?:prod|render|own)-/.test(read('scripts/downloads/catalogue.js')), 'the generator names a product picture');
+  });
+
+  it('has no deck oven product (the Pugon pandesal oven is the only bakery oven), no gas deck oven, no panel gauge or part list', () => {
+    assert.ok(!/gas deck oven/i.test(flat), 'the retired gas deck oven');
+    assert.ok(!/deck_oven|\bdeck oven\b[^.]*\b(?:3|three|six|6) trays per deck/i.test(flat));
+    // the only "deck oven" words are the website card\'s own sentence for the Pugon pandesal oven ("Steel deck oven built for pandesal")
+    for (const m of flat.matchAll(/deck oven/gi)) assert.ok(/Steel deck oven built for pandesal/.test(flat.slice(Math.max(0, m.index - 8), m.index + 40)), 'a deck oven outside the Pugon card');
+    assert.ok(!/\d+ gauge|1\.5 mm|1\.2 mm|top plate/i.test(flat), 'a panel gauge or construction line');
+  });
+
+  it('says "6-month warranty on workmanship" (full kitchens: 12 months of preventive maintenance with KitchenShield™), serves Luzon, and carries the four homepage proof points', () => {
+    assert.ok(flat.includes('6-month warranty on workmanship'));
+    assert.ok(!/service warranty/i.test(flat));
+    assert.ok(/12 months of preventive maintenance service \(PMS\) with KitchenShield™/.test(flat));
+    assert.ok(/Luzon/.test(flat) && !/nationwide|across the Philippines|throughout the Philippines/i.test(flat));
+    for (const x of ['23 years', 'in business', 'Built by our own team', 'SS304 food grade']) assert.ok(flat.includes(x), x);
+  });
+
+  it('keeps the kitchen systems (exhaust and fresh air, LPG gas line, fire suppression) and the contact page with the Quezon City address, phone and email', () => {
+    for (const x of ['Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression']) assert.ok(flat.includes(x), x);
+    assert.ok(comp.includes(compact(ADDRESS)) && flat.includes(PHONE) && flat.replace(/ /g, '').includes(EMAIL));
+  });
+});
+
+// ── wording rules for the whole PDF set (owner 2026-11-20): no hype, no "our shop", Luzon, the warranty, no Brilliant Steel ──────────────────────────
+describe('the three PDFs follow the owner\'s wording rules', () => {
+  for (const f of ['company-profile', 'catalogue', 'portfolio']) {
+    it(`${f}: no hype word, no "our shop" / "in-house" / "made in our own shop", no "service warranty", no nationwide claim, and no Brilliant Steel — in the PDF text and in its source`, () => {
+      const text = pdfPages(path.join(ROOT, `downloads/barro-industries-${f}.pdf`)).join('\n').replace(/\s+/g, ' ');
+      const src = visibleText(read(`downloads/src/${f}.html`));
+      for (const t of [text, src]) {
+        assert.ok(!/\b(premium|world[- ]class|top[- ]quality|best[- ]in[- ]class|finest)\b|high[- ]quality/i.test(t), `a hype word: ${(t.match(/\bpremium\b|world[- ]class|top[- ]quality|best[- ]in[- ]class|finest|high[- ]quality/i) || [])[0]}`);
+        assert.ok(!/\bour (?:own )?shop\b|made in our own shop|in-?house (?:fabrication|made)/i.test(t), 'a shop / in-house phrase');
+        assert.ok(!/service warranty|nationwide|across the Philippines|throughout the Philippines/i.test(t), 'an old warranty or area wording');
+        assert.ok(!/brilliant\s*steel/i.test(t));
+      }
+      assert.ok(/Luzon/.test(text) || f === 'portfolio');
+    });
+  }
 });

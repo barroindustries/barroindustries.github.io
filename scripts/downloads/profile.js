@@ -32,7 +32,7 @@ function build() {
   // 1 — cover
   pages.push(L.cover({
     photo: 'ispsc-01.jpg', edition: '2026 edition', kicker: 'Company profile',
-    title: 'Premium <span class="nowrap">stainless-steel</span> kitchens, built to order in Metro Manila.',
+    title: '<span class="nowrap">Stainless-steel</span> kitchens, built to order by our own team.',
     sub: `${CO.legal}, well known as ${CO.brand}. Designed, fabricated, delivered and installed by one team, for restaurants, hotels, schools and government institutions.`,
     footLeft: `<b>23 years</b> in business`, footRight: `<b>${CO.site}</b>`, photoPos: '50% 40%',
   }));
@@ -52,7 +52,7 @@ function build() {
           <li><b>One team, end to end.</b> We design, fabricate, deliver and install, then commission on site.</li>
           <li><b>Made to order.</b> Your exact dimensions, SS304 or SS316, with a standard hairline finish (brushed, mirror or satin on request).</li>
           <li><b>Finished with care.</b> Seams welded and ground smooth, surfaces polished to a professional finish.</li>
-          <li><b>Here after handover.</b> A 6-month service warranty, and 12 months of preventive maintenance with KitchenShield™ on full-kitchen projects.</li>
+          <li><b>Here after handover.</b> A 6-month warranty on workmanship, and 12 months of preventive maintenance with KitchenShield™ on full-kitchen projects.</li>
         </ul>
         <p class="h4 mt3">Companion documents</p>
         <p class="sm mt1"><b>Product catalogue</b><br>${CO.site}/downloads/barro-industries-catalogue.pdf</p>
@@ -65,7 +65,7 @@ function build() {
   pages.push(L.page({ doc: DOC, label: 'Who we are', body: `
     <p class="eyebrow">01 · Who we are</p>
     <h1 class="h1">Who we are</h1>
-    <p class="lead">${CO.legal}, well known as ${CO.brand}, designs, fabricates, delivers and installs premium stainless-steel kitchens from its base in Quezon City, Metro Manila.</p>
+    <p class="lead">${CO.legal}, well known as ${CO.brand}, designs, builds, delivers and installs stainless-steel kitchens from its base in Quezon City, Metro Manila.</p>
     <div class="cols ${SHOW_LEADERSHIP ? 'c32' : ''} gap8 mt3 top">
       <div>
         <p>The company began as a family business in Baguio City and La Union and has been in business for 23 years. Our kitchens have long been known as ${CO.brand}.</p>
@@ -92,7 +92,7 @@ function build() {
     <p class="lead">Excellence · Integrity · People first · Growth. Four values shape how we build and how we work with you.</p>
     <div class="cols c2 gap4 mt3 stretch">
       <div class="card"><div class="num">01</div><div class="h3">Excellence</div><p>Every piece is built to order. Seams are welded and ground smooth, and surfaces are polished to a professional finish.</p></div>
-      <div class="card"><div class="num">02</div><div class="h3">Integrity</div><p>We build to your specifications and tell you plainly what we will deliver: your equipment, your sizes, your grade and finish, and a 6-month service warranty on our equipment and work.</p></div>
+      <div class="card"><div class="num">02</div><div class="h3">Integrity</div><p>We build to your specifications and tell you plainly what we will deliver: your equipment, your sizes, your grade and finish, and a 6-month warranty on workmanship.</p></div>
       <div class="card"><div class="num">03</div><div class="h3">People first</div><p>One team carries your project from the first consultation and site visit to after-sales support. Full-kitchen projects include 12 months of preventive maintenance service with KitchenShield™.</p></div>
       <div class="card"><div class="num">04</div><div class="h3">Growth</div><p>A family business that began in Baguio City and La Union, now a Quezon City manufacturer with projects across Luzon, built on a commitment to long-term growth.</p></div>
     </div>
@@ -104,7 +104,7 @@ function build() {
   pages.push(L.page({ doc: DOC, label: 'What we do', body: `
     <p class="eyebrow">03 · What we do</p>
     <h1 class="h1">What we do</h1>
-    <p class="lead">The same high-quality build runs through every service: seams welded and ground smooth, surfaces polished to a professional finish, and every piece built to order.</p>
+    <p class="lead">The same careful build runs through every service: seams welded and ground smooth, surfaces polished to a professional finish, and every piece built to order.</p>
     <div class="cols c2 gap4 mt3 stretch">
       ${svc('01', 'flame', 'Commercial &amp; commissary kitchen fit-outs', 'Design-build from concept to completion: cooking lines, preparation and washing stations, baking equipment, exhaust hoods and ducting, fresh-air systems, gas lines and fire suppression. One contractor, from drawings to commissioning.')}
       ${svc('02', 'layers', 'Custom stainless &amp; metal fabrication', 'Work tables, sinks, cabinets, shelving and racks in stainless steel, plus railings, gates, structural and sheet-metal work fabricated to your drawing, in stainless or mild steel, for commercial and residential sites.')}

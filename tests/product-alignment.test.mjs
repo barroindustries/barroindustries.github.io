@@ -34,7 +34,7 @@ const STOCK = ['commercial-gas-rice-steamer', 'countertop-gas-charbroiler', 'cou
 const DESIGNS = ['render-03-straight-table-152-two-shelves', 'render-02-straight-table-122-backsplash-shelf', 'render-20-commercial-station-244-four-cabinets', 'render-44-two-bowl-dishwashing-sink', 'render-50-general-utility-sink', 'render-61-rear-pitch-hood-300',
   'render-74-exhaust-and-fresh-air-cutaway', 'render-78-welded-black-iron-grease-duct', 'render-77-duct-fiberglass-insulation', 'render-80-ceiling-fresh-air-diffusers', 'render-20-commercial-station-244-four-cabinets'];
 const IS_DESIGN = (slug) => /^render-\d\d-[a-z0-9-]+$/.test(slug);
-// the two stock files kept on disk ONLY because scripts/downloads/catalogue.js (the PDF builder) still names them (the committed PDF is not regenerated yet): no public page may use them
+// the two stock files still on disk, used by NOTHING now (the PDF catalogue is text only since 2026-11-20 and no longer names them); not deleted, and no public page or PDF may use them
 const KEPT_FOR_PDF = ['stainless-steel-ducting', 'square-louvered-diffusers'];
 
 const walk = (dir, out = []) => { for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) { const rel = path.posix.join(dir, e.name); if (e.isDirectory()) walk(rel, out); else out.push(rel); } return out; };
@@ -62,7 +62,7 @@ describe('the owner\'s designs replace the stock photos', () => {
       assert.equal(webpSize(fs.readFileSync(path.join(ROOT, `site/img/products/${d}.webp`))).width, 1200, d);
       assert.equal(webpSize(fs.readFileSync(path.join(ROOT, `site/img/products/${d}-thumb.webp`))).width, 600, d);
     }
-    for (const k of KEPT_FOR_PDF) assert.ok(/prod-stainless-steel-ducting|prod-square-louvered-diffusers/.test(read('scripts/downloads/catalogue.js')) && read('scripts/downloads/catalogue.js').includes(k), `${k}: kept for the PDF builder, which no longer names it`);
+    for (const k of KEPT_FOR_PDF) assert.ok(!read('scripts/downloads/catalogue.js').includes(k), `${k}: the PDF builder names a stock file`);
   });
 
   it('maps only the four designs a family card shows (preparation table, sink, range hood, cabinet) and gives the two project cards their own image path; every other card has no photo', () => {
