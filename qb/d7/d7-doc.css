@@ -1,0 +1,436 @@
+/* ==============================================================================================================
+   qb/d7/d7-doc.css: the document of a KC-mode quotation in the LIVE quote builder (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md sections 1.2, 3.7, 4.2).   Ported from the D7 prototype's d7/d7-doc.css.
+   Loaded after the page's own <style>, so a tie in specificity goes to this file.   EVERY rule is scoped to body.d7-on, table.d7-cols or a class that only exists in KC mode, so a legacy quote and
+   Brilliance Steel print exactly as before (the one global rule, @page size, says what the page already says: A4 portrait).
+
+   1  The table is ALWAYS seven columns:  # · Photo · Description · Quantity · Unit price · Amount · Actions  (c-no c-ph c-desc c-qty c-up c-amt c-act).
+      The page's print CSS hides the Workforce Copy's prices BY POSITION (columns 5 and 6, quote-builder-v2.html "WORKFORCE COPY"), so the column count must never
+      change.  A Photo column that is switched off keeps its cells, empty, at width 0.  Its old nth-child width rules were written for the old seven
+      columns (# · Description · Qty · Unit · Unit price · Amount · Actions) and out-rank nothing here: every selector below carries more classes.
+        screen        4 · 14 · 40 · 9 · 13 · 15 · 5  = 100          (photo off: 4 · 0 · 54 · 9 · 13 · 15 · 5)
+        print/preview 4 · 14 · 45 · 9 · 13 · 15      = 100          (the Actions column is not printed; its 5 % goes to the Description; photo off: 59)
+        workforce     4 · 14 · 72 · 10                = 100          (Unit price and Amount are not printed; photo off: 86)
+   2  The merged Quantity column (stepper and unit on screen, "1 pc" on paper).
+   3  The D5 block (kc-d classes) on screen, on paper and in the Client preview.
+   4  The Photo cell: a linked photo or a drawing thumbnail.
+   5  The Workforce Copy detail (.wf-only): the full drawing and one table per build part.  No price column exists in it.
+   6  A phone (<= 700 px, screen only): the editing table becomes one card per line.
+   7  Forms Standard: A4 portrait, the header (logo, company lines, the Barro Kitchens tile, QUOTATION, number, date), the Prepared by box, the Download PDF bar, navy #1F3A5F for headings and rules.  (end of file)
+   8  Q66 (Round 5): the Client preview on a phone (screen, max-width 640px): one card per line instead of the sideways-scrolling table.  (end of file)
+   9  The A4 pages the PDF engine renders (794 x 1123 px page boxes in the print look).  (end of file)
+   ============================================================================================================== */
+
+/* ───────── 1. columns ───────── */
+html body.d7-on .items-table.d7-cols{table-layout:fixed;}
+html body.d7-on .items-table.d7-cols th.c-no{width:4%!important;}
+html body.d7-on .items-table.d7-cols th.c-ph{width:14%!important;}
+html body.d7-on .items-table.d7-cols th.c-desc{width:40%!important;}
+html body.d7-on .items-table.d7-cols th.c-qty{width:9%!important;}
+html body.d7-on .items-table.d7-cols th.c-up{width:13%!important;}
+html body.d7-on .items-table.d7-cols th.c-amt{width:15%!important;}
+html body.d7-on .items-table.d7-cols th.c-act{width:5%!important;}
+/* the Photo column switched off: still seven <th>, the column has no width and its cells no padding or border */
+html body.d7-on .items-table.d7-cols.d7-noph th.c-ph{width:0!important;}
+html body.d7-on .items-table.d7-cols.d7-noph th.c-desc{width:54%!important;}
+html body.d7-on .items-table.d7-noph .c-ph,
+html body.d7-on .items-table.d7-cols.d7-noph th.c-ph,
+html body.d7-on .items-table.d7-cols.d7-noph td.c-ph{width:0;padding:0!important;border:0!important;overflow:hidden;font-size:0!important;line-height:0;}
+/* every cell of a line starts at the top: the description is tall and the numbers belong beside its first line */
+html body.d7-on .items-table.d7-cols td.c-no,
+html body.d7-on .items-table.d7-cols td.c-ph,
+html body.d7-on .items-table.d7-cols td.c-desc,
+html body.d7-on .items-table.d7-cols td.c-qty,
+html body.d7-on .items-table.d7-cols td.c-up,
+html body.d7-on .items-table.d7-cols td.c-amt,
+html body.d7-on .items-table.d7-cols td.c-act{vertical-align:top;}
+html body.d7-on .items-table.d7-cols td.c-desc{min-width:0;overflow-wrap:anywhere;}
+html body.d7-on .items-table.d7-cols td.c-up .edit-price{min-width:0;}
+
+/* the Client preview (#qbDocSheet is a clone of this table with the Actions column hidden) and paper: the Actions 5 % goes to the Description */
+html body.d7-on .qb-doc-sheet .items-table.d7-cols th.c-no{width:4%!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols th.c-ph{width:14%!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols th.c-desc{width:45%!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols th.c-qty{width:9%!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols th.c-up{width:13%!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols th.c-amt{width:15%!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols th.c-act{width:0!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols.d7-noph th.c-ph{width:0!important;}
+html body.d7-on .qb-doc-sheet .items-table.d7-cols.d7-noph th.c-desc{width:59%!important;}
+@media print{
+  html body.d7-on .items-table.d7-cols{table-layout:fixed!important;width:100%!important;}
+  html body.d7-on .items-table.d7-cols th.c-no{width:4%!important;}
+  html body.d7-on .items-table.d7-cols th.c-ph{width:14%!important;}
+  html body.d7-on .items-table.d7-cols th.c-desc{width:45%!important;}
+  html body.d7-on .items-table.d7-cols th.c-qty{width:9%!important;}
+  html body.d7-on .items-table.d7-cols th.c-up{width:13%!important;}
+  html body.d7-on .items-table.d7-cols th.c-amt{width:15%!important;}
+  html body.d7-on .items-table.d7-cols th.c-act{width:0!important;}
+  html body.d7-on .items-table.d7-cols.d7-noph th.c-ph{width:0!important;}
+  html body.d7-on .items-table.d7-cols.d7-noph th.c-desc{width:59%!important;}
+  /* the old print rule "td:nth-child(2){width:46%}" would otherwise reach the Photo cell and the second cell of every nested table */
+  html body.d7-on .items-table.d7-cols td.c-ph,
+  html body.d7-on .items-table.d7-cols td.c-desc,
+  html body.d7-on .items-table.d7-cols td.c-qty{width:auto!important;}
+  html body.d7-on .items-table.d7-cols td{font-size:8.5pt;}
+}
+
+/* the Workforce Copy (body.body-workforce is set only while printing it): the old rules above this block in the copy hide Unit price and Amount (columns 5 and 6) and
+   set widths for the OLD columns; these set the D7 ones.  Seven <th> stay in the DOM, so the hiding by position still hits the two price columns. */
+html body.d7-on.body-workforce .items-table.d7-cols th.c-no{width:4%!important;}
+html body.d7-on.body-workforce .items-table.d7-cols th.c-ph{width:14%!important;}
+html body.d7-on.body-workforce .items-table.d7-cols th.c-desc{width:72%!important;}
+html body.d7-on.body-workforce .items-table.d7-cols th.c-qty{width:10%!important;}
+html body.d7-on.body-workforce .items-table.d7-cols.d7-noph th.c-ph{width:0!important;}
+html body.d7-on.body-workforce .items-table.d7-cols.d7-noph th.c-desc{width:86%!important;}
+/* belt and braces, by class as well as by position: nothing priced is shown in the crew copy */
+html body.d7-on.body-workforce .items-table.d7-cols th.c-up,
+html body.d7-on.body-workforce .items-table.d7-cols td.c-up,
+html body.d7-on.body-workforce .items-table.d7-cols th.c-amt,
+html body.d7-on.body-workforce .items-table.d7-cols td.c-amt{display:none!important;}
+/* two more places the old crew copy let a peso figure through: the standard lead-time footnote ("per 20k pesos of materials ... priority order (+2%)") under the Timeline, and
+   the "Delivery & Installation: ₱x" fee line (the fee paragraph is the bold one without the FOC green; the delivery method and the preparer's notes stay) */
+html body.d7-on.body-workforce #timelineSummary .pay-note{display:none!important;}
+html body.d7-on.body-workforce #diPrint p[style*="font-weight:700"]:not([style*="1f8f4e"]){display:none!important;}
+
+/* ───────── 2. the merged Quantity column ───────── */
+html body.d7-on .items-table.d7-cols td.c-qty{text-align:center;}
+/* the header word is wider than a 9 % column on a small table: keep it on one line, centred over the stepper, with less side padding */
+html body.d7-on .items-table.d7-cols th.c-qty{text-align:center;white-space:nowrap;letter-spacing:.2px;padding-left:2px!important;padding-right:2px!important;}
+@media print{
+  html body.d7-on .items-table.d7-cols th.c-qty{font-size:7.5pt;}
+}
+html body.d7-on .items-table .d7-qty{display:flex;flex-direction:column;align-items:center;gap:4px;}
+html body.d7-on .items-table .d7-qty .qty-stepper{justify-content:center;}
+html body.d7-on .items-table .d7-qty .cell-unit{width:55px;max-width:100%;text-align:center;}
+html body.d7-on .items-table.d7-cols td.c-qty > .print-only{font-weight:600;white-space:nowrap;text-align:center;}
+
+/* ───────── 3. the D5 block ───────── */
+.d7-blk{min-width:0;font-size:12px;line-height:1.4;color:var(--text,#1A1F2E);overflow-wrap:anywhere;text-align:left;}
+.d7-blk .kc-d-code{font-size:9.5px;font-weight:600;letter-spacing:.4px;line-height:1.25;margin-bottom:1px;color:#8a8a8a;}   /* Addendum 2 B2: the item code, small and grey, no column of its own */
+.d7-blk .kc-d-mat{font-size:10.5px;font-weight:700;letter-spacing:.5px;color:var(--mid-blue,#2E5F8A);}
+.d7-blk .kc-d-title{font-size:14px;font-weight:800;line-height:1.3;margin-top:1px;color:var(--text,#1A1F2E);}
+.d7-blk .kc-d-sub{font-size:12px;line-height:1.4;margin-top:1px;color:var(--gray-dark,#6B7280);}
+.d7-blk .kc-d-row{font-size:11.5px;line-height:1.4;margin-top:3px;color:var(--text,#1A1F2E);}
+.d7-blk .kc-d-row > b{color:var(--dark-blue,#1E3A5F);}
+.d7-blk .kc-d-para{text-align:left;}
+.d7-screen{min-width:0;}
+.d7-screen .d7-blk{padding:2px 0 4px;}
+@media print{
+  .d7-blk{font-size:8.5pt;line-height:1.35;color:#000;}
+  .d7-blk .kc-d-code{font-size:6.5pt;letter-spacing:.3px;color:#808080;}
+  .d7-blk .kc-d-mat{font-size:7.5pt;letter-spacing:.5px;color:#1F3A5F;}   /* Forms Standard navy (was a shade off) */
+  .d7-blk .kc-d-title{font-size:10pt;color:#000;}
+  .d7-blk .kc-d-sub{font-size:8.5pt;color:#333;}
+  .d7-blk .kc-d-row{font-size:8.5pt;margin-top:2px;color:#000;}
+  .d7-blk .kc-d-row > b{color:#1F3A5F;}
+}
+
+/* ───────── 4. the Photo cell ───────── */
+.d7-thumb{box-sizing:border-box;max-width:100%;color:var(--dark-blue,#1E3A5F);background:#fff;border:1px solid var(--gray-mid,#DDE2EC);border-radius:5px;padding:3px;overflow:hidden;}
+.d7-thumb svg,.d7-thumb img{display:block;width:100%;height:auto;max-height:132px;max-width:100%;}
+.d7-thumb img{object-fit:contain;}
+.d7-nodraw{display:grid;place-items:center;min-height:56px;font-size:11px;font-weight:700;color:var(--gray-dark,#6B7280);background:var(--gray-light,#F5F6FA);border:1px dashed var(--gray-mid,#DDE2EC);text-align:center;}
+@media print{
+  .d7-thumb{border:none;padding:0;border-radius:0;color:#1E3A5F;}
+  .d7-thumb svg,.d7-thumb img{max-height:30mm;}
+}
+
+/* ───────── 5. the Workforce Copy detail ───────── */
+body.d7-on .wf-only{display:none;}
+body.body-workforce .wf-only{display:block!important;}
+html body.d7-on .qb-doc-sheet .wf-only{display:none!important;}   /* the Client preview never shows the crew detail */
+.d7-wf{margin-top:6px;padding-top:5px;border-top:1px dashed #9aa5b8;min-width:0;}
+.d7-wf-h{margin:6px 0 2px;font-size:7.5pt;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--dark-blue,#1E3A5F);}
+.d7-wf-draw{box-sizing:border-box;color:var(--dark-blue,#1E3A5F);background:#fff;border:1px solid #cdd5e2;border-radius:4px;padding:4px;overflow:hidden;}
+.d7-wf-draw svg{display:block;width:100%;height:auto;max-height:95mm;}
+.d7-wf-part{margin:4px 0 5px;break-inside:avoid;page-break-inside:avoid;}
+.d7-wf-pl{font-size:8pt;font-weight:700;color:#000;}
+.d7-wf-pt{font-size:8pt;line-height:1.35;color:#333;}
+/* one small table per part: material, quantity (2 decimals), unit.  The table rules of the items table (td padding, borders, "td:nth-child(2){width:46%}" in print, the phone td size) are reset here. */
+table.d7-wf-t{width:100%;margin:1px 0 0;border-collapse:collapse;table-layout:auto;}
+html body .items-table table.d7-wf-t td{width:auto!important;padding:1px 6px 1px 0!important;border:none!important;border-bottom:.5px dotted #b8c1d1!important;font-size:8pt!important;line-height:1.3;background:transparent!important;vertical-align:baseline;color:#000;}
+html body .items-table table.d7-wf-t td.m{width:100%!important;}
+html body .items-table table.d7-wf-t td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+html body .items-table table.d7-wf-t td.u{white-space:nowrap;color:#444;padding-right:0!important;}
+html body .items-table table.d7-wf-t tr:hover td{background:transparent!important;}
+@media print{
+  .d7-wf-draw svg{max-height:90mm;}
+}
+
+/* ───────── 6. a phone ───────── */
+@media (max-width:700px){
+  .d7-thumb svg,.d7-thumb img{max-height:110px;}
+  .d7-blk{font-size:13px;}
+  .d7-blk .kc-d-row{font-size:12px;}
+}
+/* The EDITING table on a phone (screen only; paper and the Client preview stay a table): each line is a card, so Quantity, Unit price and Amount are not
+   a swipe away.  The DOM is unchanged: still seven cells per line (c-no c-ph c-desc c-qty c-up c-amt c-act) in the same order, so nothing that finds a
+   cell by position or class is affected, and no print rule is touched (this is @media screen).  Each card: number · photo · actions on the first row,
+   the description across the full width, then Quantity · Unit price · Amount.  A phone prints through @media print, which none of this reaches. */
+@media screen and (max-width:700px){
+  html body.d7-on #internalWorkspace .items-table.d7-cols{display:block;min-width:0;width:100%;table-layout:auto;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols thead{display:none;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols tbody{display:block;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols tbody > tr{display:block;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols tbody > tr > td{display:block;width:auto!important;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols tbody > tr.subtotal-row > td.no-print{display:none;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols tbody > tr.item-row{
+    display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"no ph ph ph ph ph" "desc desc desc desc desc desc" "qty qty up up amt amt" "act act act act act act";
+    column-gap:8px;row-gap:4px;padding:8px 0 10px;border-bottom:2px solid var(--gray-mid,#DDE2EC);align-items:start;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-ph .d7-thumb{max-width:150px;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols tbody > tr.item-row > td{border:none;padding:0!important;min-width:0;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-no{grid-area:no;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols tbody > tr.item-row > td.c-no{padding-top:4px!important;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-ph{grid-area:ph;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-act{grid-area:act;justify-self:end;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-act .row-actions{justify-content:flex-end;flex-wrap:nowrap;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-desc{grid-area:desc;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-qty{grid-area:qty;text-align:left;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-up{grid-area:up;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-amt{grid-area:amt;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-qty::before,
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-up::before,
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-amt::before{display:block;margin-bottom:2px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--gray-dark,#6B7280);}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-qty::before{content:"Quantity";}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-up::before{content:"Unit price";}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-amt::before{content:"Amount";}
+  html body.d7-on #internalWorkspace .items-table.d7-cols .d7-qty{align-items:flex-start;}
+  html body.d7-on #internalWorkspace .items-table.d7-cols td.c-amt{font-size:13px!important;}
+  html body.d7-on #internalWorkspace .items-table.d7-noph td.c-ph{display:none;}
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   R5 (owner, 2026-11-19; Addendum 1 A5 and the header ruling): the Forms Standard for the KC quotation, and the phone cards of the Client preview (Q66).  Everything below is KC only: it is scoped to
+   body.d7-on or to elements that exist only for a KC quote, so Brilliance Steel and a quote "as issued" are untouched.  The literal navy #1F3A5F is used on purpose (the Forms Standard colour;
+   tests/kc-live.test.mjs reads it).
+   7  Forms Standard: A4 portrait, the header, the Prepared by box, the Download PDF bar, navy for headings and rules
+   8  Q66: the Client preview on a phone (screen, max-width 640px): one card per line.  Paper, desktop and the A4 pages never see it.
+   9  The A4 pages the PDF engine renders (explicit 794 x 1123 px page boxes): the print look, whatever the width of the phone they are made on.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ───────── 7. Forms Standard ───────── */
+/* A4, portrait.  The page's own print CSS says the same and holds the margins; this states it again for the KC quotation (pinned by tests/kc-live.test.mjs) */
+@page{size:A4 portrait;}
+
+/* the header: the horizontal logo top left with the company lines UNDER it; top right the Barro Kitchens tile (Barro Kitchens quotes only), QUOTATION, the quote number as it is, the date.
+   #lhPrintHeader is the print header and the Client preview clones it. */
+.d7-lh{--d7-logo-h:64px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin:0 0 8px;padding:0 0 8px;border-bottom:2px solid #1F3A5F;page-break-inside:avoid;break-inside:avoid;}
+.d7-lh-id{flex:1 1 auto;min-width:0;}
+/* Barro Kitchens quote: the brand mark and name lead; "By Barro Industries OPC" is the legal company line (owner 2026-11-20) */
+.d7-lh-brand{display:flex;align-items:center;gap:10px;}
+.d7-lh-bkmark{display:block;width:var(--d7-logo-h);height:var(--d7-logo-h);border-radius:4px;flex:0 0 auto;}
+.d7-lh-brandname{font-size:20px;font-weight:900;letter-spacing:1.5px;line-height:1.1;color:#1F3A5F;}
+.d7-lh-legal{margin-top:2px;font-size:11px;font-weight:700;color:#444;}
+/* the PNG carries transparent margins (about 8.6 % left, 19.5 % top, 20 % bottom of its box): the negative margins, in units of the logo height, put the visible mark on the left edge and its top level with QUOTATION */
+.d7-lh-logo{display:block;height:var(--d7-logo-h);width:auto;max-width:none;margin:calc(var(--d7-logo-h) * -0.19) 0 calc(var(--d7-logo-h) * -0.19) calc(var(--d7-logo-h) * -0.258);}
+.d7-lh-co{margin-top:5px;font-size:10.5px;line-height:1.5;color:#444;}
+.d7-lh-name{font-weight:800;color:#1F3A5F;}
+.d7-lh-line{overflow-wrap:anywhere;}
+.d7-lh-doc{flex:0 0 auto;text-align:right;}
+.d7-lh-tile{display:block;height:40px;width:auto;margin:0 0 6px auto;}
+.d7-lh-title{font-size:20px;font-weight:900;letter-spacing:1px;line-height:1.1;color:#1F3A5F;}
+.d7-lh-no{margin-top:4px;font-size:14px;font-weight:700;color:#222;}
+.d7-lh-date{margin-top:2px;font-size:12px;color:#444;}
+@media print{
+  .d7-lh{--d7-logo-h:20mm;gap:10mm;margin-bottom:3mm;padding-bottom:3mm;}
+  .d7-lh-co{margin-top:1.5mm;font-size:8pt;line-height:1.45;}
+  .d7-lh-tile{height:11mm;margin-bottom:1.5mm;}
+  .d7-lh--bk{--d7-logo-h:16mm;}
+  .d7-lh-brandname{font-size:15pt;}
+  .d7-lh-legal{font-size:8.5pt;}
+  .d7-lh-title{font-size:16pt;}
+  .d7-lh-no{font-size:11pt;}
+  .d7-lh-date{font-size:9.5pt;}
+}
+
+/* the signature row is today's (Conforme, Reviewed and Approved by): a KC quote adds one box to it, Prepared by (the salesperson), as its first box, in the same look.  Three boxes on a row; a phone stacks them. */
+html body.d7-on .sig-row.d7-sig3{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;}
+html body.d7-on .sig-row .d7-sig-prep .sig-name{min-height:19px;}
+
+/* Download PDF: the button in the Client Data bar, the top bar and phone menu button (relabelled by D7.doc.sync), and a bar above the Client preview */
+.d7-dl{white-space:nowrap;}
+.d7-dl.d7-dl-busy{opacity:.6;cursor:progress;}
+#d7DocBar{display:none;}
+.d7-docbar-name{font-size:12px;font-weight:700;color:#1F3A5F;overflow-wrap:anywhere;}
+.d7-docbar-hint{font-size:11px;color:var(--gray-dark,#6B7280);}
+@media screen{
+  html body.d7-on.body-client-view.client-previewing #d7DocBar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;max-width:920px;margin:18px auto -6px;padding:10px 14px;background:#fff;border-radius:10px;box-shadow:0 3px 22px rgba(0, 0, 0, .16);}
+}
+@media print{#d7DocBar,.d7-dl{display:none!important;}}
+
+/* navy #1F3A5F for headings and rules: on paper (the live DOM prints) and in the Client preview (a clone on screen).  The page's own rules say #1E3A5F, a shade off. */
+@media print{
+  html body.d7-on .sec-title{color:#1F3A5F;border-bottom-color:#1F3A5F;}
+  html body.d7-on th{background:#1F3A5F!important;}
+  html body.d7-on .cat-row td{color:#1F3A5F!important;}
+  html body.d7-on .terms-block h4{color:#1F3A5F;}
+  html body.d7-on .print-footer{border-top-color:#1F3A5F;}
+  html body.d7-on .pf-thanks,
+  html body.d7-on .pf-badge{color:#1F3A5F;}
+  html body.d7-on .std-hdr{border-bottom-color:#1F3A5F;}
+  html body.d7-on .std-title,
+  html body.d7-on .std-block h4{color:#1F3A5F;}
+  html body.d7-on .photo-annex-hdr{border-bottom-color:#1F3A5F;}
+  html body.d7-on .photo-annex-title,
+  html body.d7-on .photo-annex-label{color:#1F3A5F;}
+  html body.d7-on .summary-strip{color:#1F3A5F;}
+  html body.d7-on .totals-tbl tr.grand td{border-top-color:#1F3A5F;}
+}
+html body.d7-on .qb-doc-sheet .sec-title{color:#1F3A5F;border-bottom:1.5px solid #1F3A5F;}
+html body.d7-on .qb-doc-sheet th{background:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .cat-row td{color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .terms-block h4{color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .print-footer{border-top-color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .pf-thanks,
+html body.d7-on .qb-doc-sheet .pf-badge{color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .std-hdr{border-bottom-color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .std-title,
+html body.d7-on .qb-doc-sheet .std-block h4{color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .photo-annex-hdr{border-bottom-color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .photo-annex-title,
+html body.d7-on .qb-doc-sheet .photo-annex-label{color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .summary-strip{color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .totals-tbl tr.grand td{border-top-color:#1F3A5F;}
+html body.d7-on .qb-doc-sheet .d7-blk .kc-d-mat,
+html body.d7-on .qb-doc-sheet .d7-blk .kc-d-row > b{color:#1F3A5F;}
+
+/* ───────── 8. Q66: the Client preview on a phone ─────────
+   At 640px and below, on screen only, the preview (#qbDocSheet, the read-only clone) stops being a table: one card per line, the number and the photo on top, the description block across the
+   full width, then Quantity / Unit price / Amount side by side.  Nothing scrolls sideways.  DOM unchanged (the same seven cells in the same order), so this is CSS only, and it lives
+   in @media screen: paper keeps the exact A4 table of section 1, and so does every screen wider than 640px. */
+@media screen and (max-width:640px){
+  /* the header: logo and the QUOTATION block (with the Barro Kitchens tile above it) on one row, the company lines under them; the signature boxes stack.  The A4 pages of the PDF (section 9) never take any of this. */
+  .d7-lh{--d7-logo-h:48px;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"logo doc" "co co";gap:8px 12px;}
+  .d7-lh-id{display:contents;}
+  .d7-lh-logo,.d7-lh-brand{grid-area:logo;}
+  .d7-lh-brandname{font-size:16px;}
+  .d7-lh-co{grid-area:co;margin-top:0;}
+  .d7-lh-doc{grid-area:doc;}
+  html body.d7-on .sig-row.d7-sig3{grid-template-columns:minmax(0,1fr);gap:14px;}
+  html body.d7-on #d7DocBar .d7-dl,
+  html body.d7-on #clientFormBar .d7-dl{min-height:44px;flex:1 1 100%;justify-content:center;}
+
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols{display:block;width:100%!important;min-width:0!important;table-layout:auto!important;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols thead{display:none;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody{display:block;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr{display:block;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr > td{display:block;width:auto!important;min-width:0;}
+  /* a section heading and a subtotal stay full-width bars */
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr.cat-row > td{margin:14px 0 8px;padding:7px 10px!important;border-radius:6px;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr.subtotal-row > td{padding:6px 4px!important;text-align:right;}
+  /* an options quote: each option's Subtotal -> TOTAL ladder is a label and an amount on one bar (the bar, not the two cells, carries the colour and the rules) */
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr.opt-sub-row{display:flex;justify-content:space-between;gap:10px;background:#f7f9ff;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr.opt-grand-row{background:#e9f0fb;border-top:1px solid #1F3A5F;border-bottom:2px solid #1F3A5F;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr.opt-sub-row > td{padding:4px 6px!important;background:transparent!important;border:none!important;}
+  /* the card */
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr.item-row{
+    display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-areas:"no no ph ph ph ph" "desc desc desc desc desc desc" "qty qty up up amt amt";
+    column-gap:8px;row-gap:8px;margin:0 0 12px;padding:12px;border:1px solid #D6DDE8;border-radius:10px;background:#fff;align-items:start;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols.d7-noph tbody > tr.item-row{grid-template-areas:"no no no no no no" "desc desc desc desc desc desc" "qty qty up up amt amt";}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols.d7-noph td.c-ph{display:none;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols tbody > tr.item-row > td{padding:0!important;border:none!important;background:transparent!important;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-no{grid-area:no;text-align:left!important;font-size:11px!important;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:#1F3A5F!important;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-no::before{content:"Item ";}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-ph{grid-area:ph;justify-self:end;max-width:100%;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-ph .d7-thumb{max-width:100%;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-desc{grid-area:desc;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-qty{grid-area:qty;text-align:left!important;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-up{grid-area:up;text-align:left!important;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-amt{grid-area:amt;text-align:left!important;font-size:14px!important;font-weight:700!important;color:#1F3A5F;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-qty,
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-up,
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-amt{padding-top:8px!important;border-top:1px solid #D6DDE8!important;overflow-wrap:anywhere;}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-qty::before,
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-up::before,
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-amt::before{display:block;margin-bottom:2px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--gray-dark,#6B7280);}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-qty::before{content:"Quantity";}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-up::before{content:"Unit price";}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-amt::before{content:"Amount";}
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-qty > .print-only{text-align:left;white-space:normal;overflow-wrap:anywhere;}   /* the table's nowrap would let a long unit push the card wide */
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .items-table.d7-cols td.c-act{display:none!important;}
+  /* the totals are a block of the document here, not the editing table's sticky bar (it would sit on top of the cards) */
+  html body.d7-on .qb-doc-sheet:not(.d7-a4-body) .totals-box{position:static;box-shadow:none;padding:0;margin-top:10px;}
+}
+
+/* ───────── 9. The A4 pages of the PDF ─────────
+   D7.doc.downloadPdf() (d7-doc.js) clones the document from the Client preview, cuts it into units (a row of the items table, a block of the terms ...) and packs them onto page boxes; the PDF engine
+   (js/forms-pdf.js, window.FormsPdf.download) renders the container.  One .d7-a4-doc (off screen, but laid out) holds one .d7-a4-page per page, abutting, each exactly 794 x 1123 px (A4 at 96 dpi): the body
+   box is the print margins (10 mm sides, 11 mm top), the foot carries the running line and "Page n of N".
+   The body is also a .qb-doc-sheet, so the preview's own rules (the read-only look: inputs flattened, no-print hidden) apply, and the rules below set the PRINT look on top, in the units of the page's
+   print CSS.  They are written for every property that a phone-width media query of the page would change (cell padding and size, the terms grid, the signature row, the totals box), so the pages are the same
+   on a phone as on a desktop; the Q66 phone cards (section 8) exclude .d7-a4-body.  The measure and the render must see the same rules: the flow the units are measured in is a .d7-a4-body of the same width. */
+.d7-a4-doc{position:absolute;left:-10000px;top:0;width:794px;margin:0;padding:0;background:#fff;pointer-events:none;}
+.d7-a4-page{position:relative;box-sizing:border-box;width:794px;height:1123px;margin:0;padding:0;overflow:hidden;background:#fff;color:#000;}
+html body.d7-on .d7-a4-doc .qb-doc-sheet.d7-a4-body{box-sizing:border-box;max-width:none;margin:0;padding:0;border:none;border-radius:0;box-shadow:none;background:transparent;color:#000;font-size:9pt;line-height:1.35;}
+html body.d7-on .d7-a4-page > .d7-a4-body{position:absolute;left:38px;top:42px;width:718px;height:1031px;overflow:hidden;}
+html body.d7-on .d7-a4-doc > .d7-a4-flow{position:relative;width:718px;height:auto;overflow:visible;}
+.d7-a4-foot{position:absolute;left:38px;right:38px;bottom:18px;display:flex;justify-content:space-between;gap:12px;padding-top:4px;border-top:.5px solid #ddd;font-size:7pt;line-height:1.2;color:#888;}
+.d7-a4-run{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.d7-a4-pg{flex:0 0 auto;white-space:nowrap;}
+
+/* the header: the print values of section 7, and the desktop layout (the phone grid of section 8 is for screens only) */
+html body.d7-on .d7-a4-body .d7-lh{--d7-logo-h:20mm;display:flex;grid-template-columns:none;gap:10mm;margin:0 0 3mm;padding:0 0 3mm;border-bottom:2px solid #1F3A5F;}
+html body.d7-on .d7-a4-body .d7-lh-id{display:block;}
+html body.d7-on .d7-a4-body .d7-lh-co{margin-top:1.5mm;font-size:8pt;line-height:1.45;}
+html body.d7-on .d7-a4-body .d7-lh-tile{height:11mm;margin-bottom:1.5mm;}
+html body.d7-on .d7-a4-body .d7-lh--bk{--d7-logo-h:16mm;}
+html body.d7-on .d7-a4-body .d7-lh-brandname{font-size:15pt;}
+html body.d7-on .d7-a4-body .d7-lh-legal{font-size:8.5pt;}
+html body.d7-on .d7-a4-body .d7-lh-title{font-size:16pt;}
+html body.d7-on .d7-a4-body .d7-lh-no{font-size:11pt;}
+html body.d7-on .d7-a4-body .d7-lh-date{font-size:9.5pt;}
+
+/* sections, headings, bill-to, notes */
+html body.d7-on .d7-a4-body .section{box-shadow:none;border:none;border-bottom:1px solid #e3e7ef;border-radius:0;margin:0 0 6px;padding:3px 0 6px;background:transparent;}
+html body.d7-on .d7-a4-body .section:last-child{border-bottom:1px solid #e3e7ef;}
+html body.d7-on .d7-a4-body .sec-title{font-size:8.5pt;color:#1F3A5F;border-bottom:1.5px solid #1F3A5F;margin-bottom:5px;padding-bottom:2px;letter-spacing:.6px;}
+html body.d7-on .d7-a4-body .bill-strip{background:#F5F6FA;border:1px solid #DDE2EC;border-radius:5px;margin-bottom:8px;padding:5px 9px;font-size:8.5pt;line-height:1.4;}
+
+/* the items table: the print cell sizes (the page's phone rule would make every cell 11px with 5px padding), every row kind by its own full selector */
+html body.d7-on .d7-a4-body .items-table{table-layout:fixed;width:100%;min-width:0;}
+html body.d7-on .d7-a4-body .items-table > thead > tr > th{padding:3px 6px!important;font-size:8pt!important;background:#1F3A5F!important;color:#fff!important;}
+html body.d7-on .d7-a4-body .items-table > tbody > tr > td{padding:2.5px 6px!important;font-size:8.5pt!important;}
+html body.d7-on .d7-a4-body .items-table > tbody > tr.cat-row > td{padding:2.5px 6px!important;font-size:7.5pt!important;background:#D6E4F0!important;color:#1F3A5F!important;font-weight:700;}
+html body.d7-on .d7-a4-body .items-table > tbody > tr.subtotal-row > td{padding:2.5px 6px!important;font-size:8pt!important;background:#f0f4ff!important;}
+html body.d7-on .d7-a4-body .items-table > tbody > tr.opt-sub-row > td{padding:2px 6px!important;font-size:8pt!important;background:#F7F9FF!important;}
+html body.d7-on .d7-a4-body .items-table > tbody > tr.opt-grand-row > td{padding:3.5px 6px!important;font-size:9.5pt!important;background:#E9F0FB!important;}
+html body.d7-on .d7-a4-body .items-table th.c-qty{font-size:7.5pt!important;}
+
+/* the line block and the Photo cell: the print look */
+html body.d7-on .d7-a4-body .d7-blk{font-size:8.5pt;line-height:1.35;color:#000;}
+html body.d7-on .d7-a4-body .d7-blk .kc-d-code{font-size:6.5pt;letter-spacing:.3px;color:#808080;}
+html body.d7-on .d7-a4-body .d7-blk .kc-d-mat{font-size:7.5pt;letter-spacing:.5px;color:#1F3A5F;}
+html body.d7-on .d7-a4-body .d7-blk .kc-d-title{font-size:10pt;color:#000;}
+html body.d7-on .d7-a4-body .d7-blk .kc-d-sub{font-size:8.5pt;color:#333;}
+html body.d7-on .d7-a4-body .d7-blk .kc-d-row{font-size:8.5pt;margin-top:2px;color:#000;}
+html body.d7-on .d7-a4-body .d7-blk .kc-d-row > b{color:#1F3A5F;}
+html body.d7-on .d7-a4-body .d7-thumb{border:none;padding:0;border-radius:0;color:#1F3A5F;}
+html body.d7-on .d7-a4-body .d7-thumb svg,
+html body.d7-on .d7-a4-body .d7-thumb img{max-height:30mm;}
+
+/* the totals: a block of the document (the phone's sticky bar is for the editing table), the print sizes */
+html body.d7-on .d7-a4-body .totals-box{display:flex;justify-content:flex-end;position:static;box-shadow:none;padding:0;margin-top:10px;background:transparent;}
+html body.d7-on .d7-a4-body .totals-tbl{min-width:0;width:48%;margin-left:auto;}
+html body.d7-on .d7-a4-body .totals-tbl td{font-size:9pt!important;padding:2.5px 8px!important;}
+html body.d7-on .d7-a4-body .totals-tbl tr.grand td{font-size:10.5pt!important;border-top-color:#1F3A5F;}
+html body.d7-on .d7-a4-body .totals-tbl tr.opt-head td{font-size:8pt!important;padding:6px 8px 1px!important;}
+html body.d7-on .d7-a4-body .totals-tbl tr.opt-note td{font-size:7.5pt!important;padding-top:5px!important;}
+html body.d7-on .d7-a4-body .pay-tbl td,
+html body.d7-on .d7-a4-body .pay-tbl th{font-size:8pt!important;padding:2.5px 6px!important;}
+html body.d7-on .d7-a4-body .pay-note{font-size:7.5pt;}
+html body.d7-on .d7-a4-body .summary-strip{font-size:8.5pt;color:#1F3A5F;}
+
+/* the terms: two columns, the print sizes (the phone makes one column and a 40 px heading) */
+html body.d7-on .d7-a4-body .terms-grid{grid-template-columns:1fr 1fr;gap:5px 14px;}
+html body.d7-on .d7-a4-body .terms-block{background:transparent;padding:2px 0;}
+html body.d7-on .d7-a4-body .terms-block.full{grid-column:1 / -1;}
+html body.d7-on .d7-a4-body .terms-block h4{font-size:8pt;min-height:0;color:#1F3A5F;}
+html body.d7-on .d7-a4-body .terms-block p,
+html body.d7-on .d7-a4-body .terms-block li,
+html body.d7-on .d7-a4-body .term-content{font-size:7.8pt;line-height:1.35;}
+
+/* the signature row: today's two boxes with Prepared by first; three boxes on a row, never stacked on a page */
+html body.d7-on .d7-a4-body .sig-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:12px;}
+html body.d7-on .d7-a4-body .sig-row.d7-sig3{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;}
+
+/* the thank-you and company footer of the document, "Our standard" and the photo annex keep the page's own rules (they are written in pt and mm already) */

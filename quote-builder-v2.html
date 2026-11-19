@@ -1255,6 +1255,30 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
   #qbTourCard{left:8px!important;right:8px!important;bottom:8px!important;top:auto!important;
     max-width:none!important;transform:none!important;}
 }
+
+/* ══ KC MODE: the few rules the page itself needs (the kc panel stays closed until the host opens it; things that exist only while the new rules are on). The column widths live in qb/d7/d7-doc.css, the screens in qb/d7/d7-flow.css, the panel in qb/kc/kc-d7.css (loaded by the second loader below). ══ */
+/* D7:E6 — the kc panel and its backdrop stay closed until chunk B's host opens them (kc/kc-d7.css carries the full panel rules) */
+#kcPanel{display:none;}
+#kcPanel.open{display:block;}
+#kcBackdrop{display:none;}
+/* D7:E23 — things that exist only in KC mode (body.d7-on follows d7On(): the quote follows the new rules; never Brilliant Steel, never a quote "as issued") */
+body:not(.d7-on) .d7-only{display:none!important;}
+body.d7-on .d7-legacy{display:none!important;}   /* D7:R4 — the old wording of a text that D7 rewords (Brilliant Steel and a quote "as issued" keep it) */
+.d7-photo-toggle{font-size:11px;font-weight:600;text-transform:none;letter-spacing:normal;color:var(--gray-dark);display:inline-flex;align-items:center;gap:5px;cursor:pointer;}
+.d7-photo-toggle input{width:auto;margin:0;}
+/* KC:L10 — a phone in KC mode (owner quality bar: nothing clipped, no sideways scroll, filing works one-handed). Only while the quote follows the new rules (body.d7-on); the old builder keeps its own layout exactly as it was.
+   Verify & File: the footer's buttons wrap into two columns and File Quotation takes the whole bottom row. Quote Items: the "Lead time" chip sits on its own line (beside the quality chip it was wider than a 360 px screen).
+   Save draft had no background of its own (white label on the white footer): it takes the same dark blue as its neighbours. */
+body.d7-on #verifyModal #saveDraftBtn{background:var(--dark-blue);}
+/* QA — the approval row's reason is a whole sentence (it names the lines and why); the page's label style would print it in capitals, nine lines of shouting on a phone. Sentence case, like the rest of the modal. */
+body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:normal;}
+@media(max-width:640px){
+  body.d7-on #verifyModal .modal-footer{flex-wrap:wrap;justify-content:stretch;gap:8px;padding:12px 14px;}
+  body.d7-on #verifyModal .modal-footer .btn{flex:1 1 calc(50% - 4px);justify-content:center;min-height:44px;text-align:center;line-height:1.2;}
+  body.d7-on #verifyModal #fileBtn{flex:1 1 100%;order:1;}
+  body.d7-on #d7LeadChip{display:block;margin-top:6px;}
+  body.d7-on #d7LeadChip .kc-q-lead{margin-left:0;}
+}
 </style>
 </head>
 <body class="body-client-view doc-details-collapsed">
@@ -1274,7 +1298,7 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
       <!-- Barro Industries = the parent company, for GENERAL FABRICATION
            quotes (railings, gates, structural, sheet metal). -->
       <button id="coBI" onclick="setCompany('BI')">🏗 Barro Industries</button>
-      <button id="coBS" onclick="setCompany('BS')">⚙ Brilliant Steel</button>
+      <button id="coBS" onclick="setCompany('BS')">⚙ Brilliance Steel</button>
     </div>
     <div class="toggle-pills">
       <button id="btnClient" class="active" onclick="setView('client')">📋 Client Data</button>
@@ -1285,7 +1309,7 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
   <div class="topbar-right">
     <button class="btn btn-outline no-print" id="btnHelp" onclick="openHelpModal()" title="Help & guided demo">❓ Help<span class="help-dot" id="helpDot"></span></button>
     <span class="draft-save-chip no-print" id="draftSaveChip"></span>
-    <span class="filed-badge" id="filedBadge">✓ FILED</span>
+    <span class="filed-badge" id="filedBadge" onclick="if(quoteStatus==='pending_approval'&&d7On())D7.h('flow.showApprovalLink')">✓ FILED</span>
     <button class="btn btn-outline" id="btnNew" onclick="clearForm()">🗑 New</button>
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
     <button class="btn btn-outline" id="btnPrint" onclick="doPrint()" title="Save the quotation as a PDF — the file name is the client name + quote number">📄 Save PDF</button>
@@ -1319,7 +1343,7 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
       <div class="mtb-seg">
         <button class="mtb-seg-btn" id="mtbCoBK" onclick="mtbSetCompany('BK')">🍳 Barro Kitchens</button>
         <button class="mtb-seg-btn" id="mtbCoBI" onclick="mtbSetCompany('BI')">🏗 Barro Industries</button>
-        <button class="mtb-seg-btn" id="mtbCoBS" onclick="mtbSetCompany('BS')">⚙ Brilliant Steel</button>
+        <button class="mtb-seg-btn" id="mtbCoBS" onclick="mtbSetCompany('BS')">⚙ Brilliance Steel</button>
       </div>
     </div>
     <div class="mtb-seg-group">
@@ -1332,6 +1356,10 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
     </div>
   </div>
 </div>
+
+<!-- D7:E23 — the two screens of the live port (qb/d7/d7-flow.js fills them: Materials price list, Pricing settings). Direct children of <body>, right under the top bar, so a screen opens under it;
+     body[data-d7-screen] hides .main while one is open. Empty and hidden until KCLive is loaded. -->
+<div id="scrPrices" hidden></div><div id="scrSettings" hidden></div>
 
 <div class="main">
 
@@ -1536,7 +1564,9 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
        the configurator is off (kill switch) or unavailable. -->
   <div class="cfg-chips no-print" id="cfgChips" style="display:none;"></div>
 
-  <!-- Category filter tabs -->
+  <!-- Category filter tabs.
+       D7:E6 (b), adapted for live — these ten buttons ARE the legacy tab row and stay here, so a legacy quote never has this markup rewritten. In KC mode renderCatTabs() (next to filterCat) replaces them with
+       the seven tabs + All (qb/d7/d7-adapter.js draws them, the cards and the catalogue list) and puts these back, from a copy taken at the first render, when the quote is not a KC one. -->
   <div class="cat-tabs" id="catTabs">
     <button class="cat-tab active" onclick="filterCat('all',this)" style="background:var(--dark-blue);color:white;border-color:var(--dark-blue);">All</button>
     <button class="cat-tab" onclick="filterCat('cooking_line',this)" id="tabCooking">🔥 Cooking Line</button>
@@ -1549,6 +1579,9 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
     <button class="cat-tab" onclick="filterCat('fire_suppression',this)" id="tabFire">🧯 Fire Suppression</button>
     <button class="cat-tab" onclick="filterCat('miscellaneous',this)" id="tabMisc">🔧 Miscellaneous</button>
   </div>
+  <!-- D7:E6 — the configurator cards of the active tab, then the catalogue items of the tab (drawn by chunk B's D7.adapter) -->
+  <div id="d7Cards"></div>
+  <div id="d7Catalogue"></div>
 
   <!-- Product search -->
   <div id="productSearchRow" style="display:flex;gap:8px;align-items:stretch;margin-bottom:10px;flex-wrap:wrap;">
@@ -1558,7 +1591,7 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
       <button class="search-clear" onclick="clearSearch()" title="Clear">✕</button>
       <div class="search-dropdown" id="searchDropdown"></div>
     </div>
-    <button class="btn btn-outline" style="background:var(--dark-blue);white-space:nowrap;" onclick="addCustomItem()">➕ Custom item</button>
+    <button class="btn btn-outline" id="btnAddCustomItem" style="background:var(--dark-blue);white-space:nowrap;" onclick="addCustomItem()">➕ Custom item</button><!-- D7:E6 (d): reads "➕ Add custom item" in KC mode (d7SyncMode) -->
     <button class="btn btn-outline" style="background:var(--mid-blue);white-space:nowrap;" onclick="addSection()" title="Start a new named section — e.g. Option A / Option B">＋ Section</button>
     <button class="btn btn-outline no-print" id="btnImportItems" style="background:var(--mid-blue);white-space:nowrap;" onclick="openImportModal()" title="Import items from a JSON file (ask Claude to make one — 📋 format inside)">📥 Import</button>
   </div>
@@ -1644,18 +1677,25 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
     </div>
   </div>
   <div class="no-print" id="cfgBackdrop" onclick="closeConfigurator()"></div>
+
+  <!-- D7:E6 — the kc configurator panel (chunk B's kc/host-d7.js fills and opens it; kc/kc-d7.css styles it, scoped to #kcPanel so the website panel above does not change).
+       Closed until opened. The old #configPanel above (website families) is unchanged. -->
+  <div class="cfg-panel no-print" id="kcPanel" role="dialog" aria-labelledby="kcPanelTitle" tabindex="-1"><div class="cfg-head"><div class="cfg-title" id="kcPanelTitle"></div><button type="button" class="cfg-x" data-kc-close aria-label="Close the configurator">✕</button></div><div class="cfg-scroll" id="kcPanelScroll"></div><div class="cfg-foot" id="kcPanelFoot"></div></div><div id="kcBackdrop" data-kc-close></div>
 </div>
 
 <!-- ── QUOTE ITEMS TABLE ── -->
 <div class="section" id="itemsSection">
   <div class="sec-title">
-    <span>Quote Items<span class="ms-chip shadow no-print" id="qualityChip" style="display:none;"></span></span>
+    <span>Quote Items<span class="ms-chip shadow no-print" id="qualityChip" style="display:none;"></span><span class="d7-only no-print" id="d7LeadChip"></span><!-- D7:E23 — host of the kc "Lead time: N working days" chip (chunk B draws it, spec 3.7) --></span>
+    <!-- D7:E23 — the Photo column switch (D7 only; saved in the pricing fields as photoCol, spec 3.5) -->
+    <label class="no-print d7-only d7-photo-toggle"><input type="checkbox" id="d7PhotoCol" checked onchange="renderItems()"> Photo column</label>
     <span id="itemSavedTag" class="no-print" style="display:none;font-size:11px;font-weight:700;color:var(--green);text-transform:none;letter-spacing:normal;">✓ Saved</span>
   </div>
 
   <div id="tableWrap" style="overflow-x:auto;">
     <table class="items-table">
-      <thead>
+      <!-- D7:E11 — in KC mode renderItems() writes the D7 header (# · Photo · Description · Quantity · Unit price · Amount · Actions) here and puts these old seven back for a legacy quote. Always seven columns. -->
+      <thead id="itemsThead">
         <tr>
           <th>#</th>
           <th>Description</th>
@@ -1715,7 +1755,7 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
         <option value="10">10%</option>
       </select>
       <input type="number" id="commissionAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="_commAuto=false;renderTotals()">
-      <span class="pc-hint">computed on the quote total — on an options quote, on each option's own total. Auto-sets to 3% when the salesperson isn't Neil Barro (never on Brilliant Steel); your manual choice wins.</span>
+      <span class="pc-hint">computed on the quote total — on an options quote, on each option's own total. Auto-sets to 3% when the salesperson isn't Neil Barro (never on Brilliance Steel); your manual choice wins.</span>
     </div>
     <div class="pc-row" id="rushFocRow" style="display:none;">
       <label class="pc-check"><input type="checkbox" id="rushFoc" onchange="renderTotals()"> ⚡ Make the Priority Order Charge FOC — printed with its amount, given back in the consolidated FOC discount</label>
@@ -1807,7 +1847,7 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
   <div class="sec-title">Payment Terms &amp; Schedule</div>
   <div class="fg-grid no-print">
     <div class="fg"><label>Down Payment</label>
-      <select id="dpMode" onchange="onDpModeChange()">
+      <select id="dpMode" onchange="_dpTouched=true;onDpModeChange()"><!-- D7:E22 — _dpTouched: the preparer chose; the blank-quote default then leaves the field alone -->
         <option value="10">10% Down Payment</option>
         <option value="15">15% Down Payment</option>
         <option value="20">20% Down Payment</option>
@@ -1815,6 +1855,7 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
         <option value="40">40% Down Payment</option>
         <option value="50" selected>50% Down Payment</option>
         <option value="60">60% Down Payment</option>
+        <option value="65" hidden>65% Down Payment</option><!-- D7:E22 — shown in KC mode only (d7SyncMode) -->
         <option value="custom">Custom amount (₱)</option>
       </select>
     </div>
@@ -1952,8 +1993,11 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
        additional costs read as one cohesive numbers layout. no-print keeps
        it internal (it used to inherit that from the int-panel). -->
   <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);margin-bottom:4px;">➕ Additional costs — misc (delivery · permits · subcontractors)</div>
-  <p style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
+  <p class="d7-legacy" style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
     Delivery, Installation and Other are pass-throughs — cost + 25% OH, no markup. <strong>Additional labor</strong> is real work and carries the full OH+MK load (× 2.50). Delivery and Installation present as <strong>one combined line</strong> on the quotation. <strong>On quote ✓</strong> shows an entry above; unticked, its price is quietly distributed into the item prices you choose.
+  </p>
+  <p class="d7-only" style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
+    Delivery, Installation and Other are pass-throughs: cost + 25%, no markup. <strong>Additional labor</strong> is real work and carries the markup of this quote (cost × the markup). Delivery and Installation present as <strong>one combined line</strong> on the quotation. <strong>On quote ✓</strong> shows an entry above; unticked, its price is quietly distributed into the item prices you choose.
   </p>
   <div class="table-wrap" style="overflow-x:auto;">
   <table class="labor-tbl" id="miscTbl" style="min-width:640px;">
@@ -1990,9 +2034,13 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
   <!-- Internal redesign (owner ruling 2026-08-31): the cost surface is ONE
        calculator — the build waterfall + a per-line experiment table. It is
        LIVE: computed prices flow onto the quote. -->
-  <span class="ms-chip" style="background:#2e7d32;color:#fff;" title="This panel computes the quote — every costed line's price comes from here, live. Type any price to experiment; the MK column shows what your price really gives.">LIVE — this calculator prices the quote</span>
-  <p style="font-size:11px;color:var(--gray-dark);margin:6px 0 8px;">
+  <span class="ms-chip d7-legacy" style="background:#2e7d32;color:#fff;" title="This panel computes the quote — every costed line's price comes from here, live. Type any price to experiment; the MK column shows what your price really gives.">LIVE — this calculator prices the quote</span>
+  <span class="ms-chip d7-only" style="background:#2e7d32;color:#fff;" title="This panel computes the quote: every costed line's price comes from here, live. Type any price to experiment; the Markup column shows what your price really gives.">LIVE — this calculator prices the quote</span>
+  <p class="d7-legacy" style="font-size:11px;color:var(--gray-dark);margin:6px 0 8px;">
     Materials come from each line's BOM or the product's capital cost (maintained in the Inventory department's Product Pricelist). The build adds waste, labor and consumables, the dials load OH &amp; MK, and the result lands on the quotation — rounded to ₱100. Type any price in the experiment table to override a line.
+  </p>
+  <p class="d7-only" style="font-size:11px;color:var(--gray-dark);margin:6px 0 8px;">
+    Materials come from each line's price-list build or the product's cost on file. Labor is a percentage of the materials by bracket, misc is 10% of both, and the markup for this quote times the project cost gives the price, to the nearest ₱10. Type any price in the experiment table to override a line.
   </p>
 
   <!-- COSTING-PHASE1-SPEC-2026-08-26 §2 — v2 true-cost buildup/ladder/margin
@@ -2067,17 +2115,36 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
   <div class="modal-box" style="max-width:640px;" onclick="event.stopPropagation()">
     <div class="modal-hdr"><h3>❓ Quote Builder — Help</h3><button class="modal-x" onclick="closeHelpModal()">✕</button></div>
     <div class="modal-body" id="helpBody">
+      <!-- D7:E24 + KC:L9 — the configurators, in the words of a user. The first part is shown while the quote follows the new rules (KC mode); the numbered list below describes the old builder, which Brilliance Steel and every quote made before the
+           configurators still follow. The second part is shown to whoever can use the configurators on this device (kcSyncHelp()). -->
+      <div class="d7-only" id="helpKcSection">
+        <h4>Configurators</h4>
+        <p>Add items has <strong>seven tabs</strong>: Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems. Each tab shows its <strong>configurators</strong> first, then the catalogue items. A configured line <strong>prices itself</strong> from the materials price list (materials + labor 30 / 50 / 70 % + 10 % misc, × 2, rounded to the nearest 10); a <strong>Chef Mode</strong> line starts from the Standard Product Price List and adds what its options cost by the same formula (it says <em>list price</em>). Type a price to override it, ↺ goes back, and a price below the standard shows a warning. <strong>Catalogue items</strong> keep their catalogue price. ➕ <strong>Add custom item</strong> opens a configurator too: pick the materials from the price list (every row shows its list price) and type the quantities; only the President types free costs, and the line always needs review. Amounts show centavos, and Quantity and unit share one column. The OH and MK dials are gone: the President can set <strong>one markup for the whole quote</strong>, and a discount stops at the project cost. Additional labor is priced at cost × that markup; delivery, installation and other at cost + 25 %. A new Barro Kitchens or Barro Industries quote starts at a 65 % down payment.</p>
+        <p>Every line prints in <strong>one format</strong>: the item code in small grey text (for example CK-HP-4; a line with no code prints none), material and use, the title, dimensions, specs, notes. The signatures read Prepared by, Approved by and Client conforme. The Photo column shows the photo of the line or its drawing, and the Workforce Copy carries the drawing and the build detail (no prices). A line that <strong>needs review</strong>, or a quote sold <strong>below its standard price</strong>, goes to the President: Verify &amp; File says why and, once you send it, shows a <strong>link</strong> to copy and pass to him by Messenger or Viber; he approves it from the Approvals page. An approved quote keeps its approval when you reopen it, unless the new total falls below the approved total and below the standard price. The PDF button saves the A4 document named by its quote number and revision.</p>
+        <p>Where the numbered list below describes the old tabs, the ⚙ chips, the OH / MK dials, the cost-plus pricing or the OH load on additional costs, this section is what a quote on the new rules does.</p>
+      </div>
+      <div id="helpKcDevice" style="display:none;">
+        <h4>Quotes made before the configurators, and this device</h4>
+        <p>Quotes, drafts and templates made before the configurators opened open and price <strong>exactly as before</strong> — their new revisions too — and Brilliance Steel quotes never use them. To use the configurators, start a new quote.</p>
+        <p>Configurators on this device:
+          <select id="kcDeviceSel" onchange="kcSetDeviceMode(this.value)" aria-label="Configurators on this device" style="width:auto;max-width:100%;padding:3px 6px;font-size:13px;">
+            <option value="office">Follow the office setting</option>
+            <option value="off">Off</option>
+          </select>
+          Choose <em>Off</em> if something looks wrong here: new quotes then start in the old builder, and quotes already made keep opening the way they were made.</p>
+      </div>
+
       <h4>How a quote gets made</h4>
       <ol>
-        <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it. The builder starts on Barro Kitchens, or on Brilliant Steel when you open it from the Brilliant Steel department. A Brilliant Steel quote hides the cost calculator and BOM; each line gets a <em>pass-through</em> tick instead.</li>
+        <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliance Steel. Letterhead, quote number and payment details follow it. The builder starts on Barro Kitchens, or on Brilliance Steel when you open it from the Brilliance Steel department. A Brilliance Steel quote hides the cost calculator and BOM; each line gets a <em>pass-through</em> tick instead.</li>
         <li><strong>Quote number</strong> <em>(Client Data)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> <em>(Client Data)</em> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself; tick <em>no costing</em> beside it for a line that genuinely has none. ＋ Section for Option A / Option B quotes. 📥 Import brings in a whole list at once — hand Claude any list and the 📋 button inside copies the exact format brief to give it.</li>
         <li><strong>Configure a product</strong> <em>(Estimator)</em> — the ⚙ chips above the search box (Preparation table, Sink, Dish table, Stove, Wok range, Griddle / griller / fryer, Gas deck oven, Range hood, Cabinet, Wall shelving, Rack) open the configurator: pick the options, set the size in mm, and the price shown is the <strong>website price</strong> — the catalogue base at that size plus the option amounts Finance approved, the same figure the website estimate is built from. An option nobody has priced yet shows <em>Priced after review</em> and asks for your price; a line left without one cannot be filed. Some choices only show when they apply — fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table — and a size an option does not allow is flagged under the box with a <em>Use N mm</em> shortcut (a slim hood is at most 500 mm deep; a deck oven's width follows its trays per deck). Tables, sinks, dish tables, stoves and wok ranges are built with a 1.5 mm (16 ga) top as standard and the quote prints their construction; the <em>Top plate</em> option (marked <em>staff</em> — it is never offered on the website) switches it to a lighter 1.2 mm top, which reads <em>Priced after review</em> until Finance has entered its amount. Every product opens with a <em>Material</em> option — Stainless Steel 304 Food Grade as standard, or the <em>staff</em> choice Stainless Steel 316 Laboratory Grade (the website never offers it), which reads <em>Priced after review</em> until Finance has entered the 316 percentage for that product in Inventory › Family pricing — and each configured line is named for what it is on the quote (<em>SS Sink</em>, <em>SS Range Stove Combination (Griller, Fryer)</em>, <em>Gas Deck Oven</em>…). <em>⚙ configure</em> on a line changes it later, and <em>⚙ convert to configured</em> turns an older sink, table, stove… line into one without touching its price. A quote that starts from a website request or project brief opens with the client's details filled in and a bar showing what they told us.</li>
-        <li><strong>Details ▸ on each line</strong> <em>(Estimator)</em> — every line prints on the quotation as a <strong>spec sheet</strong> (not a run-on sentence): the size first, then the material and options, the construction, the finish, what is included and not included, and the lead time. Under each line, <em>Details ▸</em> opens its editor: the <em>finish</em> (hairline is the standard — or brushed, mirror, satin, or not stated), <em>Includes</em> and <em>Not included</em> (one per line) and your own <em>extra rows</em>. A configured line starts with the standard finish, includes and a lead time of 25 working days minimum, from downpayment and approved drawings; ⚙ configure regenerates its includes, not-included and lead time from the new options (your finish stays). Small chips on a line — <em>no size</em>, <em>no specs</em>, <em>no finish</em>, <em>no photo</em> — show what the sheet still lacks, and <em>Quote strength n/10</em> beside the Quote Items title scores the whole quote. A line whose specs you typed yourself shows <em>custom wording</em> with a <em>↺ regenerate</em> link. A dimension legend prints under the items table, and a one-line summary (validity, payment, lead time, delivery, warranty) under the grand total. Brilliant Steel quotes are not changed by any of this.</li>
+        <li><strong>Details ▸ on each line</strong> <em>(Estimator)</em> — every line prints on the quotation as a <strong>spec sheet</strong> (not a run-on sentence): the size first, then the material and options, the construction, the finish, what is included and not included, and the lead time. Under each line, <em>Details ▸</em> opens its editor: the <em>finish</em> (hairline is the standard — or brushed, mirror, satin, or not stated), <em>Includes</em> and <em>Not included</em> (one per line) and your own <em>extra rows</em>. A configured line starts with the standard finish, includes and a lead time of 25 working days minimum, from downpayment and approved drawings; ⚙ configure regenerates its includes, not-included and lead time from the new options (your finish stays). Small chips on a line — <em>no size</em>, <em>no specs</em>, <em>no finish</em>, <em>no photo</em> — show what the sheet still lacks, and <em>Quote strength n/10</em> beside the Quote Items title scores the whole quote. A line whose specs you typed yourself shows <em>custom wording</em> with a <em>↺ regenerate</em> link. A dimension legend prints under the items table, and a one-line summary (validity, payment, lead time, delivery, warranty) under the grand total. Brilliance Steel quotes are not changed by any of this.</li>
         <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. A configured line (and a line from a website request) keeps the <strong>website price</strong> instead — the calculator shows the cost-based price beside it, and <em>Use cost-based</em> / <em>Use website</em> / <em>Apply cost-based to all</em> switch it. A line ticked <strong>pass-through</strong> skips all of it: the supplier price is the client price (no OH, no MK), counted at cost in the calculator — and discounts never touch it. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
-        <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms. In the <em>Terms</em> tab, the <strong>Warranty plan</strong> is the standard 6-month service warranty, or <em>Full kitchen</em> — the 6-month warranty plus 12 months of preventive maintenance service (PMS) with KitchenShield™ — and a tick prints the <strong>“Our standard” page</strong> after the terms (materials &amp; finishes, the standard construction of the products on this quote, warranty, how we work, references, registrations). A quotation filed before the plan existed shows <em>As issued</em>: reopened or revised, it keeps the warranty and site wording and the timeline it was issued with until you pick a plan. The <strong>project timeline</strong> is 25 working days minimum (or 12 working days + 3 per ₱20,000 of materials, if longer; Sundays never counted) on Barro Kitchens and Barro Industries quotations; Brilliant Steel keeps minimum 2 weeks + 3 per ₱20,000.</li>
+        <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms. In the <em>Terms</em> tab, the <strong>Warranty plan</strong> is the standard 6-month service warranty, or <em>Full kitchen</em> — the 6-month warranty plus 12 months of preventive maintenance service (PMS) with KitchenShield™ — and a tick prints the <strong>“Our standard” page</strong> after the terms (materials &amp; finishes, the standard construction of the products on this quote, warranty, how we work, references, registrations). A quotation filed before the plan existed shows <em>As issued</em>: reopened or revised, it keeps the warranty and site wording and the timeline it was issued with until you pick a plan. The <strong>project timeline</strong> is 25 working days minimum (or 12 working days + 3 per ₱20,000 of materials, if longer; Sundays never counted) on Barro Kitchens and Barro Industries quotations; Brilliance Steel keeps minimum 2 weeks + 3 per ₱20,000.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist (it also warns when the total is outside the estimate the client saw online, and waits for any line marked <em>needs a price</em>); filing makes the quote official. A made-to-order line with no size blocks filing; lines still missing specs or a finish are only listed (you can file anyway). 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
         <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately, and 🛠 Workforce Copy prints the crew version with no prices — item details, qty and unit only. A quotation is always shared as the PDF.</li>
       </ol>
@@ -2211,7 +2278,28 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
      spec-sheet helpers, specs/QB-SELLING-QUOTE-SPEC.md) with that version, as the same
      parser-inserted defer scripts the app-kit in index.html uses. Opened without ?v= (standalone, file://) they load bare, as before. -->
 <script>(function(){var v=new URLSearchParams(location.search).get('v'),q=(v&&/^[0-9][0-9.]*$/.test(v))?'?v='+v:'';['js/firebase-config.js','js/letterhead.js','js/pricing-core.js','js/qr-families.js','js/product-families.js','js/qb-configured.js','js/qb-spec-sheet.js'].forEach(function(f){document.write('<script defer src="'+f+q+'"><\/script>');});})();</script>
+<!-- KC (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md section 4.2, as changed by its Addendum 1, A9) — the BK configurators: stylesheets, then the pure money rules, the Sales flow's form engine, the bridge, ONE minified engine file
+     (qb/kc.min.js, built by scripts/kc-bundle.js: the build logic is not committed as sources), the host and the live reads (qb/), as the same parser-inserted defer scripts, with the same ?v= rule.
+     Order is load-bearing: qb/kc-live.js is last and sets D7.live only when every piece is there. A missing or broken file leaves the feature off and the page exactly as it was (shim below, L1).
+     js/forms-pdf.js (the form engine of the Sales flow: the quotation downloads as a file) may be absent until that branch is merged: a missing script is only a 404, the page is not touched and the bridge uses window.FormsPdf behind a guard.
+     Written so that tests/lazy-script-versioning.test.mjs (which pins the first loader above, and forbids a literal js/ script tag outside it) still finds its one line. -->
+<script>/* kc */(function(){var v=new URLSearchParams(location.search).get('v'),q=(v&&/^[0-9][0-9.]*$/.test(v))?'?v='+v:'';
+['qb/kc/kc-d7.css','qb/d7/d7-doc.css','qb/d7/d7-flow.css'].forEach(function(f){document.write('<link rel="stylesheet" href="'+f+q+'">');});
+['qb/kc-rules.js','js/forms-pdf.js','qb/d7/d7-core.js','qb/kc.min.js','qb/kc/host-d7.js','qb/d7/d7-pricing.js','qb/d7/d7-doc.js','qb/d7/d7-adapter.js',
+ 'qb/kc/admin-d7.js','qb/d7/d7-flow.js','qb/kc-live.js'].forEach(function(f){document.write('<script defer src="'+f+q+'"><\/script>');});})();</script>
 <script>
+/* ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   KC MODE (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md): the Barro Kitchens configurators inside this builder. The edits ported from the D7 reference build are marked D7:E<n> / D7:R4, the live-only ones KC:L<n>.
+   Everything new is behind d7On() = the quote carries the engine stamp 'kc1', is not Brilliant Steel and is not "as issued" (spec 2.2). With the stamp 'legacy' (the office switch off, qb/ missing or broken, Brilliant
+   Steel, every quote, draft and template made before the switch) this page runs the code that ran before. The hooks are D7.h('chunk.name', …): a missing hook returns '' (the shim, then qb/d7/d7-core.js).
+   Storage keys stay bkqb_* (the reference build's storage-key rename is not ported) and every window.parent.postMessage(…) of the page is as it was.
+   ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+/* KC:L1 — the shim. The qb/ scripts are deferred: they run after this script has been parsed, and a file that fails to load (offline, a 404, a rename) leaves only these stand-ins:
+   every D7.h() returns '' and D7.has() is false, so the page behaves as it did before the configurators existed. The real qb/d7/d7-core.js replaces D7.h / D7.has and fills the namespaces.
+   D7.live is deliberately NOT created here: it is the flag d7On() reads, and qb/kc-live.js sets it, as its last statement, only when every piece is present (spec 4.2). */
+window.D7 = window.D7 || {};
+if(!D7.h){ D7.h=function(){ return ''; }; D7.has=function(){ return false; }; }
+['adapter','pricing','doc','flow','core'].forEach(function(k){ D7[k]=D7[k]||{}; });
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
 //  Local mirror of window.BRAND.companies (js/config.js, v12 WS09). This file
@@ -2263,10 +2351,10 @@ const CO = {
   // No `pay` field either, deliberately: Brilliant Steel must never show
   // Barro's own UnionBank account — renderPaymentDetails() only renders a
   // payment block when co.pay exists.
-  BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
-    sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS',
-    thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
-    creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
+  BS:{name:'BRILLIANCE STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
+    sig:{name:'GERALD CHAN',title:'President, Brilliance Steel Corporation'},nav:'<span>BRILLIANCE</span> STEEL',code:'BS',
+    thanks:'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.',
+    creds:'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2326,6 +2414,32 @@ function siteTermText(){
 }
 // the spec sheet / completeness / summary / Our standard page are for Barro Kitchens and Barro Industries only, and need the helper file (offline copies degrade to the old lines)
 function docSheetOn(){ return currentCo!=='BS' && !!window.QBSpecSheet; }
+/* D7:E4 + KC:L2 — "KC mode" = the quote follows the new rules: the configurator layer is loaded and complete (D7.live), the quote carries the engine stamp 'kc1', the company is not Brilliant Steel and the quote is not
+   "as issued" (isLegacyDoc()). Everything new in this page is behind it; when it is false the builder behaves exactly as it did before the configurators (spec rules 3.5 and 3.9). */
+let quoteEngine='legacy';   // 'legacy' | 'kc1' — saved with the quote in the pricing fields (engine); a loaded state with no engine is 'legacy', so every quote, draft and template that exists today stays as it is, forever
+function d7On(){ return !!(window.D7 && D7.live) && quoteEngine==='kc1' && currentCo!=='BS' && !isLegacyDoc(); }
+// KC:L2 — the engine a BLANK quote takes: 'kc1' when the office switch and this device allow it for this user (KCLive.allowsNew(), qb/kc-live.js), else 'legacy'. Brilliant Steel is always legacy.
+function kcDefaultEngine(){ try{ return (window.KCLive && KCLive.allowsNew && KCLive.allowsNew() && currentCo!=='BS') ? 'kc1' : 'legacy'; }catch(e){ return 'legacy'; } }
+// KC:L2 — a state is about to be loaded: take ITS engine now, before anything else looks at d7On() (setCompany() re-renders the lines before applyPricingFields() runs, and a quote must never be drawn, or priced, with the
+// engine of the quote that was open before it). applyPricingFields() says the same thing again, from the same state.
+function kcStampEngine(pricing){ quoteEngine = (pricing && pricing.engine==='kc1') ? 'kc1' : 'legacy'; }
+/* KC:L3 — a BLANK quote (no lines, no reopen source, no saved draft) follows the office switch. Called after the switch has been read (D7.core.ready, from initUI) and at the end of setCompany. A quote that
+   already has lines, or came from a filing or a draft, keeps the engine it was made with, always. Taking the engine also takes its blank-quote down payment (65 % for KC on Barro Kitchens / Barro Industries,
+   50 % otherwise) unless the preparer already chose one (D7:E22). */
+function kcAdoptEngineIfBlank(){
+  try{
+    if(items.length || reopenSourceDocId || savedDraftDocId) return;
+    const want=kcDefaultEngine();
+    if(quoteEngine===want) return;
+    quoteEngine=want;
+    d7ApplyBlankDp();
+    d7SyncMode(true);
+    if(document.getElementById('itemsTbody')) renderItems();
+  }catch(e){ console.warn('[quote-builder] kc engine adoption skipped', e); }
+}
+/* D7 — a kc line is a line that carries kcKind (a configured product, or the new custom item, kcKind 'custom'); a kc PRODUCT line is the former (its wording is edited in the panel, never inline). */
+function isKcLine(it){ return !!(it && it.kcKind); }
+function isKcProductLine(it){ return !!(it && it.kcKind && it.kcKind!=='custom'); }
 
 // ── QUOTE COLLECTION ROUTING ────────────────────────────────────────
 // Which Firestore collection a company's quotes are filed in.
@@ -2740,6 +2854,10 @@ async function loadDatabase(force) {
       FAMILY_PRICING_STATE = 'denied';
     }
 
+    // KC:L4 — the configurator layer's reads (role, office switch, settings, list prices, material prices: qb/kc-live.js), each in its own try/catch inside KCLive.load(), before the catalogue is drawn. It never throws and gives
+    // up after 6 s; a failed read leaves the configurators read-only (KCLive.ready false) and the old builder untouched. Nothing on the fallback branches below.
+    try{ if(window.KCLive && KCLive.load) await KCLive.load(); }catch(e){ console.warn('[quote-builder] kc load skipped', e); }
+
     DB = {
       products: snap.docs.map(d => {
         const p = d.data();
@@ -2929,6 +3047,9 @@ function initUI(){
   // items) are in. initUI() re-runs on every "Reload DB"/import too, so this
   // also keeps the preview honest after those.
   renderClientPreview();
+  D7.h('core.ready');   // D7:E23 — D7.ready = true; draws the tab row and the cards; reprices the kc lines (runs again on every "Reload DB")
+  kcAdoptEngineIfBlank();   // KC:L3 — the office switch has been read (KCLive.load, in loadDatabase): a blank quote takes the engine it gives. D7.core.ready may have done it already; this returns at once then
+  if(typeof initTutorial==='function') initTutorial();   // B5 — the same switch decides whether the configurators' What's New entry counts: the gold dot, the banner and the list are measured again now that it is known
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2946,6 +3067,8 @@ function bootCompany(){
   }catch(e){ return 'BK'; }
 }
 function setCompany(co){
+  // KC:L9 — a Brilliant Steel quote cannot carry configured lines (spec 1.1): the pill does not move while the quote holds one. (A state that is being loaded has its own lines in place before this runs.)
+  if(co==='BS' && currentCo!=='BS' && items.some(isKcLine)){ showToast('Remove the configured lines first: a Brilliance Steel quote cannot carry them.','error'); return; }
   // DEFENSIVE — an unknown code used to throw on `c.nav` below and abort the
   // WHOLE restore mid-way (setCompany runs from loadFromStorage/resumeDraft/
   // loadEditableState). Fall back the same way applyLetterheadHeader() already
@@ -2999,6 +3122,8 @@ function setCompany(co){
   // preview clones the items table, whose markup now depends on the company.
   if (typeof renderClientPreview==='function' && document.getElementById('qbDocSheet')) renderClientPreview();
   if (typeof autoCommissionSync==='function') autoCommissionSync();
+  D7.h('core.sync');   // D7:E23 — body.d7-on follows d7On(); the tab row follows the mode
+  kcAdoptEngineIfBlank();   // KC:L3 — a blank quote takes the engine the office switch gives it (and the blank-quote down payment that goes with it)
 }
 
 // v12 WS31 Spec 7 — shared letterhead engine for the printed quote. Renders
@@ -3036,7 +3161,16 @@ function applyLetterheadHeader(){
     lhBox.id = 'lhPrintHeader';
     document.getElementById('printHeader')?.insertAdjacentElement('afterend', lhBox);
   }
-  lhBox.innerHTML = lh.headerHTML;
+  // KC:S3 (Forms Standard, owner R5; spec 3.7) — in KC mode the quotation's header is the doc layer's (logo, the company line, QUOTATION / number / date / Rev. n); '' (no such hook, or the quote is not a KC one) keeps the letterhead above
+  let _hdr = lh.headerHTML;
+  if(d7On()){
+    const _no = document.getElementById('quoteNo')?.value || '';
+    const _tags = document.body.classList.contains('body-agent') ? ['AGENT COPY — CONFIDENTIAL'] : document.body.classList.contains('body-workforce') ? ['WORKFORCE COPY — NO PRICES'] : [];
+    const _h = D7.h('doc.header', { no:_no, docNumber:_no, quoteNo:_no, date:document.getElementById('quoteDate')?.value || '', dateLabel:new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}),
+      tags:_tags, extraMeta:_tags, co:currentCo, entity:{ name:c.name, registration:c.sub||'', address:c.addr||'', phone:bits[0]||'', email:bits[1]||'' } });
+    if(typeof _h==='string' && _h) _hdr = _h;
+  }
+  lhBox.innerHTML = _hdr;
   let st = document.getElementById('lhPrintCss');
   if (!st) { st = document.createElement('style'); st.id = 'lhPrintCss'; document.head.appendChild(st); }
   st.textContent = lh.printCSS;
@@ -3073,6 +3207,7 @@ function setView(v){
   }
   if (v==='client') renderClientPreview();
   mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
+  D7.h('core.sync');   // D7:E23
 }
 
 // COSTING-QB-UX-SPEC-2026-08-26 §1 — the exact top-level containers the
@@ -3608,14 +3743,51 @@ function updateFiledSig(){
 // ═══════════════════════════════════════════════════════════════════
 //  CATEGORY FILTER
 // ═══════════════════════════════════════════════════════════════════
+/* D7:E6/E7 — the tab row, adapted for live.
+   KC mode  -> D7.adapter.renderTabs() draws All + the seven tabs, the cards of the active tab and its catalogue list (until that hook exists, a provisional row of the same tabs).
+   legacy   -> the ten buttons of the HTML, which are never rewritten while the quote is legacy; leaving KC mode puts back the copy taken at the first render.
+   currentCatFilter holds a tab id (or 'all') in KC mode and a catalogue category id (or 'all') otherwise, so it goes back to 'all' whenever the mode changes. */
+let _catTabsLegacyHtml=null, _catTabsKc=false;   // the legacy row's markup (copied at the first render) and whether #catTabs holds the KC row now
+function kcKeepLegacyTabs(){ const host=document.getElementById('catTabs'); if(host && _catTabsLegacyHtml===null && !_catTabsKc) _catTabsLegacyHtml=host.innerHTML; }
+function renderCatTabs(){
+  const host=document.getElementById('catTabs'); if(!host) return;
+  const cards=document.getElementById('d7Cards'), cat=document.getElementById('d7Catalogue');
+  kcKeepLegacyTabs();
+  if(d7On()){
+    _catTabsKc=true;
+    if(D7.has('adapter.renderTabs')){ D7.h('adapter.renderTabs'); return; }
+    const act='style="background:var(--dark-blue);color:white;border-color:var(--dark-blue);"';
+    host.innerHTML=[{id:'all',label:'All'}].concat(D7.TABS||[]).map(t=>`<button type="button" class="cat-tab${currentCatFilter===t.id?' active':''}" onclick="filterCat('${t.id}')" ${currentCatFilter===t.id?act:''}>${txtEsc(t.label)}</button>`).join('');
+    return;
+  }
+  if(_catTabsKc){ if(_catTabsLegacyHtml!==null) host.innerHTML=_catTabsLegacyHtml; _catTabsKc=false; }   // back from KC mode: the old ten buttons, 'All' active
+  if(cards && cards.innerHTML) cards.innerHTML='';
+  if(cat && cat.innerHTML) cat.innerHTML='';
+}
+let _d7Mode=null;   // 'd7' | 'legacy' | null (not drawn yet)
+function d7SyncMode(force){
+  const on=d7On();
+  document.body.classList.toggle('d7-on',on);
+  const m=on?'d7':'legacy';
+  if(m!==_d7Mode){
+    const first=(_d7Mode===null);
+    _d7Mode=m; currentCatFilter='all'; renderCatTabs();
+    if(!first){ try{ renderCfgChips(); }catch(e){} }   // D7:E9 — the ⚙ chips are hidden in KC mode and are back for Brilliant Steel / legacy quotes (no extra draw at the first render: the live builder has none before initUI())
+    // the label and the option that differ between the two modes: "➕ Add custom item" and the 65 % down-payment option
+    const bc=document.getElementById('btnAddCustomItem'); if(bc) bc.textContent=on?'➕ Add custom item':'➕ Custom item';
+    const o65=document.querySelector('#dpMode option[value="65"]'); if(o65) o65.hidden=!on;
+  }
+  else if(force) renderCatTabs();
+}
 function filterCat(cat, btn){
   currentCatFilter=cat;
+  if(d7On()){ handleSearch(); renderCatTabs(); return; }   // D7:E7 — the row is drawn by D7.adapter.renderTabs() (or the provisional row), not styled here
   document.querySelectorAll('.cat-tab').forEach(b=>{
     b.classList.remove('active');
     b.style.background='';b.style.color='';b.style.borderColor='';
   });
   btn.classList.add('active');
-  const catObj = DB.categories.find(c=>c.id===cat);
+  const catObj = qbCategories().find(c=>c.id===cat);
   if(catObj){btn.style.background=catObj.color;btn.style.color='white';btn.style.borderColor=catObj.color;}
   else{btn.style.background='var(--dark-blue)';btn.style.color='white';btn.style.borderColor='var(--dark-blue)';}
   handleSearch();
@@ -3626,7 +3798,8 @@ function filterCat(cat, btn){
 // ═══════════════════════════════════════════════════════════════════
 function filteredProducts(q=''){
   let prods = DB.products||[];
-  if(currentCatFilter!=='all') prods=prods.filter(p=>p.category===currentCatFilter);
+  // D7:E7 — under D7 the filter is a TAB id (D7.tabOfProduct); a Miscellaneous item is in no tab, the search below still finds it. Brilliant Steel / "as issued": the old category test.
+  if(currentCatFilter!=='all') prods=d7On() ? prods.filter(p=>D7.tabOfProduct(p)===currentCatFilter) : prods.filter(p=>p.category===currentCatFilter);
   if(q) prods=prods.filter(p=>
     p.name.toLowerCase().includes(q.toLowerCase())||
     (p.shortName||'').toLowerCase().includes(q.toLowerCase())||
@@ -3648,7 +3821,7 @@ function renderDropdown(prods){
   prods.forEach(p=>{(cats[p.category]=cats[p.category]||[]).push(p);});
   let html='';
   Object.entries(cats).forEach(([catId,ps])=>{
-    const catObj=DB.categories.find(c=>c.id===catId)||{label:catId,icon:'•'};
+    const catObj=qbCategories().find(c=>c.id===catId)||{label:catId,icon:'•'};
     html+=`<div class="sd-group">${catObj.icon||''} ${catObj.label}</div>`;
     ps.forEach((p,i)=>{
       const baseP=formatPeso(p.basePrice);
@@ -3729,10 +3902,10 @@ function renderPricelist(){
   if(!prods.length){ body.innerHTML='<div style="padding:14px;color:var(--gray-dark);font-size:13px;">No products match.</div>'; return; }
   const cats={};
   prods.forEach(p=>{(cats[p.category]=cats[p.category]||[]).push(p);});
-  const order=(DB.categories||[]).map(c=>c.id);
+  const order=qbCategories().map(c=>c.id);
   let html='';
   Object.entries(cats).sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0])).forEach(([catId,ps])=>{
-    const catObj=(DB.categories||[]).find(c=>c.id===catId)||{label:catId,icon:'•'};
+    const catObj=qbCategories().find(c=>c.id===catId)||{label:catId,icon:'•'};
     html+=`<div class="pl-cat">${catObj.icon||''} ${txtEsc(catObj.label||catId)}</div>`;
     ps.forEach(p=>{
       const meta=p.formulaType==='fixed'?'Fixed price':p.formulaType==='per_length'?'Scales by length':p.formulaType==='per_area'?'Per sqm':p.formulaType==='per_run'?'Per run':'Configurable';
@@ -3787,7 +3960,7 @@ function fixedItemDimString(p){
 function addFixedItemDirect(p){
   const price=computePrice(p);
   items.push({
-    id:p.id, category:p.category, name:p.name, dims:fixedItemDimString(p),
+    id:p.id, category:d7On()?D7.sectionFor(p):p.category /* D7:E8 */, name:p.name, dims:fixedItemDimString(p),
     specs:[], specStr:'', finish:'', includes:[], excludes:[], specLines:[], qty:1, unit:p.unit||'pc', unitPrice:price, amount:price,
     leadTime:p.leadTime||'—', laborHours:p.laborHours||null,
     capitalMaterials:p.capitalMaterials||0, capitalLabor:p.capitalLabor||0,
@@ -4064,7 +4237,7 @@ function addItemFromCalc(){
 
   items.push({
     id:p.id,
-    category:p.category,
+    category:d7On()?D7.sectionFor(p):p.category,   // D7:E8 — under D7 a line's section is its tab id
     name:p.name,
     dims:dimStr,
     specs:specSnapshot,
@@ -4090,6 +4263,7 @@ function addItemFromCalc(){
 
 // Add a blank, fully-editable custom line item (not from the DB)
 function addCustomItem(){
+  if(d7On() && D7.adapter && D7.adapter.addCustom) return D7.adapter.addCustom();   // D7:E8 — one editor for a new custom item: the kc "Add custom item" panel (chunk B)
   items.push({
     id:'CUSTOM',
     category:currentCatFilter!=='all'?currentCatFilter:'miscellaneous',
@@ -4166,9 +4340,9 @@ function cfgPrimary(fam){ return fam ? ((DB.products || []).find(p => p.id === f
 //     never out of a section the database, the preparer or a "convert" put it in.
 function cfgCatalogueSection(fam){
   const prim = cfgPrimary(fam);
-  if (prim && prim.category) return prim.category;
+  if (prim && prim.category) return d7On() ? D7.sectionFor(prim) : prim.category;   // D7:E8 — under D7 the section is the tab id
   const hit = (DB.products || []).find(p => fam && fam.absorbed && Object.prototype.hasOwnProperty.call(fam.absorbed, p.id) && p.category);
-  return hit ? hit.category : '';
+  return hit ? (d7On() ? D7.sectionFor(hit) : hit.category) : '';
 }
 function cfgHomeHandoffLine(it){
   const fam = it && cfgFamily(it.familyId);
@@ -4276,6 +4450,7 @@ function cfgMakeLine(ev, st){
   const item = QBConfigured.buildLine(qbDeps(), { family:ev.fam, primary, config:ev.v.config, size:ev.v.dims, qty:st.qty, unit:st.unit, note:st.note, basis:ev.basis });
   if (!item) return null;
   if (!(primary && primary.category)) item.category = cfgCatalogueSection(ev.fam) || 'miscellaneous';
+  if (d7On()) item.category = D7.sectionFor(primary || { id:item.id, category:item.category });   // D7:E8 — a website family line files under its base product's tab
   item._cfg.priced = !!ev.basis.priced;
   item._cfg.livePrice = ev.basis.priced ? ev.basis.unitPrice : 0;
   return item;
@@ -4338,6 +4513,7 @@ function cfgConvertLine(it){
 function renderCfgChips(){
   const box = document.getElementById('cfgChips');
   if (!box) return;
+  if (d7On()) { box.style.display = 'none'; box.innerHTML = ''; return; }   // D7:E9 — R7: the chips are replaced by the tab cards (the website-family code stays, D2)
   if (!configuratorAvailable()) { box.style.display = 'none'; box.innerHTML = ''; return; }
   const F = window.QR_FAMILIES;
   // one chip per product in the definitions' own order — minus a product switched off in productMeta/config.families.disabled (§9)
@@ -4355,12 +4531,18 @@ function cfgOpenFromChip(btn){
 }
 // "Sold online as: Sink (configurable)  [configure instead]" — beside an absorbed SKU in the search dropdown, the pricelist and the calculator title
 function cfgSoldOnlineHtml(sku){
+  if (d7On()) {   // D7:E10 — a catalogue item that a kc configurator covers says so; the website-family hint and its "configure instead" are gone under D7 (spec 3.8, M3)
+    const kind = D7.h('adapter.kindForSku', sku);
+    return kind ? `<span class="cfg-hint no-print">Has a configurator</span> <button type="button" class="cfg-link no-print" data-cfg-sku="${attrEsc(sku)}" onclick="event.stopPropagation();D7.adapter.configureInstead(this.dataset.cfgSku)">configure instead</button>` : '';
+  }
   if (!configuratorAvailable()) return '';
   const a = absorbedFamilyOf(sku);
   if (!a || !familyEnabled(a.familyId)) return '';
   return `<span class="cfg-hint no-print">Sold online as: ${txtEsc(a.label)} (configurable)</span> <button type="button" class="cfg-link no-print" data-cfg-sku="${attrEsc(sku)}" onclick="event.stopPropagation();configureInstead(this.dataset.cfgSku)">configure instead</button>`;
 }
 function configureInstead(sku){
+  if (d7On() && D7.adapter && D7.adapter.configureInstead) return D7.adapter.configureInstead(sku);   // D7:E10 — opens the kc panel on that product's default start
+  if (d7On()) return;
   if (!configuratorAvailable()) return;
   let old = {};
   if (selectedProduct && selectedProduct.id === sku) {       // carry what was already typed into the calculator
@@ -4380,6 +4562,10 @@ function configureInstead(sku){
 
 function priceBasisChipHtml(item, long){
   const pb = item.priceBasis;
+  // D7:E14 (spec 3.6, M11) — the fourth basis: a kc line priced by the R1 formula from the materials price list. 'manual' (a typed price) keeps its chip below.
+  // D7:R4 (owner Q23) — a Chef Mode line sold from the Standard Product Price List says "list price" (its list price plus what the options add by formula); every other configured line says "cost-based"
+  if (pb === 'configured' && item._kc && item._kc.list) return `<span class="ms-chip ok" style="font-size:9px;" title="List price: the model's price on the Standard Product Price List (Nov 19), plus what the options add by formula, to the nearest ₱10. Type a price to override it.">list price</span>`;
+  if (pb === 'configured') return `<span class="ms-chip ok" style="font-size:9px;" title="Cost-based: the materials price list, labor and misc, times the markup, to the nearest ₱10. Type a price to override it.">cost-based</span>`;
   if (pb === 'website') return `<span class="ms-chip ok" style="font-size:9px;" title="The website price: the catalogue base at this size plus the option amounts Finance approved — what the client\'s estimate was built from. The cost-plus auto-pricer leaves it alone.">${long ? 'website price' : 'website'}</span>`;
   if (pb === 'manual' || item.priceManual) return `<span class="ms-chip" style="font-size:9px;background:#eee;color:var(--gray-dark);" title="Hand-typed price — auto-pricing leaves it alone. ↺ re-apply clears it.">${long ? 'manual price' : 'manual'}</span>`;
   return `<span class="ms-chip ok" style="font-size:9px;" title="Computed price — follows the build and the dials automatically">${long && pb === 'cost' ? 'cost-based price' : 'auto'}</span>`;
@@ -5553,6 +5739,7 @@ function refreshBomModal(){
 // (the filing gate) so all three can never drift out of sync with each
 // other.
 function customLineHasMaterialsBasis(item){
+  if(d7On() && D7.pricing && D7.pricing.customHasBasis) return D7.pricing.customHasBasis(item);   // D7:E14 (spec 3.8) — a kc custom item has a basis when a material row is priced or typed materials > 0
   return (Array.isArray(item.bom) && item.bom.length>0) || item.costMat!==undefined;
 }
 
@@ -5700,13 +5887,18 @@ function syncCustomItemMaterialsSpec(item){
 // ═══════════════════════════════════════════════════════════════════
 function isCustomSection(k){ return /^sec_\d+$/.test(String(k||'')); }
 function nextSectionId(){ let n=1; while(items.some(i=>i.category==='sec_'+n)) n++; return 'sec_'+n; }
-function dbCategory(catId){ return (DB.categories||[]).find(c=>c.id===catId)||null; }
+// KC:L5 — the sections a line can be filed under: in KC mode the seven tab ids come first (D7.TABS), then the catalogue's own categories; otherwise exactly DB.categories. (The status-bar counts and the Quick Quote
+// wizard keep DB.categories.)
+function qbCategories(){ return d7On() ? (D7.TABS||[]).map(t=>({id:t.id,label:t.label,color:'#1E3A5F'})).concat(DB.categories||[]) : (DB.categories||[]); }
+function dbCategory(catId){ return qbCategories().find(c=>c.id===catId)||null; }
 function sectionItems(catId){ return items.filter(i=>i.category===catId); }
 // The labels of the built-in sections, for a quote rendered before the product database has loaded (a #quote= link, an offline open): the heading reads the section's own name,
 // never the raw id ("prep_washing" printed as PREP_WASHING). An id nobody knows is spelled out in words ("exhaust_system" -> "Exhaust System").
 const SECTION_FALLBACK_LABELS={
   cooking_line:'Cooking Line', prep_washing:'Preparation & Washing', refrigeration:'Refrigeration', baking:'Baking', ventilation:'Ventilation',
-  exhaust_system:'Exhaust System', fresh_air_system:'Fresh Air System', gas_line:'Gas Line', fire_suppression:'Fire Suppression', miscellaneous:'Miscellaneous'
+  exhaust_system:'Exhaust System', fresh_air_system:'Fresh Air System', gas_line:'Gas Line', fire_suppression:'Fire Suppression', miscellaneous:'Miscellaneous',
+  // D7 (spec 3.1) — the seven tab ids a D7 line is sectioned under, so a quote shown before the catalogue has loaded still prints their proper names
+  prep:'Prep and storage', wash:'Washing', cook:'Cooking', vent:'Ventilation', cold:'Refrigeration', multi:'Multi-purpose', mech:'Mechanical Systems'
 };
 function humanSectionLabel(catId){
   const id=String(catId==null?'':catId);
@@ -5762,7 +5954,7 @@ function sectionKeys(){
   const seen=[], has={};
   items.forEach(i=>{ const k=i.category||'miscellaneous'; if(!has[k]){ has[k]=1; seen.push(k); } });
   if(seen.some(isCustomSection)) return seen;
-  const order=DB.categories?DB.categories.map(c=>c.id):[];
+  const order=qbCategories().map(c=>c.id);
   return [...order.filter(k=>has[k]),...seen.filter(k=>!order.includes(k))];
 }
 
@@ -5812,6 +6004,7 @@ function moveSection(catId,dir){
     newKeys.forEach(k=>{ (grouped[k]||[]).forEach(i=>out.push(i)); });
     items.length=0; out.forEach(i=>items.push(i));
   });
+  D7.h('adapter.afterItemsChange','moveSection',null);   // D7:E16 — no single line: a whole section moved (catId is the first argument of moveSection)
   saveToStorage(); renderItems(); flashItemSaved();
 }
 
@@ -5839,6 +6032,7 @@ function moveItemToSection(idx){
     it.category=target;
     if(carrier) it.catLabel=carrier.catLabel; else delete it.catLabel;
   }
+  D7.h('adapter.afterItemsChange','moveItemToSection',idx);   // D7:E16
   saveToStorage(); renderItems(); flashItemSaved();
 }
 
@@ -5888,7 +6082,10 @@ function unifyMiscIntoItems(){
 // ═══════════════════════════════════════════════════════════════════
 const _detailsOpen=new WeakSet();   // the lines whose "Details ▸" editor is open — screen state only, never saved or filed
 function lineHasPhoto(item,idx){ return !!(item && (item.photoUrl || quotePhotos.some(p=>p && p.itemIndex===idx))); }
-function lineCompleteness(item,idx){ return window.QBSpecSheet.completeness(item,{hasPhoto:lineHasPhoto(item,idx),leadOn:!isLegacyDoc()}); }
+function lineCompleteness(item,idx){
+  if(d7On() && isKcProductLine(item)) return {score:1,missing:[],fabricated:true};   // D7:E20 — a configured product line is complete by definition (made to order, always has a size, its wording is edited in the panel)
+  return window.QBSpecSheet.completeness(item,{hasPhoto:lineHasPhoto(item,idx),leadOn:!isLegacyDoc()});
+}
 // the quote-level view (null on Brilliant Steel / without the helper file)
 function docQuality(){
   return docSheetOn() ? window.QBSpecSheet.quality(items,{hasPhoto:(it,i)=>lineHasPhoto(it,i),leadOn:!isLegacyDoc()}) : null;
@@ -5896,6 +6093,7 @@ function docQuality(){
 // the chips of one line: what the printed sheet still lacks, and the "custom wording" mark on a line whose specs are the preparer's own text
 function lineChipsHtml(item,idx){
   if(!docSheetOn() || !item || item.id==='MISCFEE') return '';
+  if(d7On() && isKcProductLine(item)) return '';   // D7:E20 — nothing is missing on a configured product line, and it has no "custom wording" to regenerate
   const c=lineCompleteness(item,idx);
   const chip=(cls,txt,tip)=>`<span class="ms-chip ${cls}" title="${attrEsc(tip)}">${txt}</span>`;
   let h='';
@@ -5920,7 +6118,10 @@ function lineDetailsEditorHtml(item,idx){
     +`<input type="text" maxlength="300" value="${txtEsc((r&&r.value)||'')}" placeholder="Value" aria-label="Extra row ${i+1} value" onchange="editSpecLine(${idx},${i},'value',this)">`
     +`<button type="button" class="move-btn" title="Remove this row" onclick="removeSpecLine(${idx},${i})">✕</button></div>`).join('');
   const lines=a=>txtEsc((Array.isArray(a)?a:[]).join('\n'));
-  return `<div class="line-details no-print" data-ld="${idx}">
+  // D7:E20 — every other D7 line gains a "Use" row (Commercial / Institutional / Residential -> item.use, printed in the first line of the print block: "STAINLESS STEEL 304 | COMMERCIAL")
+  const useNow=String(item.use||'commercial').toLowerCase();
+  const useRow=d7On() ? `<div class="ld-row"><span class="ld-lbl">Use</span><div class="ld-body"><div class="ld-pills" role="group" aria-label="Use">${[['commercial','Commercial'],['institutional','Institutional'],['residential','Residential']].map(([v,l])=>`<button type="button" class="ld-pill" aria-pressed="${useNow===v}" onclick="d7SetUse(${idx},'${v}')">${l}</button>`).join('')}</div></div></div>` : '';
+  return `<div class="line-details no-print" data-ld="${idx}">${useRow}
     <div class="ld-row"><span class="ld-lbl">Finish</span><div class="ld-body"><div class="ld-pills" role="group" aria-label="Finish">${pills}</div></div></div>
     <div class="ld-row"><span class="ld-lbl">Includes</span><div class="ld-body"><textarea rows="3" placeholder="One item per line" aria-label="Includes" onchange="editIncludes(${idx},this)">${lines(item.includes)}</textarea></div></div>
     <div class="ld-row"><span class="ld-lbl">Not included</span><div class="ld-body"><textarea rows="2" placeholder="One item per line" aria-label="Not included" onchange="editExcludes(${idx},this)">${lines(item.excludes)}</textarea></div></div>
@@ -5931,6 +6132,7 @@ function lineDetailsEditorHtml(item,idx){
 // the "Details ▸" row: the toggle, the chips and (when open) the editor
 function lineDetailsHtml(item,idx){
   if(!docSheetOn() || !item || item.id==='MISCFEE') return '';
+  if(d7On() && isKcProductLine(item)) return '';   // D7:E20 — no Details editor on a configured product line: its wording is edited in the panel ("Edit the wording")
   const open=_detailsOpen.has(item);
   return `<div class="spec-line line-details-row no-print"><button type="button" class="cfg-link line-details-toggle" aria-expanded="${open}" onclick="toggleLineDetails(${idx})">${open?'Details ▾':'Details ▸'}</button><span class="ld-chips" data-chips="${idx}" style="display:contents;">${lineChipsHtml(item,idx)}</span></div>${open?lineDetailsEditorHtml(item,idx):''}`;
 }
@@ -5941,6 +6143,12 @@ function toggleLineDetails(idx){
 }
 // one phrase per line, blank lines dropped, at most 12 phrases of 160 characters
 const _phraseLines=el=>String((el&&el.value)||'').split('\n').map(x=>x.trim().slice(0,160)).filter(Boolean).slice(0,12);
+// D7:E20 — the "Use" pills. Chunk D's D7.doc.setUse(idx, use) may take over (it can also refresh the print block); the default just sets item.use.
+function d7SetUse(idx,use){
+  const it=items[idx]; if(!it || (use!=='commercial' && use!=='institutional' && use!=='residential')) return;
+  if(D7.has('doc.setUse')) D7.h('doc.setUse',idx,use); else it.use=use;
+  saveToStorage(); renderItems(); flashItemSaved();
+}
 function editFinish(idx,v){
   const it=items[idx]; if(!it || !window.QBSpecSheet) return;
   if(v!=='' && !Object.prototype.hasOwnProperty.call(window.QBSpecSheet.FINISH_LABELS,v)) return;
@@ -5978,7 +6186,7 @@ function refreshLineDocParts(idx){
   const tbody=document.getElementById('itemsTbody');
   const row=(tbody && tbody.querySelector) ? tbody.querySelector(`tr.item-row[data-idx="${idx}"]`) : null;
   if(!it || !row || !docSheetOn()){ renderItems(); return; }
-  const slot=row.querySelector('.sheet-slot'); if(slot) slot.innerHTML=window.QBSpecSheet.html(it,{view:currentView,bac:false,leadOn:!isLegacyDoc()},txtEsc);
+  const slot=row.querySelector('.sheet-slot'); if(slot) slot.innerHTML=d7On()?d7SheetHtml(it,idx):window.QBSpecSheet.html(it,{view:currentView,bac:false,leadOn:!isLegacyDoc()},txtEsc);   // D7:E12
   const chips=row.querySelector('.ld-chips'); if(chips) chips.innerHTML=lineChipsHtml(it,idx);
   renderDocExtras();
 }
@@ -6049,6 +6257,7 @@ function renderStandardPage(){
   const P=QB_STANDARD_PAGE, co=(currentCo==='BI')?'BI':'BK', plan=getWarrantyPlan(), warrantyOn=warrantyIsDefault();
   let bullets=[];
   try{ bullets=window.QBSpecSheet.constructionBullets(items,it=>{ const f=cfgFamily(it.familyId); return f?f.label:''; }); }catch(e){}
+  if(d7On()){ const _b=D7.h('doc.standardBullets'); if(Array.isArray(_b)) bullets=bullets.concat(_b); }   // D7:E21 (M8) — chunk D adds one "Standard construction" bullet: the kc products' construction sentences, once each
   const block=(key,inner)=>`<section class="std-block"><h4>${txtEsc(P.headings[key])}</h4>${inner}</section>`;
   let h=`<div class="std-hdr"><div class="std-title">${txtEsc(P.title)}</div><div class="std-meta">${txtEsc(P.brand[co])}</div></div>`;
   h+=block('materials',`<p>${txtEsc(P.materials)}</p>`);
@@ -6069,12 +6278,28 @@ function renderDocExtras(){
     notes.innerHTML = n ? ((n.dims?`<p class="dims-legend">${txtEsc(n.dims)}</p>`:'')+(n.lead?`<p class="lead-legend">${txtEsc(n.lead)}</p>`:'')) : '';
   }
   const strip=document.getElementById('summaryStrip');
-  if(strip) strip.textContent = on ? window.QBSpecSheet.summaryStrip(summaryState()) : '';
+  if(strip){
+    const st=on?summaryState():null;
+    let txt = on ? window.QBSpecSheet.summaryStrip(st) : '';
+    // D7:E22 — QBSpecSheet.summaryStrip prints "65% down payment, balance on completion"; the owner wording is "65% downpayment, 35% upon delivery". Chunk D's D7.doc.summaryStrip(text, state) may return the replacement text.
+    if(on && d7On()){ const o=D7.h('doc.summaryStrip', txt, st); if(typeof o==='string' && o) txt=o; }
+    strip.textContent = txt;
+  }
   renderStandardPage();
   renderQualityChip();
 }
 
+// D7:E12 — what prints under a line in KC mode (spec 3.3, 3.4): the one print block of the doc layer, else the old spec sheet. The row template that uses it, d7ItemRowHtml(), is defined after renderItems():
+// tests/quote-builder-static.test.mjs pins that the code between the spec-sheet banner and `function renderItems(){` reads no price, and the row reads unitPrice like the old row does.
+// Hooks of the row: doc.photoCell / doc.screenBlock / doc.printBlock / doc.workforceBlock (doc layer), adapter.lineRow, pricing.priceNote. A missing hook falls back cleanly: no photo, the editable cells, the old sheet, nothing.
+function d7SheetHtml(item,idx){      // what prints under the line: the one print block (chunk D), else the old spec sheet
+  if(D7.has('doc.printBlock')) return D7.h('doc.printBlock',item,idx,{view:currentView});
+  return docSheetOn()?window.QBSpecSheet.html(item,{view:currentView,bac:false,leadOn:!isLegacyDoc()},txtEsc):'';
+}
 function renderItems(){
+  D7.h('adapter.sync');   // D7:E12 — first statement: rebuild KC.S.lines, the mirror the kc product files read, from the kc lines (chunk B; no rendering)
+  if(d7On()) D7.h('pricing.autoPrice');   // D7:R4 (chunk C gap 1) — price every cost-basis line at once (cheap, idempotent). Only in KC mode: a legacy quote's prices are never touched by this layer
+  d7SyncMode();           // D7:E11 — body.d7-on, the tab row and the cards follow d7On() (it changes when a quote "as issued" is opened, or the company switches)
   unifyMiscIntoItems();
   unifyPaymentIntoTerms();
   // Owner ruling 2026-09-01: an applied discount shows PER ITEM on the
@@ -6084,6 +6309,18 @@ function renderItems(){
   let _discFactor=0;
   try{ const _t=computeTotals(); if(_t.discountAmt>0 && _t.discBase>0) _discFactor=_t.discountAmt/_t.discBase; }catch(e){}
   const tbody=document.getElementById('itemsTbody');
+  // D7:E11 — the table header and layout class. D7: # · Photo · Description · Quantity · Unit price · Amount · Actions. Otherwise the old seven headers. ALWAYS seven columns (spec 3.5): Unit price and
+  // Amount stay columns 5 and 6, which the Workforce Copy rules address by position. A Photo column that is off (or whose drawing hook, chunk D, is not loaded yet) keeps its cells, empty, at width 0.
+  const d7=d7On();
+  const photoOn=d7 && document.getElementById('d7PhotoCol')?.checked!==false && D7.has('doc.photoCell');
+  { const tbl=tbody.closest('table'); if(tbl){ tbl.classList.toggle('d7-cols',d7); tbl.classList.toggle('d7-noph',d7&&!photoOn); } }
+  { const th=document.getElementById('itemsThead');
+    if(th){
+      if(d7){   // KC mode: the D7 header; the page's own (legacy) header is kept to put back
+        if(th._kcLegacyHtml===undefined) th._kcLegacyHtml=th.innerHTML;
+        th.innerHTML=`<tr><th class="c-no">#</th><th class="c-ph">${photoOn?'Photo':''}</th><th class="c-desc">Description</th><th class="c-qty">Quantity</th><th class="c-up">Unit price</th><th class="c-amt">Amount</th><th class="c-act no-print">Actions</th></tr>`;
+      } else if(th._kcLegacyHtml!==undefined){ th.innerHTML=th._kcLegacyHtml; th._kcLegacyHtml=undefined; }   // back from KC mode: byte for byte the markup of the page
+    } }
   if(!items.length){
     tbody.innerHTML='<tr><td colspan="7" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
     renderTotals(); renderQuotePhotos(); return;
@@ -6145,6 +6382,9 @@ function renderItems(){
       // uses on Barro quotes (customCostGateHtml is '' for BS) — see
       // bsPassThroughRowHtml() for the ruling.
       const bsPtRowHtml=bsPassThroughRowHtml(item,idx);
+      if(d7){   // D7:E12 — the D7 row (spec 3.3): seven cells with the classes c-no c-ph c-desc c-qty c-up c-amt c-act. The old row below is untouched (Brilliant Steel, "as issued").
+        html+=d7ItemRowHtml(item,idx,{n:globalN++,specText,dragHandle,isFirst,isLast,volNoteHtml,discFactor:_discFactor,photoOn,costGateHtml,bsPtRowHtml,sheetOn});
+      } else
       html+=`<tr class="item-row" data-idx="${idx}" ondragover="onItemRowDragOver(event,${idx})" ondragleave="onItemRowDragLeave(event)" ondrop="onItemRowDrop(event,${idx})">
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
@@ -6189,6 +6429,53 @@ function renderItems(){
   renderTotals();
   renderQuotePhotos();
   if(currentView==='internal') buildLaborTable();
+}
+// D7:E12 — one <tr class="item-row"> of the D7 layout (spec 3.3), the template of renderItems() in KC mode. It sits after renderItems() (see the note at d7SheetHtml): a hoisted declaration.
+function d7ItemRowHtml(item,idx,c){
+  const kc=isKcLine(item), screen=kc && D7.has('doc.screenBlock'), printBlock=D7.has('doc.printBlock'), sheet=d7SheetHtml(item,idx);
+  const ce=kc?'false':'true';        // a kc line's wording is edited in the kc panel, never inline
+  let desc='';
+  if(screen){
+    desc+=D7.h('doc.screenBlock',item,idx);
+    desc+=`<div class="print-only sheet-slot">${sheet}</div>`;
+  } else {
+    desc+=`<div class="name-cell cell-edit${printBlock?' no-print':''}" contenteditable="${ce}" onblur="editName(${idx},this)">${txtEsc(item.name)}</div>`;
+    desc+=`<div class="print-only sheet-slot">${sheet}</div>`;
+    desc+=`<div class="spec-line ${c.specText?'':'pe-empty'}${c.sheetOn?' no-print':''}"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="${ce}" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(c.specText)}</span></div>`;
+    desc+=`<div class="spec-line ${(item.dims||'')?'':'pe-empty'}${c.sheetOn?' no-print':''}"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="${ce}" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>`;
+    desc+=`<div class="notes-cell cell-edit ${(item.notes||'')?'':'pe-empty'}${c.sheetOn?' no-print':''}" contenteditable="${ce}" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>`;
+  }
+  desc+=`<div class="wf-only">${D7.h('doc.workforceBlock',item,idx)}</div>`;
+  desc+=`${kc?'':c.costGateHtml}${c.bsPtRowHtml}${item.familyId?cfgLineRowHtml(item,idx):''}${D7.h('adapter.lineRow',item,idx)}${lineDetailsHtml(item,idx)}`;
+  const qty=Number(item.qty)>0?item.qty:1, df=c.discFactor, disc=(df>0&&!item.passThrough);
+  return `<tr class="item-row" data-idx="${idx}" ondragover="onItemRowDragOver(event,${idx})" ondragleave="onItemRowDragLeave(event)" ondrop="onItemRowDrop(event,${idx})">
+        <td class="c-no" style="text-align:center;color:var(--gray-dark);font-size:12px;">${c.n}</td>
+        <td class="c-ph">${c.photoOn?D7.h('doc.photoCell',item,idx):''}</td>
+        <td class="c-desc">${desc}</td>
+        <td class="c-qty" style="text-align:center;">
+          <div class="d7-qty no-print">
+            <div class="qty-stepper compact" style="justify-content:center;">
+              <button type="button" class="qty-btn no-print" onclick="bumpQty(${idx},-1)" tabindex="-1">−</button>
+              <input class="cell-num" type="number" min="1" value="${qty}" onchange="updateQty(${idx},this)" style="width:40px;">
+              <button type="button" class="qty-btn no-print" onclick="bumpQty(${idx},1)" tabindex="-1">+</button>
+            </div>
+            <input class="cell-unit" type="text" value="${attrEsc(item.unit||'')}" onchange="updateUnit(${idx},this)" style="width:55px;" aria-label="Unit">
+          </div>
+          <span class="print-only">${qty} ${txtEsc(item.unit||'pc')}</span>
+        </td>
+        <td class="c-up" style="text-align:right;"><input class="edit-price${lineNeedsPrice(item)?' needs-price':''}" type="number" step="0.01" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"${lineNeedsPrice(item)?' title="No price yet — type one here"':''}>${D7.h('pricing.priceNote',item,idx)}<span class="price-print">${disc?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-df))}</span>`:formatPeso(item.unitPrice)}</span></td>
+        <td class="c-amt" style="text-align:right;font-weight:600;">${disc?`<span class="disc-old">${formatPeso(item.amount)}</span> <span class="disc-new">${formatPeso(item.amount*(1-df))}</span>`:formatPeso(item.amount)}${c.volNoteHtml}</td>
+        <td class="c-act no-print" style="text-align:center;">
+          <div class="row-actions">
+            ${c.dragHandle}
+            <button class="move-btn" onclick="moveItemUp(${idx})" title="Move up" ${c.isFirst?'disabled':''}>▲</button>
+            <button class="move-btn" onclick="moveItemDown(${idx})" title="Move down" ${c.isLast?'disabled':''}>▼</button>
+            <button class="move-btn" onclick="duplicateItem(${idx})" title="Duplicate this line">⧉</button>
+            <button class="move-btn" onclick="moveItemToSection(${idx})" title="Move to another section">⇄</button>
+            <button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button>
+          </div>
+        </td>
+      </tr>`;
 }
 
 // `subset` scopes the whole computation to one section (options quote).
@@ -6369,7 +6656,7 @@ function totalsLines(t,grandLabel){
   (t.miscLines||[]).forEach(f=>{
     out.push({label:txtEsc(f.name)+(f.foc?' — FOC':''), amt: formatPeso(f.amt)});
   });
-  if(t.discountCapped) out.push({label:'<span style="font-size:10px;color:var(--orange);">Discount capped — a discount never goes below true cost (it may eat the markup, never the overhead)</span>', amt:'', cls:'discount'});
+  if(t.discountCapped) out.push({label:'<span style="font-size:10px;color:var(--orange);">'+(d7On()?'Discount capped: it cannot go below the project cost.':'Discount capped — a discount never goes below true cost (it may eat the markup, never the overhead)')+'</span>', amt:'', cls:'discount'});   // D7:E15
   // PRICING-TIERS-SPEC.md §3.3 — inserted directly after Subtotal, before
   // D&I. With t.volumeBreakTotal===0 (no tiers configured) this renders
   // nothing (§1.4).
@@ -6474,6 +6761,15 @@ function updateRunningTotalPill(t){
   pill.style.display='block';
 }
 
+// D7:E22 (R2) — a blank new quote starts at 65% down on Barro Kitchens / Barro Industries; Brilliant Steel stays at 50. _dpTouched: the preparer picked a value.
+let _dpTouched=false;
+function d7DefaultDp(engine){ return ((engine||quoteEngine)==='kc1' && currentCo!=='BS') ? '65' : '50'; }   // KC:L2 — follows the engine, not the mere presence of the layer: a legacy blank quote stays at 50
+// the blank-quote down payment (see kcAdoptEngineIfBlank): only a blank quote whose field the preparer has not touched
+function d7ApplyBlankDp(){
+  if(items.length || _dpTouched) return;
+  const dp=document.getElementById('dpMode'), v=d7DefaultDp();
+  if(dp && dp.value!==v && Array.from(dp.options||[]).some(o=>o.value===v)) dp.value=v;
+}
 // ── Payment schedule ──
 function onDpModeChange(){
   const mode=document.getElementById('dpMode').value;
@@ -7072,16 +7368,17 @@ function editNotes(idx,el){items[idx].notes=el.innerText.trim();saveToStorage();
 // Re-audit fix (sales.txt, "no lower-bound/sign guard") — Math.max(1,...)
 // matches Quick Estimate's qeSetQty/qeAddItem (sales.js), which already
 // guarded against 0 *and* negative qty; this only guarded against 0.
-function updateQty(idx,el){items[idx].qty=Math.max(1,parseInt(el.value)||1);items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
+function updateQty(idx,el){items[idx].qty=Math.max(1,parseInt(el.value)||1);items[idx].amount=items[idx].unitPrice*items[idx].qty;D7.h('adapter.afterItemsChange','updateQty',idx);/* D7:E16 */saveToStorage();renderItems();flashItemSaved();}
 // Qty +/- stepper buttons (audit: touch-friendly bump instead of retyping the
 // field) — same Math.max(1,...) guard as manual entry via updateQty above.
 function bumpQty(idx,delta){
   if(!items[idx]) return;
   items[idx].qty=Math.max(1,(items[idx].qty||1)+delta);
   items[idx].amount=items[idx].unitPrice*items[idx].qty;
+  D7.h('adapter.afterItemsChange','bumpQty',idx);   // D7:E16
   saveToStorage();renderItems();flashItemSaved();
 }
-function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();flashItemSaved();}
+function updateUnit(idx,el){items[idx].unit=el.value;D7.h('adapter.afterItemsChange','updateUnit',idx);/* D7:E16 */saveToStorage();flashItemSaved();}
 function updatePrice(idx,el){
   const it=items[idx];
   it.unitPrice=parseFloat(el.value)||0;it.amount=it.unitPrice*it.qty;
@@ -7089,10 +7386,11 @@ function updatePrice(idx,el){
   // CONFIGURATOR R4 — a line that carries a price basis (configured, or handed off from a website request) records the typed price as its
   // basis too: priceBasis 'manual' is the PERSISTED twin of priceManual (which the filed payload strips), and a real price clears "needs a price".
   // Plain catalogue lines have no basis and stay byte-identical to before.
-  if(it.priceBasis!==undefined){ it.priceBasis='manual'; if(it.unitPrice>0) delete it.needsPrice; }
+  if(it.priceBasis!==undefined){ it.priceBasis='manual'; if(it.unitPrice>0) delete it.needsPrice; }   // D7:E16 — a kc line carries priceBasis 'configured', so a typed price makes it 'manual' here
+  D7.h('adapter.afterItemsChange','updatePrice',idx);   // D7:E16
   saveToStorage();renderItems();flashItemSaved();
 }
-function deleteItem(idx){items.splice(idx,1);saveToStorage();renderItems();}
+function deleteItem(idx){items.splice(idx,1);D7.h('adapter.afterItemsChange','deleteItem',idx);/* D7:E16 */saveToStorage();renderItems();}
 // Duplicate a line item (audit: "no duplicate/clone-line-item action") —
 // inserts an identical copy directly after the original; the copy is then
 // edited inline exactly like any custom item (name/specs/dims/qty/price cells
@@ -7107,6 +7405,7 @@ function duplicateItem(idx){
     const copy=JSON.parse(JSON.stringify(items[idx]));
     items.splice(idx+1,0,copy);
   });
+  D7.h('adapter.afterItemsChange','duplicateItem',idx);   // D7:E16 — the copy is at idx+1; chunk B gives it a new kcId
   saveToStorage();renderItems();flashItemSaved();
 }
 
@@ -7149,6 +7448,7 @@ function moveItemUp(idx){
   if(pos<=0) return;
   const other=grp[pos-1];
   withPhotoIndexRemap(()=>{ [items[idx],items[other]]=[items[other],items[idx]]; });
+  D7.h('adapter.afterItemsChange','moveItemUp',idx);   // D7:E16
   saveToStorage(); renderItems(); flashItemSaved();
 }
 function moveItemDown(idx){
@@ -7157,6 +7457,7 @@ function moveItemDown(idx){
   if(pos===-1||pos>=grp.length-1) return;
   const other=grp[pos+1];
   withPhotoIndexRemap(()=>{ [items[idx],items[other]]=[items[other],items[idx]]; });
+  D7.h('adapter.afterItemsChange','moveItemDown',idx);   // D7:E16
   saveToStorage(); renderItems(); flashItemSaved();
 }
 function onItemDragStart(e,idx){
@@ -7192,6 +7493,7 @@ function onItemRowDrop(e,idx){
     const insertAt=from<idx?idx-1:idx; // account for the shift caused by removing `from` first
     items.splice(insertAt,0,moved);
   });
+  D7.h('adapter.afterItemsChange','onItemRowDrop',idx);   // D7:E16 — idx = the drop target's index before the move; the moved line is items.indexOf(moved)
   saveToStorage(); renderItems();
 }
 
@@ -7228,6 +7530,7 @@ function _miscRates(){
 // the full OH+MK load (× 2.50), same as item labor.
 const MISC_TYPE_LABEL = { delivery:'Delivery', installation:'Installation', labor:'Additional labor', other:'Misc cost' };
 function miscMultOf(m){
+  if(d7On() && D7.pricing && D7.pricing.miscMult) return D7.pricing.miscMult(m);   // D7:R4 (chunk C gap 2) — delivery / installation / other = cost x 1.25; additional labor = cost x the markup of this quote
   const r = _miscRates();
   return (m && m.type==='labor') ? r.mult : r.miscMult;
 }
@@ -7279,7 +7582,7 @@ function renderMiscCosts(){
     const distBtn = m.reflect ? '' :
       `<button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:1px 8px;font-size:10.5px;" onclick="openMiscDistModal('${m.id}')" title="Choose which quoted items quietly absorb this cost">→ distribute${nDist?` (${nDist})`:' (all)'}</button>`;
     return `<tr>
-      <td style="white-space:nowrap;"><select class="cell-unit" onchange="updateMiscField('${m.id}','type',this.value)" title="Type sets the pricing: Delivery/Installation/Misc are pass-throughs at cost + 25% OH; Additional labor carries the full OH+MK load (× 2.50). Delivery and Installation present as ONE combined line on the quotation." style="width:120px;">
+      <td style="white-space:nowrap;"><select class="cell-unit" onchange="updateMiscField('${m.id}','type',this.value)" title="${d7On() ? 'Type sets the pricing: Delivery/Installation/Other are pass-throughs at cost + 25%; Additional labor is priced at cost × the markup of this quote. Delivery and Installation present as ONE combined line on the quotation.' : 'Type sets the pricing: Delivery/Installation/Misc are pass-throughs at cost + 25% OH; Additional labor carries the full OH+MK load (× 2.50). Delivery and Installation present as ONE combined line on the quotation.'}" style="width:120px;">
         <option value="delivery" ${ty==='delivery'?'selected':''}>🚚 Delivery</option>
         <option value="installation" ${ty==='installation'?'selected':''}>🔧 Installation</option>
         <option value="labor" ${ty==='labor'?'selected':''}>👷 Add'l labor</option>
@@ -7287,7 +7590,7 @@ function renderMiscCosts(){
       </select></td>
       <td><input type="text" class="cell-unit" placeholder="${attrEsc(MISC_TYPE_LABEL[ty])} — details" value="${attrEsc(m.desc||'')}" onchange="updateMiscField('${m.id}','desc',this.value)" style="width:100%;min-width:130px;"></td>
       <td style="text-align:right;"><input type="number" min="0" step="0.01" class="cell-unit" value="${m.cost||''}" placeholder="0" onchange="updateMiscField('${m.id}','cost',this.value)" style="width:100px;text-align:right;"></td>
-      <td style="text-align:right;">${formatPeso(loadAmt)} <span style="font-size:9.5px;color:var(--gray-dark);">${ty==='labor'?'OH+MK 150%':'OH 25%'}</span></td>
+      <td style="text-align:right;">${formatPeso(loadAmt)} <span style="font-size:9.5px;color:var(--gray-dark);">${d7On() ? (ty==='labor' ? 'markup ×'+(+mult.toFixed(3)) : '+25%') : (ty==='labor'?'OH+MK 150%':'OH 25%')}</span></td>
       <td style="text-align:right;font-weight:700;">${formatPeso(q)}${m.foc?' <span style="font-size:9.5px;color:var(--green);font-weight:700;">FOC → discount</span>':''}</td>
       <td style="text-align:center;"><input type="checkbox" ${m.foc?'checked':''} onchange="toggleMiscFoc('${m.id}')" title="Free of charge — printed at full value after the Subtotal, then given back inside the consolidated 'Less: FOC' discount row; the cost still counts against our margin"></td>
       <td style="text-align:center;"><input type="checkbox" ${m.reflect?'checked':''} ${m.foc?'disabled':''} onchange="toggleMiscReflect('${m.id}')" title="Ticked: shows as its own line after the Subtotal on the quotation. Unticked: distributed into item prices."> ${m.foc?'':distBtn}</td>
@@ -7560,6 +7863,7 @@ function ptUnitCostOf(item, basis, cs){
 // mirrors, at item grain, the pre-v2 panel's whole-quote laborEst-vs-
 // capLabor either/or.
 function computeTrueCost(){
+  if(d7On() && D7.pricing && D7.pricing.trueCost) return D7.pricing.trueCost();   // D7:E14 (spec 3.6) — the R1 engine; same return keys. The old body below stays for Brilliant Steel and "as issued" quotes.
   const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
   const liveById = new Map((DB.products||[]).map(p=>[p.id,p]));
   const laborPct = (typeof cs.laborPctOfMaterials==='number') ? cs.laborPctOfMaterials : 0.70;
@@ -7675,7 +7979,7 @@ function computeMarginSummary(laborEst){
   // modal is closed). A 'change' event is dispatched so the Submit/File
   // button label (wired to 'change' at buildVerifyModal() time) stays in
   // sync without needing a full modal rebuild.
-  if (cost.sell < cost.floorTotal) {
+  if (cost.sell < cost.floorTotal && !approvalCoversNow()) {   // D7:R4 — an approved quote (unchanged since) is not asked again
     const rac=document.getElementById('reqApprovalCheck');
     if (rac && !rac.checked) { rac.checked=true; rac.dispatchEvent(new Event('change')); }
   }
@@ -7686,6 +7990,7 @@ function computeMarginSummary(laborEst){
 // for #marginTbl. Split out of computeMarginSummary() for readability only;
 // it renders nothing itself (returns a string).
 function renderTrueCostPanelHtml(cost){
+  if(d7On() && D7.pricing && D7.pricing.panelHtml) return D7.pricing.panelHtml(cost);   // D7:E14 — the D7 calculator (no OH / MK dials, a markup for this quote)
   const cs=cost.cs;
   // ── the CALCULATOR (Internal redesign, owner ruling 2026-08-31) ─────────
   // One surface, two cards: the build waterfall (materials → direct → dials
@@ -7875,6 +8180,7 @@ function onMkOverrideChange(val){
 // Clears hand-typed prices so every costed line snaps back to the computed
 // selling price (direct/unit × (1+OH+MK), rounded to the nearest ₱100).
 function resetPricesToComputed(){
+  if(d7On() && D7.pricing && D7.pricing.resetPrices) return D7.pricing.resetPrices();   // D7:E14
   // CONFIGURATOR R4: a hand-typed or website-basis line that HAS a cost basis goes back to the cost rule too; one without a basis keeps its price
   const liveById = new Map((DB.products||[]).map(p => [p.id, p]));
   items.forEach(i => {
@@ -7889,6 +8195,7 @@ function resetPricesToComputed(){
 // rounding. A hand-typed price sticks (updatePrice sets priceManual) and
 // simply means a different effective MK.
 function applyComputedPricing(cost){
+  if(d7On() && D7.pricing && D7.pricing.apply) return D7.pricing.apply(cost);   // D7:E14 (spec 3.6) — the auto-pricer: project cost × markup, nearest ₱10
   if (!cost) return false;
   let changed = false;
   const laborPctA = (typeof cost.cs.laborPctOfMaterials==='number') ? cost.cs.laborPctOfMaterials : 0.80;
@@ -8216,6 +8523,7 @@ function deletePhoto(idx){
   renderQuotePhotos();
   saveToStorage();
   refreshLineChips();
+  if(d7On()) renderItems();   // KC:L11 — a line whose linked photo is gone goes back to its drawing
 }
 function updatePhotoCaption(idx,val){
   if(!quotePhotos[idx]) return;
@@ -8229,6 +8537,7 @@ function updatePhotoLink(idx,val){
   saveToStorage();
   renderPhotoAnnex();
   refreshLineChips();   // the "no photo" chip and the quote strength follow the link
+  if(d7On()) renderItems();   /* KC:L11 — the Photo column of a new-rules quote draws the linked photo: without this the Estimator kept the drawing until some other change redrew the table */
 }
 // Renders BOTH the on-screen editor grid (#photoGrid) and the printed annex
 // (#photoAnnex) — called from renderItems() whenever items change (so the
@@ -8290,11 +8599,13 @@ function movePhotoUp(i){
   if(i<=0||!quotePhotos[i]) return;
   [quotePhotos[i-1],quotePhotos[i]]=[quotePhotos[i],quotePhotos[i-1]];
   saveToStorage(); renderQuotePhotos();
+  if(d7On()) renderItems();   // KC:L11 — the first photo of a line is the one its cell shows
 }
 function movePhotoDown(i){
   if(i>=quotePhotos.length-1||!quotePhotos[i]) return;
   [quotePhotos[i],quotePhotos[i+1]]=[quotePhotos[i+1],quotePhotos[i]];
   saveToStorage(); renderQuotePhotos();
+  if(d7On()) renderItems();   // KC:L11 — as above
 }
 // the annex header's right-hand text: company, the CURRENT quote number, the client
 function annexMetaHtml(){
@@ -8377,7 +8688,7 @@ function _flushSaveToStorage(){
       qnoSeq:document.getElementById('qnoSeq').value,
     };
     localStorage.setItem('bkqb_client',JSON.stringify(client));
-    localStorage.setItem('bkqb_items',JSON.stringify(items,(k,v)=>k==='_cfg'?undefined:v));   // CONFIGURATOR: `_cfg` is runtime-only
+    localStorage.setItem('bkqb_items',JSON.stringify(items,(k,v)=>(k==='_cfg'||k==='_kc')?undefined:v));   // CONFIGURATOR: `_cfg` is runtime-only; D7:E18 — so is a kc line's `_kc`
     localStorage.setItem('bkqb_source',JSON.stringify(cleanSourceRef(sourceRef,true)));
     localStorage.setItem('bkqb_terms_content',JSON.stringify(termsContent));
     localStorage.setItem('bkqb_terms_enabled',JSON.stringify(termsEnabled));
@@ -8426,6 +8737,15 @@ function getPricingFields(){
   // runs, so writing el.value on a select whose <option>s don't exist yet
   // would silently drop the saved basis. The module variable is authoritative.
   o.optionsBasis = optionsBasisKey || '';
+  // KC:L2 — the engine stamp (spec 2.2) and the last approval this quote carries (spec 3.4) ride every state path (drafts, payloads, templates, revisions, #quote= links) in the pricing fields.
+  o.engine=quoteEngine;
+  o.approvalCarry=(quoteEngine==='kc1' ? D7.h('live.carry') : '')||null;
+  // D7:E17 — KC additions to the pricing fields. photoCol (spec 3.5) is written here because #d7PhotoCol belongs to this file; markupOvr comes from the pricing hook; doc.fields is an optional extra of the doc layer.
+  // So drafts, payloads, templates and revisions carry them. A legacy quote gets none of them.
+  if(quoteEngine==='kc1'){
+    const pc=document.getElementById('d7PhotoCol'); if(pc) o.photoCol=!!pc.checked;
+    Object.assign(o, D7.h('pricing.fields') || {}, D7.h('doc.fields') || {});
+  }
   return o;
 }
 // The two document options of this phase for a loaded state. WHICH rules does the loaded quote follow? 'service6' / 'kitchenshield12' = the current ones. '' = "as issued" (isLegacyDoc()):
@@ -8455,6 +8775,9 @@ function syncLegacyDocUi(){
   const note=document.getElementById('legacyDocNote'); if(note) note.style.display=legacy?'':'none';
 }
 function applyPricingFields(o){
+  // KC:L2 — the engine stamp comes FIRST: everything below, and every hook it calls, asks d7On(). A state with no engine is a legacy one (spec 2.2); the last approval this quote carries goes to the live layer (null clears it).
+  quoteEngine = (o && o.engine==='kc1') ? 'kc1' : 'legacy';
+  D7.h('live.setCarry', (o && o.approvalCarry) || null);
   // _msStash holds the rows a user set aside by UNTICKING the milestone toggle,
   // so an accidental toggle-off does not destroy their work. It must NOT survive
   // a load of a DIFFERENT quote: LOAD_TEMPLATE is posted into the STILL-OPEN
@@ -8466,6 +8789,9 @@ function applyPricingFields(o){
   // Cleared here, beside payMilestones, for the same reason stated below: every
   // caller of this function is loading a WHOLE state.
   _msStash = null;
+  // D7:E17 — every caller loads a WHOLE state (clearForm passes a defaults object): a missing photoCol is "on", a missing markupOvr means "no override".
+  { const pc=document.getElementById('d7PhotoCol'); if(pc) pc.checked = !(o && o.photoCol===false); }
+  D7.h('pricing.applyFields', o); D7.h('doc.applyFields', o);
   // Cleared BEFORE the early return, not after: `!o` still means "a whole state
   // is being loaded", so bailing out early must not leave the previous quote's
   // milestones in place either.
@@ -8520,6 +8846,7 @@ function normalizeLoadedItems(arr){
   (arr||[]).forEach(it=>{
     if(!it||it.id==='MISCFEE') return;
     if(it.familyId) cfgHydrateLine(it);   // CONFIGURATOR: protect the price basis and give the line its runtime figures
+    if(it.kcKind) D7.h('adapter.hydrate', it);   // D7:E17 — a kc line: recompute its runtime figures (_kc); an unknown kind (product file missing) keeps its stored text and price
     const q=parseInt(it.qty,10);
     if(!Number.isFinite(q)||q<1){
       it.qty=1;
@@ -8535,6 +8862,7 @@ function loadFromStorage(){
     try{
       const json=decodeURIComponent(atob(hash.slice(7)));
       const state=JSON.parse(json);
+      kcStampEngine(state.pricing);   // KC:L2
       items=normalizeLoadedItems(state.items||[]);
       document.getElementById('clientName').value=state.clientName||'';
       document.getElementById('clientCompany').value=state.clientCompany||'';
@@ -8622,6 +8950,7 @@ function resumeDraft(){
   if(!_draftSnapshot){ hideDraftResumeBanner(); return; }
   try{
     const client=_draftSnapshot.client||{};
+    kcStampEngine(_draftSnapshot.pricing);   // KC:L2
     items=normalizeLoadedItems(_draftSnapshot.items||[]);
     termsContent=_draftSnapshot.termsContent||{};
     termsEnabled=_draftSnapshot.termsEnabled||{};
@@ -8670,6 +8999,7 @@ function clearForm(){
   // un-overridden (follows the live suggested value) and the per-item table
   // collapsed, same as any other quote-level state reset above.
   ohOverridePct=null; ohPerItemOpen=false;
+  D7.h('adapter.reset'); _dpTouched=false;   // D7:E17 — a new quote has no kc lines, no open panel, no markup override
   sourceRef=null; estimateReason=''; renderHandoffBar();   // CONFIGURATOR — a brand-new quote answers no website request
   // Wave 3 Q4 — a brand new quote has no reopen lineage; don't carry a stale
   // "update original" choice over from whatever was open before.
@@ -8682,9 +9012,10 @@ function clearForm(){
   });
   const today=new Date().toISOString().split('T')[0];
   // Reset pricing / payment / delivery fields to defaults
-  applyPricingFields({showVat:false,discountMode:'pct',discountPct:'0',discountAmtCustom:'',
+  const _eng=kcDefaultEngine();   // KC:L2 — the engine of the new blank quote follows the office switch ('legacy' when it is off)
+  applyPricingFields({engine:_eng,showVat:false,discountMode:'pct',discountPct:'0',discountAmtCustom:'',
     commissionMode:'pct',commissionPct:'0',commissionAmtCustom:'',diMethod:'',diFree:false,diNotes:'',
-    diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
+    diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:d7DefaultDp(_eng)/* D7:E22 — 65 on a KC quote (Barro Kitchens / Barro Industries), 50 otherwise */,dpCustom:'',balMode:'lump',
     interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true,quoteValidDays:'30',
     optionsMode:false,optionsBasis:'',warrantyPlan:'service6',showStandardPage:true,
     milestones:null});   // back to LEGACY dpMode/balMode mode on a brand-new quote
@@ -8698,6 +9029,7 @@ function clearForm(){
   document.getElementById('filedBadge').classList.remove('show');
   document.getElementById('filedBadge').textContent='✓ FILED';
   document.getElementById('filedBadge').style.background='';
+  document.getElementById('filedBadge').style.cursor='';
   updateFiledSig();
   saveToStorage();
   buildQuoteNo();
@@ -8732,6 +9064,7 @@ const VERIFY_CHECKS=[
 // keeps this in lockstep with itemCostBasis()'s hasBasis and
 // customCostGateHtml()'s chip; see the comment there for the full rationale.
 function uncostedCustomLinesReason(){
+  if(d7On() && D7.pricing && D7.pricing.uncostedReason) return D7.pricing.uncostedReason();   // D7:E14 — a kc custom item needs at least one priced material row or typed materials
   if (typeof currentCo!=='undefined' && currentCo==='BS') return '';   // BS quotes never require a Barro cost basis
   // A pass-through line never blocks filing either: its quoted price IS its
   // cost (owner 2026-09-21), so there is nothing left to cost.
@@ -8745,6 +9078,7 @@ function uncostedCustomLinesReason(){
 // auto-pricer never fills such a line in (its price basis is 'manual'), so the ways out are a typed price, "Use cost-based" on the
 // calculator, or Finance approving the option sheet.
 function needsPriceReason(){
+  if(d7On() && D7.pricing && D7.pricing.needsPriceReason) return D7.pricing.needsPriceReason();   // D7:R4 (chunk C gap 4) — the D7 wording (a material has no price, or a custom cost is not typed)
   const bad = items.filter(lineNeedsPrice);
   if (!bad.length) return '';
   const noun = bad.every(i => i.familyId) ? 'configured line(s)' : 'line(s)';
@@ -8856,7 +9190,15 @@ function openSourceRequest(){
   catch (e) { showToast('Could not reach the app to open the request.', 'error'); }
 }
 
+// D7:E19 (spec 3.10, M10) + KC:L8 — '' when nothing forces the approval route, else why: "N line(s) need review: #3 Exhaust and Fresh Air Ventilation System (ventilation sizing).", the quote sells below its standard
+// price, or the office asks for every quote to be approved (spec 1.3). D7.flow.approvalReason() decides ('' for the President: he is the approver). Unlike the blocks below it does NOT disable File: canFile() is unchanged.
+// It forces the approval route instead (buildVerifyModal, fileQuotation): such a quote can only be SENT FOR APPROVAL.
+function reviewBlockReason(){ return d7On() ? String(D7.h('flow.approvalReason')||'') : ''; }
+// D7:R4 + KC:L8 — true while an approval still covers this quote (spec 1.3 item 3: the approved total is not undercut): the below-project-cost auto-tick must not come back for it. D7.flow.approvalCovers() decides.
+function approvalCoversNow(){ return d7On() && !!D7.h('flow.approvalCovers'); }
+let _d7ApprovalForced=false;   // the approval tick in the Verify & File modal is currently forced
 function canFile(){
+  // D7:E19 — unchanged list: the review block is not in it (the quote can be sent for approval)
   // Milestone arithmetic is a HARD gate, deliberately outside VERIFY_CHECKS:
   // every check in that list is waivable ("Mark as N/A"), and a quote whose
   // stages don't add up to the contract price must never be waivable.
@@ -9030,17 +9372,24 @@ function buildVerifyModal(){
   // re-renders the margin panel between the checkbox being created and this
   // html string being built). Checking computeTrueCost() directly here closes
   // that gap.
-  const belowFloorAtOpen = (typeof computeTrueCost==='function') && (()=>{ const c=computeTrueCost(); return !!c && c.sell<c.direct; })();
-  const reqApproval = document.getElementById('reqApprovalCheck')?.checked || belowFloorAtOpen || false;
+  const belowFloorAtOpen = (typeof computeTrueCost==='function') && (()=>{ const c=computeTrueCost(); return !!c && c.sell<c.direct && !approvalCoversNow(); })();   // D7:R4 — not again once the President has approved this very quote
+  // D7:E19 (spec 3.10) — a line that needs review forces the approval route: the tick is ticked and locked, the row names the reason, and the President / Operations can mark every line reviewed right here
+  const reviewReason = reviewBlockReason();
+  const canMarkAll = !!(d7On() && String(D7.h('flow.reviewReason')||'') && window.KC && KC.can && KC.can('review'));   // KC:L8 — "Mark all reviewed" only while a REVIEW is open (a price reason is not cleared by it), and only for a role that may
+  // the tick the review block FORCED is not the preparer's choice: once the block is gone (Mark all reviewed) the box starts unticked again
+  const _prevTick = (_d7ApprovalForced && !reviewReason) ? false : document.getElementById('reqApprovalCheck')?.checked;
+  _d7ApprovalForced = !!reviewReason;
+  const reqApproval = _prevTick || belowFloorAtOpen || !!reviewReason || false;
   html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
     <div class="verify-icon">📋</div>
     <div class="verify-info">
       <div class="verify-label" style="font-size:13px;font-weight:700">Request Approval Before Filing?</div>
       <div class="verify-val" style="margin-top:4px">
-        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px">
-          <input type="checkbox" id="reqApprovalCheck" ${reqApproval?'checked':''} style="accent-color:var(--accent);margin-top:1px;">
-          <span>Send to president for review first — they can edit and return before filing</span>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:${reviewReason?'default':'pointer'};font-size:13px">
+          <input type="checkbox" id="reqApprovalCheck" ${reqApproval?'checked':''}${reviewReason?' disabled':''} style="accent-color:var(--accent);margin-top:1px;">
+          <span>${reviewReason ? "Needs the President's approval: "+txtEsc(reviewReason) : 'Send to president for review first — they can edit and return before filing'}</span>
         </label>
+        ${canMarkAll ? `<button type="button" class="btn btn-outline btn-sm no-print" id="markAllReviewedBtn" style="margin-top:8px;background:var(--mid-blue);" onclick="D7.h('flow.markAllReviewed');buildVerifyModal();renderItems();">Mark all reviewed</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -9070,6 +9419,7 @@ function buildVerifyModal(){
     btn.textContent = e.target.checked ? '📤 Submit for Approval' : '📁 File Quotation';
   });
   if(reqApproval) btn.textContent='📤 Submit for Approval';
+  if(d7On()) btn.textContent = reviewReason ? 'Send for approval (get the link)' : (reqApproval ? '📤 Submit for Approval' : '📁 File Quotation');   // D7:E19
 }
 
 function toggleWaive(id,cb){
@@ -9154,7 +9504,7 @@ async function fileQuotation(){
   const fileBtnEl=document.getElementById('fileBtn');
   if(fileBtnEl){ fileBtnEl.disabled=true; fileBtnEl.style.opacity='0.5'; }
   await reserveAtomicQnoSeq();
-  const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
+  const reqApproval = !!reviewBlockReason() || document.getElementById('reqApprovalCheck')?.checked || false;   // D7:E19 — a line in review can never reach the QUOTE_FILED branch below
   const quotePayload = buildQuotePayload();
   const quoteCostSidecar = buildCostSidecar();   // QUOTE-COSTS — rides the envelope, never the payload
 
@@ -9164,11 +9514,13 @@ async function fileQuotation(){
     document.getElementById('verifyModal').style.display='none';
     saveToStorage();
     window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar }, window.location.origin);
+    if(d7On()) D7.h('flow.showApprovalLink', quotePayload);   // KC:L8 — the approval link panel (Copy link, the ready-to-paste message); KC mode only, and a hook that is not there does nothing
     setSavedDraft(null); // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
     // Show feedback
     document.getElementById('filedBadge').textContent='⏳ Pending Approval';
     document.getElementById('filedBadge').classList.add('show');
     document.getElementById('filedBadge').style.background='#E67E22';
+    document.getElementById('filedBadge').style.cursor=d7On()?'pointer':'';   // KC:L8 — a click shows the approval link again
     return;
   }
 
@@ -9177,6 +9529,7 @@ async function fileQuotation(){
   updateFiledSig();
   document.getElementById('filedBadge').textContent='✓ FILED';
   document.getElementById('filedBadge').style.background='';
+  document.getElementById('filedBadge').style.cursor='';
   document.getElementById('filedBadge').classList.add('show');
   document.getElementById('verifyModal').style.display='none';
   saveToStorage();
@@ -9222,9 +9575,15 @@ function buildCostSidecar(){
     if(it.familyId && _cfgLive){ try{ const b=itemCostBasis(it,_cfgLive); if(b&&b.hasBasis&&b.basisSku) r.cfgCost={basisSku:b.basisSku,scale:b.scale,approx:!!b.approx}; }catch(e){} }
     if(Array.isArray(it.bom)&&it.bom.length) r.bom=it.bom.map(b=>({name:String(b.name||''),qty:Number(b.qty)||0,unitPrice:Number(b.unitPrice)||0,...(b.src?{src:String(b.src)}:{})}));
     if(it.priceManual) r.priceManual=true;
-    if(Object.keys(r).length) rows.push({i, n:String(it.name||'').slice(0,120), ...r});
+    if(it.kcKind){ const k = D7.h('adapter.sidecarRow', it); if(k) r.kc = k; }   // D7:E18 — the kc cost basis of a configured line (spec 3.9): materials, groups, typed costs
+    // KC:L7 — in KC mode EVERY line has a row ({i, n} at least): the bridge saves a sidecar only when items is a non-empty array, and the summary below must be saved with every KC quote
+    if(Object.keys(r).length || d7On()) rows.push({i, n:String(it.name||'').slice(0,120), ...r});
   });
-  return rows.length ? {v:1, items:rows} : null;
+  const _mo = (d7On() && typeof D7.markupOvr==='function') ? D7.markupOvr() : null;   // D7:E18 — the President's markup override for this quote rides the sidecar too
+  if(!rows.length && _mo==null) return null;
+  const _sc = {v:1, items:rows}; if(_mo!=null) _sc.markupOvr=_mo;
+  if(d7On()) Object.assign(_sc, D7.h('live.sidecarExtras') || {});   // KC:L7 — { kcSummary, approval } (spec 3.4): what the Sales flow reads to decide a re-approval
+  return _sc;
 }
 
 function buildQuotePayload(){
@@ -9270,7 +9629,10 @@ function buildQuotePayload(){
   // item.specEdit) is NOT stripped — it carries no prices and already prints
   // on the quotation by design, same as any other spec line.
   // CONFIGURATOR: `_cfg` (a configured line's base, option deltas and reason — runtime only, recomputed on load) is stripped here too.
-  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, _uid, _miscId, _cfg, ...rest }) => rest);
+  // D7:E18 — also strip `_kc` (a kc line's runtime figures: project cost, materials…); then chunk B's D7.adapter.publicItem() takes the typed costs (cfg.custom[].m / .lab, a custom item's cfg.m / .lab) out of
+  // the line's cfg. The peso costs ride the SIDECAR (buildCostSidecar), never the payload (spec 3.9).
+  let strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, _uid, _miscId, _cfg, _kc, ...rest }) => rest);
+  strippedItems = strippedItems.map(x => (x && x.kcKind) ? (D7.h('adapter.publicItem', x) || x) : x);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
   // downPaymentMode / balance / interestRate stay populated on EVERY filed
@@ -9431,6 +9793,8 @@ function stripTemplateState(rawEditableState){
     const pr={...state.pricing};
     if(pr.warrantyPlan==='') pr.showStandardPage=true;      // an "as issued" quotation carried no page by default: the new quote does
     if(pr.warrantyPlan!=='service6' && pr.warrantyPlan!=='kitchenshield12') pr.warrantyPlan='service6';
+    delete pr.markupOvr;   // D7:E17 — a template starts a NEW quote: the President's markup override for the old quote never travels with it
+    delete pr.approvalCarry;   // KC:L2 — nor does the approval of the old quote. `engine` stays: a template keeps the engine it was saved with (spec 2.2)
     if(pr.showStandardPage===undefined) pr.showStandardPage=true;
     state.pricing=pr;
   }
@@ -9461,6 +9825,7 @@ function loadEditableState(state, opts){
   if(!state) return;
   opts=opts||{};
   try{
+    kcStampEngine(state.pricing);   // KC:L2 — before the lines are normalised and before setCompany() draws them
     items=normalizeLoadedItems(state.items||[]);
     // A website hand-off (fresh, never filed) carries the server's stored name ("Sink"): give its configured lines their title. Filed quotes keep theirs.
     if(state.handoff===true) items.forEach(it=>{ const fam=it&&it.familyId&&cfgFamily(it.familyId); const t=fam&&window.ProductFamilies&&window.ProductFamilies.lineTitle?window.ProductFamilies.lineTitle(fam,it.config):''; if(t) it.name=t; });
@@ -9526,7 +9891,7 @@ function loadEditableState(state, opts){
       // base quote number (and its original filing-date segment) must stay
       // frozen across a New Revision; only the display Date field advances.
       if(qEl){ qEl.value=bumpRevisionNo(qEl.value); }
-      const fb=document.getElementById('filedBadge'); if(fb){ fb.classList.remove('show'); fb.textContent='✓ FILED'; fb.style.background=''; }
+      const fb=document.getElementById('filedBadge'); if(fb){ fb.classList.remove('show'); fb.textContent='✓ FILED'; fb.style.background=''; fb.style.cursor=''; }
       updateFiledSig();
       setStatus('online','🆕 New revision '+(qEl?qEl.value:'')+' — date set to today. Adjust as needed, then File.');
     }
@@ -9534,14 +9899,14 @@ function loadEditableState(state, opts){
     renderHandoffBar();
   }catch(e){console.warn('loadEditableState failed',e);}
 }
-window.addEventListener('message',ev=>{
-  // Origin-pinned — only the parent app frame (same origin) may drive the
-  // builder. Applies to every message type handled here, old and new.
-  if(ev.origin!==window.location.origin) return;
-  const d=ev.data||{};
+// D7:E5 (the one piece of it that is ported) — the body of the old `message` listener, moved here unchanged so the configurator layer can hand the page a message without a postMessage round trip.
+// The window listener right after this function keeps the origin pin; every window.parent.postMessage(…) and both `window.parent===window` guards of the page stay as they are.
+function qbOnMessage(d){
+  d=d||{};
   if(d.type==='LOAD_QUOTE' && d.payload){
     loadEditableState(d.payload.editableState||d.payload, { asRevision: !!d.payload.asRevision });
     hideDraftResumeBanner(); // Wave 3 Q1 — a real reopen takes priority over the local-draft prompt
+    if(quoteEngine==='kc1') D7.h('live.afterLoad', d.payload.editableState||d.payload);   // KC:L6 — the approval this quote carries, its typed costs, the prices (qb/kc-live.js); a legacy quote is never touched by it
   }
   // Host (president review mode) asks for the current edited state to save it back
   // to the original quote without going through the File flow.
@@ -9569,10 +9934,17 @@ window.addEventListener('message',ev=>{
   if(d.type==='LOAD_TEMPLATE' && d.payload && d.payload.state){
     loadEditableState(d.payload.state, { asRevision:false, template:true });
     hideDraftResumeBanner();
+    if(quoteEngine==='kc1') D7.h('live.afterLoad', d.payload.state);   // KC:L6
     showToast('📋 Template loaded — fill in the client details, then Verify & File.');
   }
   // App confirmed the template save.
   if(d.type==='QUOTE_TEMPLATE_SAVED') showToast('💾 Template saved: '+(d.name||''));
+}
+window.addEventListener('message',ev=>{
+  // Origin-pinned — only the parent app frame (same origin) may drive the
+  // builder. Applies to every message type handled here, old and new.
+  if(ev.origin!==window.location.origin) return;
+  qbOnMessage(ev.data||{});
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -9741,7 +10113,8 @@ function doPrintAgent(){
 // ═══════════════════════════════════════════════════════════════════
 function formatPeso(n){
   if(!n&&n!==0) return '—';
-  return '₱'+Math.round(n).toLocaleString('en-PH');
+  // D7:E13 (M13) — under D7 amounts show centavos, on screen and in print (₱545,180.00). The math and every rounding step are unchanged; Brilliant Steel and "as issued" quotes keep whole pesos.
+  return d7On() ? '₱'+Number(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}) : '₱'+Math.round(n).toLocaleString('en-PH');
 }
 function addDays(iso,n){
   const d=new Date((iso||new Date().toISOString().split('T')[0])+'T12:00:00');
@@ -9763,6 +10136,12 @@ function sanitizeFile(s){
   return (s||'').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
 }
 function quoteFileName(suffix){
+  // KC:S3 (Forms Standard, owner R5; owner ruling 2026-11-19: no separate "Rev." label) — in KC mode the client copy's PDF is named by the quote number as is (its -Rn suffix
+  // already carries the revision), the name the Download PDF button proposes. The Agent and Workforce copies, and every legacy quote, keep the rule below.
+  if(!suffix && d7On()){
+    const _no=document.getElementById('quoteNo')?.value?.trim()||'';
+    return sanitizeFile(_no||'Quotation');
+  }
   // Owner ruling 2026-09-01: the saved PDF is titled by the CLIENT NAME plus
   // the LAST SEGMENT of the quote number — "Juan Dela Cruz - 001R1" — not the
   // full BKLUFB…-serial (that stays printed on the document itself).
@@ -9830,17 +10209,25 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 50;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 51;   // integer; bump on every user-visible quote-builder change
 // CONFIGURATOR §7 — what the Verify & File modal does when the quote's total sits outside the estimate range the client saw online.
 // 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
 // them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
 const ESTIMATE_RANGE_MODE = 'warn';
-const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+const WHATS_NEW = [           // newest first; plain user language, no dev jargon. An entry with kc:true is the configurators' own and is shown only while they are on for this person (kcWhatsNewOn(), Addendum 2 B5).
+  { ver:51, date:'2026-11-20', kc:true, items:[
+    'Add items has seven tabs now — Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems — and each tab shows its configurators ahead of the catalogue items. ➕ Add custom item opens a configurator too: pick the materials from the price list and type the quantities.',
+    'A configured line prices itself from the materials price list, and a Chef Mode line starts from the Standard Product Price List. Type a price to override it; ↺ puts the computed price back, and a price below the standard shows a warning. Catalogue items keep their catalogue price.',
+    'Every line prints in one format — the item code (for example CK-HP-4) in small grey text, then material and use, title, dimensions, specs and notes — with the photo of the line or its drawing beside it. Amounts show centavos, Quantity and unit share one column, the signatures read Prepared by, Approved by and Client conforme, and the 🛠 Workforce Copy carries the drawing and the build detail (still no prices).',
+    'A line that needs review, or a quote priced below the standard, goes to the President for approval: Verify & File says why and, once you send it, gives you a link to pass to him by Messenger or Viber. An approved quote keeps its approval when you reopen it.',
+    'The President can set one markup for a quote (the OH and MK dials are gone from these quotes), and a discount stops at the project cost.',
+    'Quotes, drafts and templates made before today open and price exactly as before, and Brilliance Steel quotes price as before (their letterhead now names the company BRILLIANCE STEEL CORPORATION).',
+  ]},
   { ver:50, date:'2026-11-19', items:[
     'Client tab: after 👁 Preview document, the ✎ Back to the form button now stays on screen above the preview, so you can return to the form without switching tabs.'
   ]},
   { ver:49, date:'2026-11-05', items:[
-    'Lead time is now at least 25 working days (Sundays not counted) on Barro Kitchens and Barro Industries quotations — or 12 working days plus 3 for every ₱20,000 of materials, if that is longer. The Project Timeline, the estimated completion date and the ⚡ priority-order threshold (cut the timeline by more than a third and +2% applies) all follow it, and the printed timeline note says so. Brilliant Steel is unchanged.',
+    'Lead time is now at least 25 working days (Sundays not counted) on Barro Kitchens and Barro Industries quotations — or 12 working days plus 3 for every ₱20,000 of materials, if that is longer. The Project Timeline, the estimated completion date and the ⚡ priority-order threshold (cut the timeline by more than a third and +2% applies) all follow it, and the printed timeline note says so. Brilliance Steel is unchanged.',
     'A quotation filed before the warranty plan existed keeps the warranty and site-requirements wording and the timeline it was issued with when you reopen or revise it — the Terms tab shows “As issued”. Pick a Warranty plan there to bring it onto the current terms.',
     'Printing: the quote number and client name now sit in the bottom margin of every page (Chrome / Edge) so they never cover the last line, and the thank-you and company details close the “Our standard” page instead of landing alone on a page of their own.',
   ]},
@@ -9850,7 +10237,7 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
     'A new “Our standard” page follows the terms: materials and finishes, the standard construction of the products on your quote, warranty, how we work, references and registrations. Tick or untick it in the Terms tab. The thank-you and company details now sit right after the signatures.',
     'Terms tab: pick the Warranty plan — the 6-month service warranty (standard), or Full kitchen, which adds 12 months of preventive maintenance service (PMS) with KitchenShield™. The Warranty term now states the 6-month service warranty, and the Site Requirements term names the company that is quoting.',
     'Chips on each line show what is missing (no size, no specs, no finish, no photo) and Quote strength n/10 scores the whole quote. Verify & File lists the lines that lack specs or a finish — and will not file a made-to-order line that has no size.',
-    'Section headings always print their proper names (never an id like PREP_WASHING) and the photo annex shows the current quote number. Brilliant Steel quotes are unchanged.',
+    'Section headings always print their proper names (never an id like PREP_WASHING) and the photo annex shows the current quote number. Brilliance Steel quotes are unchanged.',
   ]},
   { ver:47, date:'2026-10-29', items:[
     'The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.',
@@ -9864,8 +10251,8 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
     'Some choices only show when they apply (fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table); a size an option does not allow is flagged as you type, with a one-tap "Use N mm" (a slim hood is at most 500 mm deep; a deck oven\'s width follows its trays per deck).',
   ]},
   { ver:44, date:'2026-10-28', items:[
-    'The external partner portal is retired. Brilliant Steel staff use the same builder as everyone else: pick the Brilliant Steel pill for a BS quote — every BS line still carries the pass-through tick. Nothing changes for Barro Kitchens or Barro Industries quotes.',
-    'Open Quote Builder from the Brilliant Steel department and it starts on the Brilliant Steel pill. A quote you reopen or revise keeps its own company, and you can still switch the pill any time.',
+    'The external partner portal is retired. Brilliance Steel staff use the same builder as everyone else: pick the Brilliance Steel pill for a BS quote — every BS line still carries the pass-through tick. Nothing changes for Barro Kitchens or Barro Industries quotes.',
+    'Open Quote Builder from the Brilliance Steel department and it starts on the Brilliance Steel pill. A quote you reopen or revise keeps its own company, and you can still switch the pill any time.',
   ]},
   { ver:43, date:'2026-10-28', items:[
     '⚙ Configure a sink, prep table, stove, cabinet, wall shelf or rack right in the builder — the same options and prices as the website. Tap a Configure chip above the search box. The price follows the option amounts Finance approved, and an option nobody has priced yet shows "Priced after review" and asks you for a price instead of guessing.',
@@ -9887,7 +10274,7 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
     'Costing survives reopen — the BOM, lump materials, crew-days and capital costs on a quote now come back when you reopen a filed quote, resume a draft, or start a New Revision. The cost data is stored privately (internal accounts only — it still never rides inside the quote itself, and partners still never see it). Quotes filed before today reopen without costing, same as before.',
   ]},
   { ver:39, date:'2026-09-21', items:[
-    'Brilliant Steel quotes can mark pass-through items too — every line on a BS quote gets a "pass-through" tick (below the item name): the supplier price is the client price, and discounts skip the line. Available to Brilliant Steel partner accounts as well; it shows no cost data.',
+    'Brilliance Steel quotes can mark pass-through items too — every line on a BS quote gets a "pass-through" tick (below the item name): the supplier price is the client price, and discounts skip the line. Available to Brilliance Steel partner accounts as well; it shows no cost data.',
   ]},
   { ver:38, date:'2026-09-21', items:[
     'Discounts skip pass-through lines — a pass-through item has no markup to give, so the discount ladder now bites only the other lines: pass-through prices print plain (no crossed-out pair) and the discount percent applies to the rest, same as pass-through charges have always worked.',
@@ -9916,7 +10303,7 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
     'The ⚡ +2% Priority Order Charge can be FOC too — a toggle appears in Pricing whenever a rush is active; the row still prints with its amount and joins the FOC discount instead of the bill.',
   ]},
   { ver:30, date:'2026-09-01', items:[
-    'Brilliant Steel quotes: the internal calculator and 🧮 BOM are hidden while the BS company is toggled — BS prices by its own model, never Barro\'s ×2.50 build — and commission does not apply to Brilliant Steel at all.',
+    'Brilliance Steel quotes: the internal calculator and 🧮 BOM are hidden while the BS company is toggled — BS prices by its own model, never Barro\'s ×2.50 build — and commission does not apply to Brilliance Steel at all.',
     'Commission auto-sets to 3% when the salesperson is anyone other than Neil Barro (Barro Kitchens / Barro Industries quotes). Change or zero it any time — a manual choice always wins.',
   ]},
   { ver:29, date:'2026-09-01', items:[
@@ -10037,11 +10424,13 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
 // showTourStep() below). Every step must resolve or be skipped gracefully —
 // a missing or hidden target (mobile-hidden topbar buttons, the configurator
 // switched off) skips the step.
+// KC mode (spec 5, tutorial): a step may carry kcTitle / kcBody (what the step says when the quote is a KC one), legacyOnly (skipped in KC mode: the website-family configurator step) and kcOnly (skipped
+// in legacy mode: the configurator cards, which are an empty host there; needsContent skips it while the cards are not drawn yet). The legacy copy below is HEAD's, word for word.
 const TOUR_STEPS = [
  { title:'Welcome to the Quote Builder 👋',
-   body:'This is where Barro Kitchens, Barro Industries and Brilliant Steel quotes are built, priced, filed and shared. This demo takes about 2 minutes and changes nothing in your quote.' },
+   body:'This is where Barro Kitchens, Barro Industries and Brilliance Steel quotes are built, priced, filed and shared. This demo takes about 2 minutes and changes nothing in your quote.' },
  { target:'#coBK', closest:'.toggle-pills', title:'Pick the company',
-   body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice. On Brilliant Steel the cost calculator stays out of the way and each line gets a pass-through tick.' },
+   body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice. On Brilliance Steel the cost calculator stays out of the way and each line gets a pass-through tick.' },
  { target:'#btnClient', closest:'.toggle-pills', title:'Three tabs',
    body:'Client Data is the document form — quote number, client, delivery, photos — with a 👁 Preview button that shows the finished document. Estimator deals with the numbers: items, additional costs and the calculator. Terms holds the terms & conditions.' },
  { target:'#clientFormBar', needsForm:true, title:'The document form',
@@ -10051,28 +10440,37 @@ const TOUR_STEPS = [
  { target:'#clientInfoSection', needsForm:true, title:'Who is this quote for',
    body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
  { target:'#diSection', needsForm:true, title:'Delivery, timeline & payments',
-   body:'Delivery & installation notes and the project timeline — the ↻ Auto button computes the lead: 25 working days minimum, or 12 working days plus 3 per ₱20,000 of materials if that is longer, Sundays excluded (Brilliant Steel and quotations issued before the warranty plan keep the earlier rule: minimum 2 weeks plus 3 per ₱20,000). Payment schedule and bank details now live in the Terms tab.' },
+   body:'Delivery & installation notes and the project timeline — the ↻ Auto button computes the lead: 25 working days minimum, or 12 working days plus 3 per ₱20,000 of materials if that is longer, Sundays excluded (Brilliance Steel and quotations issued before the warranty plan keep the earlier rule: minimum 2 weeks plus 3 per ₱20,000). Payment schedule and bank details now live in the Terms tab.' },
  { target:'#termsSection', needsTerms:true, title:'The Terms tab',
    body:'Terms & conditions get their own tab — together with the payment terms & schedule and the bank / e-wallet payment details, which print just ahead of the terms text. Standard terms are pre-loaded per company, including the ±5mm measurement tolerance; toggle or adjust per quote. The conforme signature blocks close the document.' },
  { target:'#termsOptionsBox', needsTerms:true, title:'Warranty plan & “Our standard” page',
-   body:'The Warranty plan drives the Warranty term, the summary line under the grand total and the “Our standard” page: the standard 6-month service warranty, or Full kitchen — the 6-month warranty plus 12 months of preventive maintenance service (PMS) with KitchenShield™. The tick prints the “Our standard” page after the signatures: materials and finishes, the standard construction of the products on this quote, warranty, how we work, references and registrations. Brilliant Steel quotes do not get it. A quotation filed before the plan existed shows “As issued” — it keeps its earlier warranty wording and timeline until you pick a plan.' },
+   body:'The Warranty plan drives the Warranty term, the summary line under the grand total and the “Our standard” page: the standard 6-month service warranty, or Full kitchen — the 6-month warranty plus 12 months of preventive maintenance service (PMS) with KitchenShield™. The tick prints the “Our standard” page after the signatures: materials and finishes, the standard construction of the products on this quote, warranty, how we work, references and registrations. Brilliance Steel quotes do not get it. A quotation filed before the plan existed shows “As issued” — it keeps its earlier warranty wording and timeline until you pick a plan.' },
  { target:'#docDetailsBar', needsWorkspace:true, title:'Estimator = the numbers',
    body:'The Estimator keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
+   kcBody:'Seven tabs — Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems — each show the configurators first, then the catalogue items of that tab. Or just search: the search box finds every catalogue item, Miscellaneous included. Picking a catalogue item opens a calculator — set dimensions, unit and quantity. ➕ Add custom item opens the configurator panel for a one-off item: pick its materials from the price list and type the quantities; only the President types free costs, and the line always needs review. ＋ Section splits the quote into Option A / Option B. 📥 Import adds a whole list at once — hand Claude any list (photo, Excel, text) and the 📋 button inside copies the exact format brief. The cards under the tabs open the configurators — the next step.',
    body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself — tick no costing beside it when a line genuinely has none. ＋ Section splits the quote into Option A / Option B. 📥 Import adds a whole list at once — hand Claude any list (photo, Excel, text) and the 📋 button inside copies the exact format brief. The ⚙ chips above the search box configure a table, sink, dish table, stove, wok range, griddle / griller / fryer, deck oven, hood, cabinet, shelf or rack — the next step.' },
- { target:'#configPanel', needsWorkspace:true, needsConfigurator:true, title:'Configure a product',
+ { target:'#configPanel', needsWorkspace:true, needsConfigurator:true, legacyOnly:true, title:'Configure a product',
    body:'The ⚙ chips open this panel. Pick the options and set the size in mm — it tells you when a size is too short for the options. The price is the website price: the catalogue base at that size plus the option amounts Finance approved; an option nobody has priced yet shows "Priced after review" and asks you for a price instead of guessing. Some choices only appear when they apply (fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table). On a table, sink, dish table, stove or wok range the staff-only Top plate option switches the standard 1.5 mm top to a lighter 1.2 mm one. Every product opens with the staff-only Material option — Stainless Steel 304 Food Grade as standard, or 316 Laboratory Grade, which adds a percentage of the whole line price — and each line is named for what it is on the quote (SS Sink, SS Griddle…). ➕ Add to Quote puts the line on the quote, and ⚙ configure on a configured line reopens it. (The demo opens it on a standard product and adds nothing.)' },
+ { target:'#d7Cards', needsWorkspace:true, needsContent:true, kcOnly:true, title:'Configure a product',
+   body:'Pick a product and press ⚙ Configure. Choose the options and set the size — the panel shows the price as you go and how the line will print. ➕ Add to Quote puts the line on the quote; ⚙ edit configuration on a line changes it later. A hood with a blower or ducting opens Ventilation linked to it. A product with no configurator yet says so on its card. (The demo adds nothing.)' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
+   kcBody:'Every line lands here. A configured line prices itself from the materials price list: materials + labor (30 / 50 / 70 %) + 10 % misc, times 2, rounded to the nearest 10. A Chef Mode line starts from its Standard Product Price List price and adds what the options you pick cost by the same formula. A catalogue item keeps its catalogue price. Type a price to override it — ↺ goes back to the computed one, and a price below the standard shows a warning. Amounts show centavos. Below the table: VAT (12%), discounts (a discount never goes below the project cost), agent commission, and Options mode.',
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. A configured line (or one from a website request) keeps the website price instead — the calculator shows the cost-based price beside it. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'.line-details-toggle', needsWorkspace:true, title:'Details ▸ — the spec sheet of a line',
+   kcBody:'Every line prints in one format: the item code in small grey text, material and use, the title, dimensions, specs, notes. Details ▸ opens the editor under a catalogue line — pick the Use (Commercial, Institutional or Residential) and the finish (hairline is the standard), type what is included and not included, add your own rows. A configured line is edited in its panel instead. The chips beside it — no size, no specs, no finish, no photo — show what is still missing, and Quote strength scores the whole quote. A made-to-order line with no size cannot be filed. (Opens nothing and changes nothing in the demo.)',
    body:'Every line prints as a spec sheet: size first, then material and options, construction, finish, includes and not included, lead time. Details ▸ opens the editor under a line — pick the finish (hairline is the standard), type what is included and not included, add your own rows. The chips beside it — no size, no specs, no finish, no photo — show what is still missing, and Quote strength scores the whole quote. A made-to-order line with no size cannot be filed. (Opens nothing and changes nothing in the demo.)' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
+   kcBody:'Right under the quote items — one layout. Pick a type per entry: Delivery, Installation and Other are pass-throughs: cost + 25%, no markup. Additional labor is real work and carries the markup of this quote (cost × the markup). Delivery and Installation present as one combined line on the quotation. Ticked "On quote?" puts an entry on the document; unticked, its price is quietly distributed into the item prices you choose.',
    body:'Right under the quote items — one layout. Pick a type per entry: Delivery, Installation and Other are pass-throughs at cost + 25% OH; Additional labor carries the full × 2.50 like item labor. Delivery and Installation present as one combined line on the quotation. Ticked "On quote?" puts an entry on the document; unticked, its price is quietly distributed into the item prices you choose.' },
  { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Estimator only)',
+   kcBody:'The calculator — one surface, two cards. The build: materials + labor (30 / 50 / 70 %) + 10 % misc = the PROJECT COST, the floor a discount never goes below. The President sets one Markup for this quote (blank = the standard, times 2) and every cost-based line, custom items included, is priced at project cost times that number (a Chef Mode line keeps its list-price offset); the OH and MK dials are gone. The per-line table shows each line with its computed price and an editable price. It all lands on the quote, live. Only the President sees the costs; clients never do.',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
+   kcBody:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price". A line that needs review, or a quote priced below the standard, cannot be filed by Sales: Verify & File says why, and "Send for approval" then shows a link to pass to the President by Messenger or Viber.',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price".' },
  { target:'#btnPrint', title:'Save PDF, Agent & Workforce copies',
+   kcBody:'The PDF button saves the client document as an A4 PDF named by its quote number and revision ("<quote no.> Rev. 1") — the ONLY way a quotation is shared. Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: the drawing and the build detail of each line, with quantity and unit — no prices anywhere.',
    body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: item details, qty and unit only — no prices anywhere.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',
    body:'📦 opens the full product pricelist — scroll or search, tap a product and it lands on the quote (configurable items open the calculator first). Products themselves are added or edited in the Inventory department, not here.' },
@@ -10080,28 +10478,59 @@ const TOUR_STEPS = [
    body:'Your work auto-saves as a draft while you type — an unfiled quote offers to resume next time you open the builder. Tap ❓ Help any time for the written guide and What\'s New.' },
 ];
 
+/* Addendum 2 B5 — the configurators' What's New entry (v51, kc:true) is held until the configurators are on for this person: it shows, and counts as news, only when the office switch gives this user the
+   configurators (KCLive.allowsNew(): kcMode 'on', or 'president' for the President, or the per-device force), never while the switch is off. While it is held, the newest entry a person can see is 50, so the gold
+   dot and the "updated" banner measure against 50, and what a person has "seen" is recorded as 50, never 51: the day the switch is turned on they get it once. initTutorial() runs again when the switch has been read (initUI). */
+function kcWhatsNewOn(){
+  try{ return !!(window.D7 && D7.live && window.KCLive && typeof KCLive.allowsNew==='function' && KCLive.allowsNew()); }catch(e){ return false; }
+}
+function whatsNewList(){ const on=kcWhatsNewOn(); return WHATS_NEW.filter(e=>on || !e.kc); }
+function tutorialVersion(){ return whatsNewList().reduce((m,e)=>Math.max(m, Number(e.ver)||0), 0) || TUTORIAL_VERSION; }
+function tutStoredInt(key, dflt){ try{ const v=parseInt(localStorage.getItem(key),10); return isNaN(v)?dflt:v; }catch(e){ return dflt; } }
+/* what a person has seen only ever grows: opening Help while the switch is off records 50 (never 51), and a person who saw 51 while it was on keeps 51 if it is switched off again */
+function tutMarkSeen(){
+  const v=tutorialVersion();
+  try{ if(!(tutStoredInt('qbTutSeenVer',0) > v)) localStorage.setItem('qbTutSeenVer', String(v)); }catch(e){}
+  document.getElementById('helpDot')?.classList.remove('show');
+}
+
 // ── What's New / Help modal ──────────────────────────────────────────
 function renderWhatsNew(){
   const host=document.getElementById('helpWhatsNew');
   if(!host) return;
   try{
-    host.innerHTML=WHATS_NEW.map(entry=>{
+    host.innerHTML=whatsNewList().map(entry=>{
       const li=(entry.items||[]).map(t=>`<li>${t}</li>`).join('');
       return `<div class="wn-entry"><span class="wn-ver">v${entry.ver}</span><span class="wn-date">${entry.date}</span><ul>${li}</ul></div>`;
     }).join('');
   }catch(e){}
 }
 
+/* KC:L9 — the per-device switch (spec 2.2): localStorage bkqb_kc_force = '0' turns the configurators OFF on THIS device (new quotes start in the old builder; quotes already made keep opening the way they were made);
+   removing the key follows the office setting. ('1' is only ever set by hand, in the console, to test.) The row of the Help modal is drawn only when the configurator layer is loaded (D7.live). */
+function kcDeviceMode(){ try{ return localStorage.getItem('bkqb_kc_force')==='0' ? 'off' : 'office'; }catch(e){ return 'office'; } }
+function kcSetDeviceMode(v){
+  try{ if(v==='off') localStorage.setItem('bkqb_kc_force','0'); else localStorage.removeItem('bkqb_kc_force'); }
+  catch(e){ showToast('This browser would not save the setting.','error'); return; }
+  showToast(v==='off' ? 'Configurators are off on this device: new quotes use the old builder.' : 'This device follows the office setting.');
+  kcAdoptEngineIfBlank();
+}
+function kcSyncHelp(){
+  const box=document.getElementById('helpKcDevice'); if(!box) return;
+  box.style.display=(window.D7 && D7.live && (quoteEngine==='kc1' || kcDefaultEngine()==='kc1' || kcDeviceMode()==='off')) ? '' : 'none';
+  const sel=document.getElementById('kcDeviceSel'); if(sel) sel.value=kcDeviceMode();
+}
 function openHelpModal(section){
   const m=document.getElementById('helpModal');
   if(!m) return;
+  kcSyncHelp();
+  renderWhatsNew();   // B5 — the list follows the switch as it is now (the v51 entry only while the configurators are on)
   // Note: intentionally does NOT end an active tour — helpModal (z-index
   // 2600) is designed to be able to open above one (the tour highlight uses
   // pointer-events:none, so the ❓ Help button stays clickable mid-tour); see
   // the z-index map comment on the HTML block above.
   m.style.display='flex';
-  try{ localStorage.setItem('qbTutSeenVer', String(TUTORIAL_VERSION)); }catch(e){}
-  document.getElementById('helpDot')?.classList.remove('show');
+  tutMarkSeen();
   hideTutBanner();
   if(section==='whatsnew'){
     setTimeout(()=>{ document.getElementById('helpWhatsNew')?.scrollIntoView({block:'start',behavior:'smooth'}); }, 50);
@@ -10118,7 +10547,7 @@ function hideTutBanner(){
   if(b) b.style.display='none';
 }
 function dismissTutBanner(){
-  try{ localStorage.setItem('qbTutDismissedVer', String(TUTORIAL_VERSION)); }catch(e){}
+  try{ const v=tutorialVersion(); if(!(tutStoredInt('qbTutDismissedVer',-1) > v)) localStorage.setItem('qbTutDismissedVer', String(v)); }catch(e){}
   hideTutBanner();
 }
 
@@ -10150,8 +10579,7 @@ function startTour(){
   tourActive=true;
   tourChangedView=false;
   tourSavedView=(typeof currentView!=='undefined' && currentView) ? currentView : 'client';
-  try{ localStorage.setItem('qbTutSeenVer', String(TUTORIAL_VERSION)); }catch(e){}
-  document.getElementById('helpDot')?.classList.remove('show');
+  tutMarkSeen();
   document.addEventListener('keydown', tourKeyHandler);
   window.addEventListener('resize', tourReposition);
   window.addEventListener('scroll', tourReposition, {capture:true, passive:true});
@@ -10163,10 +10591,14 @@ function tourGo(delta){
   showTourStep(tourIdx+delta, delta);
 }
 
+function tourSkips(step){ return !!((step.legacyOnly && d7On()) || (step.kcOnly && !d7On())); }
+function tourTitle(step){ return (d7On() && step.kcTitle) ? step.kcTitle : (step.title||''); }
+function tourBody(step){ return (d7On() && step.kcBody) ? step.kcBody : (step.body||''); }
 function showTourStep(i, dir){
   if(!tourActive) return;
   if(i<0 || i>=TOUR_STEPS.length){ endTour(); return; }
   const step=TOUR_STEPS[i];
+  if(tourSkips(step)){ showTourStep(i+dir, dir); return; }   // KC: a step of the other mode is skipped like any hidden target
   if(step.needsForm){
     // Owner ruling 2026-08-31: these sections live on the Client-tab FORM.
     // Switch to client view (form mode, never the preview) so they show.
@@ -10211,6 +10643,7 @@ function showTourStep(i, dir){
     if(!target || target.offsetParent===null){ showTourStep(i+dir, dir); return; }
     const rect=target.getBoundingClientRect();
     if(rect.width===0 && rect.height===0){ showTourStep(i+dir, dir); return; }
+    if(step.needsContent && !target.children.length){ showTourStep(i+dir, dir); return; }   // D7:E24 — the cards are drawn by chunk B; an empty host is skipped like any hidden target
   }
   tourIdx=i;
   tourCurrentTarget=target;
@@ -10229,9 +10662,10 @@ function renderTourCard(step, i){
   const stepNo=document.getElementById('qbTourStepNo');
   const title=document.getElementById('qbTourTitle');
   const body=document.getElementById('qbTourBody');
-  if(stepNo) stepNo.textContent=(i+1)+' / '+TOUR_STEPS.length;
-  if(title) title.textContent=step.title||'';
-  if(body) body.textContent=step.body||'';
+  const shown=TOUR_STEPS.filter(x=>!tourSkips(x));   // KC: the steps of the other mode are not counted
+  if(stepNo) stepNo.textContent=(shown.indexOf(step)+1)+' / '+shown.length;
+  if(title) title.textContent=tourTitle(step);
+  if(body) body.textContent=tourBody(step);
   const back=document.getElementById('qbTourBack');
   if(back) back.style.display=(i===0)?'none':'inline-flex';
   const next=document.getElementById('qbTourNext');
@@ -10308,8 +10742,9 @@ function initTutorial(){
     let seenVer=0, dismissedVer=-1;
     try{ const sv=parseInt(localStorage.getItem('qbTutSeenVer'),10); seenVer=isNaN(sv)?0:sv; }catch(e){}
     try{ const dv=parseInt(localStorage.getItem('qbTutDismissedVer'),10); dismissedVer=isNaN(dv)?-1:dv; }catch(e){}
+    const curVer=tutorialVersion();   // B5 — 50 while the configurators are held back, 51 once they are on for this person
 
-    document.getElementById('helpDot')?.classList.toggle('show', seenVer < TUTORIAL_VERSION);
+    document.getElementById('helpDot')?.classList.toggle('show', seenVer < curVer);
 
     renderWhatsNew();
 
@@ -10318,8 +10753,8 @@ function initTutorial(){
     const noBtn=document.getElementById('qbTutBannerNo');
     const yesBtn=document.getElementById('qbTutBannerYes');
     if(banner && textEl && noBtn && yesBtn){
-      const notDismissedAtThisVersion=(dismissedVer!==TUTORIAL_VERSION);
-      if(seenVer < TUTORIAL_VERSION && notDismissedAtThisVersion){
+      const notDismissedAtThisVersion=(dismissedVer!==curVer);
+      if(seenVer < curVer && notDismissedAtThisVersion){
         if(seenVer===0){
           // First-run — never opened Help / taken the tour.
           textEl.innerHTML='👋 <strong>New to the quote builder?</strong> Take a 2-minute guided demo of how a quote gets built, priced and filed.';
@@ -10335,6 +10770,8 @@ function initTutorial(){
         }
         noBtn.onclick=dismissTutBanner;
         banner.style.display='flex';
+      } else {
+        banner.style.display='none';   // B5 — initTutorial runs again once the switch is read: a banner that no longer applies goes away
       }
     }
   }catch(e){}

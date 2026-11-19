@@ -1533,6 +1533,30 @@ service cloud.firestore {
       allow read, write: if isAuth() && hasProfile() && (isSeniorAdmin() || canFinance() || isPurchasingDept());
     }
 
+    // BK configurators (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md §3): settings, list prices, material prices.
+    function kcStaff() { return isSeniorAdmin() || canFinance() || cirWriter() || isPurchasingDept() || isProductionDept(); }
+    match /kc_config/{docId} {
+      allow read: if isAuth() && hasProfile() && kcStaff();
+      allow create, update: if isAuth() && isPresident() && docId in ['settings', 'list_prices']
+        && request.resource.data.get('v', 0) == 1
+        && request.resource.data.get('updatedBy', '') == request.auth.uid
+        && (docId != 'settings' || (request.resource.data.get('markup', 0) is number
+              && request.resource.data.markup >= 1 && request.resource.data.markup <= 10
+              && request.resource.data.get('floorMode', 'list') in ['list', 'formula']))
+        && (docId != 'list_prices' || request.resource.data.get('rows', null) is map);
+      allow delete: if false;
+    }
+    match /kc_materials/{key} {
+      allow read: if isAuth() && hasProfile() && kcStaff();
+      allow create, update: if isAuth() && hasProfile() && (isPresident() || isPurchasingDept())
+        && request.resource.data.get('key', '') == key
+        && key.matches('^[a-z0-9_]{1,40}$')
+        && (request.resource.data.get('p', null) == null || isNonNegNumber(request.resource.data.p))
+        && request.resource.data.get('hist', []) is list && request.resource.data.get('hist', []).size() <= 20
+        && request.resource.data.get('updatedBy', '') == request.auth.uid;
+      allow delete: if isAuth() && isPresident();
+    }
+
     // ── Reference materials ─
     // Read needs a profile (hasProfile()) on all four. Write stays isAdmin() (secretary keeps this surface).
     match /resources/{docId} {

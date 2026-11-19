@@ -86,10 +86,10 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     BI: Object.freeze({ code: 'BI', name: 'BARRO INDUSTRIES OPC', sub: 'SEC-registered One Person Corporation', addr: ADDR, contact: CONTACT, sig: SIG_NEIL,
       thanks: 'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
       creds: CREDS, logo: 'icons/barro-industries.png' }),
-    BS: Object.freeze({ code: 'BS', name: 'BRILLIANT STEEL CORPORATION', sub: '', addr: 'Pasig City, Metro Manila', contact: '09276836300',
-      sig: Object.freeze({ name: 'GERALD CHAN', title: 'President, Brilliant Steel Corporation' }),
-      thanks: 'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
-      creds: 'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300', logo: '' }),
+    BS: Object.freeze({ code: 'BS', name: 'BRILLIANCE STEEL CORPORATION', sub: '', addr: 'Pasig City, Metro Manila', contact: '09276836300',
+      sig: Object.freeze({ name: 'GERALD CHAN', title: 'President, Brilliance Steel Corporation' }),
+      thanks: 'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.',
+      creds: 'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300', logo: '' }),
   });
   FC.DEFAULT_COMPANY = 'BI';
   // The owner's navy for every form (rule, section titles, table headers, footer rule). The quote builder's own is #1E3A5F; the owner asked for this one.

@@ -154,7 +154,8 @@
     var ok = {
       size: hasSize(item),
       specs: rs.some(function (r) { return r.kind === 'spec' || r.kind === 'construction' || r.kind === 'extra'; }),
-      finish: isObj(item) && typeof item.finish === 'string' && has(FINISH_LABELS, item.finish),
+      // a configurator line (kcKind) states its material and finish in its own build text, so it is never "no finish" (KC integration 2026-11-19)
+      finish: isObj(item) && ((typeof item.finish === 'string' && has(FINISH_LABELS, item.finish)) || !!trim(item.kcKind)),
       lead: isObj(item) && !!leadInfo(item.leadTime),
       photo: !!(opts && opts.hasPhoto) || (isObj(item) && !!trim(item.photoUrl))
     };
