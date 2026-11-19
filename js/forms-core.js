@@ -449,6 +449,7 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
 .pd-print .frm .fh-brand{display:flex;align-items:center;gap:9px}
 .pd-print .frm .fh-mark{display:block;width:48px;height:48px;flex:none}
 .pd-print .frm .fh-name{font-size:16pt;font-weight:900;color:#1F3A5F;letter-spacing:1.5px;line-height:1.1;white-space:nowrap}
+.pd-print .frm .cd{color:#777;font-size:7.5pt;font-weight:600;margin-right:5px;letter-spacing:.3px}
 .pd-print .frm .fh-legal{font-size:8.5pt;font-weight:600;color:#444;margin-top:1px}
 .pd-print .frm .fh-title{font-size:14pt;font-weight:900;color:#1F3A5F;letter-spacing:1px;white-space:nowrap}
 .pd-print .frm .fh-no{font-size:11pt;font-weight:700;color:#333;margin-top:4px}
@@ -647,6 +648,26 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
   const metaQuoteRef = (c) => (quoteNo(c) ? 'Quotation ref: ' + quoteNo(c) : '');
   const metaSoRef = (c, withRev) => { const i = soInfo(c); return i.source === 'fallback' || !i.number ? '' : 'Sales order ref: ' + (withRev ? FC.withRev(i.number, salesRev(c)) : i.number); };
 
+  // ── line sections and codes (shared by every form that lists items) ─────────────────────────────────────────
+  // A line's section heading, as the quote prints it: its own catLabel (a custom section), else its `category` id in words. kc1 lines (the
+  // configurators, live 2026-11-20) carry only `category` ('prep', 'cook' …); most legacy catalogue lines carry only `category` too. The names
+  // are the quote builder's SECTION_FALLBACK_LABELS; an id nobody knows is spelled out ("exhaust_system" → "Exhaust System").
+  FC.SECTION_LABELS = Object.freeze({
+    cooking_line: 'Cooking Line', prep_washing: 'Preparation & Washing', refrigeration: 'Refrigeration', baking: 'Baking', ventilation: 'Ventilation',
+    exhaust_system: 'Exhaust System', fresh_air_system: 'Fresh Air System', gas_line: 'Gas Line', fire_suppression: 'Fire Suppression', miscellaneous: 'Miscellaneous',
+    prep: 'Prep and storage', wash: 'Washing', cook: 'Cooking', vent: 'Ventilation', cold: 'Refrigeration', multi: 'Multi-purpose', mech: 'Mechanical Systems',
+  });
+  FC.sectionLabel = function (it) {
+    const own = str(it && it.catLabel).trim(); if (own) return own;
+    const id = str(it && it.category).trim(); if (!id) return '';
+    if (Object.prototype.hasOwnProperty.call(FC.SECTION_LABELS, id)) return FC.SECTION_LABELS[id];
+    return id.split(/[_\s]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  };
+  // a kc1 line's model code (doc.code, e.g. "WT-1800"), printed in small grey before the name as the quotation does; '' for a legacy or custom line
+  // OFF until the owner approves an item code on the printed SO / JO (asked 2026-11-20 by the quick-fixes session). Flip to true on his yes.
+  FC.SHOW_ITEM_CODES = false;
+  FC.itemCode = (it) => { if (!FC.SHOW_ITEM_CODES) return ''; const d = it && it.doc; return d && typeof d === 'object' ? str(d.code).trim() : ''; };
+
   // ── sales_order ──────────────────────────────────────────────────────────────────────────────────────────
   // item specs: same precedence as production.js joScopeRow (edited spec text, then the spec list, then the plain string)
   function specText(it) {
@@ -659,7 +680,7 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
   function orderLines(c) {
     const o = c.order || {};
     const items = arr(o.items).length ? arr(o.items) : arr(c.project && c.project.items);
-    return items.map((it) => ({ cat: str(it.catLabel), name: str(it.name), dims: str(it.dims), specs: specText(it),
+    return items.map((it) => ({ cat: FC.sectionLabel(it), code: FC.itemCode(it), name: str(it.name), dims: str(it.dims), specs: specText(it),
       qty: fin(it.qty), unit: str(it.unit) || 'pc', unitPrice: fin(it.unitPrice), amount: fin(it.amount) }));
   }
   // The quote's Subtotal / Discount / VAT ladder, printed only when it RECONCILES with the order's contract amount (a later price change would
@@ -777,7 +798,20 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
   // the money-free scope lines: joScopeRow() already names its keys; only what a workforce copy prints is taken
   function crewLines(c) {
     const j = joOf(c);
-    return arr(j && j.items).map((it) => ({ name: it.name, specs: it.specs, dims: it.dims, qty: it.qty, unit: it.unit, location: it.location, adjustment: it.adjustment, notes: it.notes, catLabel: it.catLabel }));
+    // joDoc's rows are joScopeRow(source[i]) one for one (production.js joScopeOf): the source line gives the section and the code that
+    // joScopeRow does not carry. An edited job order's saved rows have no category, so the quote's line of the same name stands in.
+    const p = c.project || {}, jo = p.jobOrder || {};
+    const saved = arr(jo.items).length ? arr(jo.items) : null, quoteRows = arr(p.items);
+    const srcOf = (i, name) => {
+      const s = saved ? saved[i] : quoteRows[i];
+      if (s && (FC.sectionLabel(s) || FC.itemCode(s))) return s;
+      return quoteRows.find((q) => q && str(q.name).trim() === str(name).trim()) || s || {};
+    };
+    return arr(j && j.items).map((it, i) => {
+      const s = srcOf(i, it.name);
+      return { name: it.name, specs: it.specs, dims: it.dims, qty: it.qty, unit: it.unit, location: it.location, adjustment: it.adjustment, notes: it.notes,
+        catLabel: str(it.catLabel).trim() || FC.sectionLabel(s), code: FC.itemCode(s) };
+    });
   }
   function crewDrawings(c) {
     return arr(c.drawings).filter((d) => str(d.status) === 'released').map((d) => ({ title: first(d.title, d.number) || 'Drawing', rev: first(d.currentRev) || 'A' }));

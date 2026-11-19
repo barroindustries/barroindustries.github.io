@@ -22,12 +22,13 @@
   const money = (h, v) => (v === null || v === undefined ? '—' : h.peso(v));
   const signed = (h, v) => (v === null || v === undefined ? '—' : (v < 0 ? '−' : '+') + h.peso(Math.abs(v)));
   const sumOf = (rows) => { let s = 0; for (const r of rows) { if (r.amount === null || r.amount === undefined) return null; s += r.amount; } return s; };
-  // consecutive lines with the same section label share one band (the quote's .cat-row)
+  // lines of the same section share one band (the quote's .cat-row), sections in the order they first appear — as the quotation groups them
   const groupBy = (lines, key) => {
-    const groups = [];
-    lines.forEach((l) => { const g = groups[groups.length - 1]; if (g && g.label === l[key]) g.rows.push(l); else groups.push({ label: l[key] || '', rows: [l] }); });
+    const groups = [], at = new Map();
+    lines.forEach((l) => { const k = l[key] || ''; if (at.has(k)) groups[at.get(k)].rows.push(l); else { at.set(k, groups.length); groups.push({ label: k, rows: [l] }); } });
     return groups;
   };
+  const nameHtml = (h, l, dflt) => `<div class="nm">${has(l.code) ? `<span class="cd">${h.e(l.code)}</span>` : ''}${h.e(l.name) || dflt}</div>`;
   const partyParts = (d, k) => [d[k.address], has(d[k.phone]) ? '☎ ' + d[k.phone] : '', has(d[k.email]) ? '✉ ' + d[k.email] : ''];
   // the quote's standard terms (TERMS_DEF in quote-builder-v2.html), as reviewed in the prototype
   const TERM = {
@@ -59,7 +60,7 @@
       if (bands && g.label) rows.push({ cat: g.label });
       g.rows.forEach((l) => {
         n += 1;
-        const desc = `<div class="nm">${h.e(l.name) || '—'}</div>` + (has(l.dims) ? `<div class="sp">${h.e(l.dims)}</div>` : '') + (has(l.specs) ? `<div class="sp">${h.e(l.specs)}</div>` : '');
+        const desc = nameHtml(h, l, '—') + (has(l.dims) ? `<div class="sp">${h.e(l.dims)}</div>` : '') + (has(l.specs) ? `<div class="sp">${h.e(l.specs)}</div>` : '');
         rows.push({ cells: [String(n), h.raw(desc), l.qty === null ? '—' : h.int(l.qty), l.unit, money(h, l.unitPrice), money(h, l.amount)] });
       });
       const sub = sumOf(g.rows);
@@ -143,7 +144,7 @@
       g.rows.forEach((it) => {
         n += 1;
         const la = [has(it.location) ? 'Location: ' + it.location : '', has(it.adjustment) ? 'Adjustment: ' + it.adjustment : ''].filter(has).join(' · ');
-        const desc = `<div class="nm">${h.e(it.name) || 'Item'}</div>` + (has(it.dims) ? `<div class="sp">${h.e(it.dims)}</div>` : '') + (has(it.specs) ? `<div class="sp">${h.e(it.specs)}</div>` : '') +
+        const desc = nameHtml(h, it, 'Item') + (has(it.dims) ? `<div class="sp">${h.e(it.dims)}</div>` : '') + (has(it.specs) ? `<div class="sp">${h.e(it.specs)}</div>` : '') +
           (la ? `<div class="sp" style="font-style:italic;">${h.e(la)}</div>` : '') + (has(it.notes) ? `<div class="sp" style="font-style:italic;">${h.e(it.notes)}</div>` : '');
         rows.push({ cells: [String(n), h.raw(desc), String(it.qty || 1), it.unit || 'pc'] });
       });

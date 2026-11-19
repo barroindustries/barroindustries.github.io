@@ -14,7 +14,7 @@
 //                   UNIT only), the prototype's sections, escaping.
 //   6. ASSIGN       serials stored in ONE transaction with their counter, one counter for the SO/JO pair, only where today's rules allow, never throwing.
 // Mutation-checked by hand (scratch copy, one break at a time): see the commit report.
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -205,7 +205,7 @@ describe('3. the peso wall (§9.7)', () => {
     const json = JSON.stringify(data);
     for (const leak of ['unitPrice', 'amount', 'contractAmount', 'amountCollected', 'arBalance', 'capital', 'payments', 'dpPercent', '150000', '75000', '41000', '20000', '35000']) assert.ok(!json.includes(leak), `job_order data carries "${leak}"`);
     assert.equal(data.lines.length, 2);
-    assert.deepEqual(Object.keys(data.lines[0]).sort(), ['adjustment', 'catLabel', 'dims', 'location', 'name', 'notes', 'qty', 'specs', 'unit'], 'the workforce copy takes only what it prints');
+    assert.deepEqual(Object.keys(data.lines[0]).sort(), ['adjustment', 'catLabel', 'code', 'dims', 'location', 'name', 'notes', 'qty', 'specs', 'unit'], 'the workforce copy takes only what it prints (code is the money-free model code)');
   });
   it('…and the same for the handoff pack', () => {
     const data = FC.build(FC.get('handoff_pack'), ctxOf({ project }, PEOPLE.rene));
@@ -591,5 +591,80 @@ describe('6. assigning serials (fake Firestore, never throws)', () => {
     assert.equal(pre.order.id, fx.order.id); assert.equal(Object.keys(fake.stats.docGets).length, reads);
     await assert.rejects(FC.loadRecords(fake.db, FC.get('sales_order'), { orderId: 'nope' }), (e) => e.code === 'not-found');
     await assert.rejects(FC.loadRecords(fake.db, FC.get('job_order'), { projectId: 'nope' }), (e) => e.code === 'not-found');
+  });
+});
+
+// ── kc1 quotes (the Barro Kitchens configurators, live 2026-11-20 at v15.0.6) ───────────────────────────────────────────────────────────
+// A kc1 line (qb/d7/d7-adapter.js newItem + describe) carries `category` (the tab id), name / dims / specEdit, doc { code, material, use … },
+// priceBasis 'configured', qty, unit, unitPrice, amount — and NO catLabel. The forms must name its section, print its code, keep its quantity,
+// and (on the workforce copies) drop every price.
+describe('kc1 lines: section names, codes and quantities on every form', () => {
+  const FC = setupForms();
+  // codes print only once the owner says yes (FC.SHOW_ITEM_CODES ships false); these tests run with it ON, and the last one pins the default
+  beforeEach(() => { FC.SHOW_ITEM_CODES = true; });
+  afterEach(() => { FC.SHOW_ITEM_CODES = false; });
+  const kcItems = () => [
+    { id: 'KC', kcKind: 'table', kcId: 'kc1', category: 'prep', name: 'Work table with undershelf', dims: '1800 x 700 x 850 mm', specEdit: 'SS304 1.2 mm top', specStr: '', qty: 2, unit: 'pc', unitPrice: 21000, amount: 42000, priceBasis: 'configured',
+      doc: { code: 'WT-1800', material: 'SS304', use: 'commercial', title: 'Work table with undershelf', specs: 'SS304 1.2 mm top' } },
+    { id: 'KC', kcKind: 'range', kcId: 'kc2', category: 'cook', name: 'Two-burner range', dims: '900 x 800 x 850 mm', specEdit: '', qty: 1, unit: 'pc', unitPrice: 48000, amount: 48000, priceBasis: 'configured',
+      doc: { code: 'GR-2B', material: 'SS304', use: 'commercial' } },
+    { id: 'KC', kcKind: 'sink', kcId: 'kc3', category: 'prep', name: 'Single-bowl sink', dims: '900 x 700 x 850 mm', qty: 3, unit: 'pc', unitPrice: 30000, amount: 90000, priceBasis: 'configured',
+      doc: { code: 'SK-1B', material: 'SS304', use: 'commercial' } },
+    { id: 'CUSTOM', kcKind: 'custom', kcId: 'kc4', category: 'exhaust_system', name: 'Custom duct run', qty: 1, unit: 'lot', unitPrice: 15000, amount: 15000, priceBasis: 'manual', doc: { code: '' } },
+  ];
+  it('sectionLabel: catLabel first, then the category id in the quote builder\'s words, unknown ids spelled out, nothing for no category', () => {
+    assert.equal(FC.sectionLabel({ catLabel: 'Bar area', category: 'prep' }), 'Bar area');
+    assert.equal(FC.sectionLabel({ category: 'prep' }), 'Prep and storage');
+    assert.equal(FC.sectionLabel({ category: 'cook' }), 'Cooking');
+    assert.equal(FC.sectionLabel({ category: 'cooking_line' }), 'Cooking Line');
+    assert.equal(FC.sectionLabel({ category: 'dish_return_area' }), 'Dish Return Area');
+    assert.equal(FC.sectionLabel({}), '');
+    assert.equal(FC.itemCode({ doc: { code: 'WT-1800' } }), 'WT-1800');
+    assert.equal(FC.itemCode({ doc: null }), ''); assert.equal(FC.itemCode({}), '');
+  });
+  it('Sales Order from a kc1 order: sections grouped as the quote groups them, codes before the names, quantities and amounts kept', () => {
+    const fx = fixtures(); const order = { ...fx.order, items: kcItems(), contractAmount: 195000 };
+    const p = FC.prepare('sales_order', ctxOf({ order, project: { ...fx.project, items: kcItems() }, client: fx.client }));
+    assert.equal(p.ok, true, p.error);
+    const html = FC.compose(p, FC.renderSections(p)).bodyHtml;
+    const bands = [...html.matchAll(/class="cat-row"[^>]*>(?:<td[^>]*>)?([^<]+)/g)].map((m) => m[1].trim());
+    assert.deepEqual(bands, ['Prep and storage', 'Cooking', 'Exhaust System'], 'one band per section, in first-appearance order');
+    for (const code of ['WT-1800', 'GR-2B', 'SK-1B']) assert.match(html, new RegExp(`<span class="cd">${code}</span>`));
+    const prep = html.slice(html.indexOf('Prep and storage'), html.indexOf('Cooking'));
+    assert.ok(prep.includes('Work table with undershelf') && prep.includes('Single-bowl sink'), 'the sink joins the work table under Prep and storage');
+    assert.match(html, /₱42,000/); assert.match(html, /₱90,000/);
+  });
+  it('Job Order and Handoff pack from a kc1 job: same sections, codes and quantities — and still no price anywhere', () => {
+    const fx = fixtures(); const project = { ...fx.project, items: kcItems(), jobOrder: { ...fx.project.jobOrder, items: undefined } };
+    for (const id of ['job_order', 'handoff_pack']) {
+      const p = FC.prepare(id, ctxOf({ project, order: { ...fx.order, items: kcItems() } }, PEOPLE.rene));
+      assert.equal(p.ok, true, p.error);
+      const html = FC.compose(p, FC.renderSections(p)).bodyHtml;
+      for (const code of ['WT-1800', 'GR-2B', 'SK-1B']) assert.match(html, new RegExp(`<span class="cd">${code}</span>`), id);
+      assert.ok(html.includes('Prep and storage') && html.includes('Cooking') && html.includes('Exhaust System'), id);
+      assert.ok(!/₱|PHP|21,000|48,000|30,000|15,000|42000|90000/.test(html), `${id} carries a price`);
+      const qty = [...html.matchAll(/<div class="nm">(?:<span class="cd">[^<]*<\/span>)?([^<]+)<\/div>[\s\S]*?<\/td><td[^>]*>(\d+)<\/td>/g)].map((m) => [m[1], m[2]]);
+      assert.deepEqual(qty.find((r) => r[0] === 'Single-bowl sink'), ['Single-bowl sink', '3'], id);
+    }
+  });
+  it('an EDITED job order (saved rows have no category) still finds each line\'s section and code from the quote line of the same name', () => {
+    const fx = fixtures(); const items = kcItems();
+    const saved = items.map((it) => ({ name: it.name, dims: it.dims, qty: it.qty, unit: it.unit, specs: '' }));
+    const project = { ...fx.project, items, jobOrder: { ...fx.project.jobOrder, items: saved } };
+    const p = FC.prepare('job_order', ctxOf({ project }, PEOPLE.rene));
+    assert.equal(p.ok, true, p.error);
+    assert.deepEqual(p.data.lines.map((l) => [l.catLabel, l.code]), [['Prep and storage', 'WT-1800'], ['Cooking', 'GR-2B'], ['Prep and storage', 'SK-1B'], ['Exhaust System', '']]);
+  });
+  it('SHIPS WITH CODES OFF (owner approval pending): no code on any form, sections still named', () => {
+    FC.SHOW_ITEM_CODES = false;
+    assert.equal(FC.itemCode({ doc: { code: 'WT-1800' } }), '');
+    const fx = fixtures(); const project = { ...fx.project, items: kcItems(), jobOrder: { ...fx.project.jobOrder, items: undefined } };
+    for (const id of ['sales_order', 'job_order', 'handoff_pack']) {
+      const p = FC.prepare(id, ctxOf({ project, order: { ...fx.order, items: kcItems() }, client: fx.client }));
+      const html = FC.compose(p, FC.renderSections(p)).bodyHtml;
+      assert.ok(!html.includes('class="cd"') && !html.includes('WT-1800'), id);
+      assert.ok(html.includes('Prep and storage'), id);
+    }
+    assert.match(read('js/forms-core.js'), /FC\.SHOW_ITEM_CODES = false;/);
   });
 });
