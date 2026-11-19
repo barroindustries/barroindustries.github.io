@@ -1,0 +1,153 @@
+/* ==============================================================================================================
+   qb/d7/d7-flow.css   The look of qb/d7/d7-flow.js: the two screens (Materials price list, Pricing settings), the approval-link panel, the top-bar buttons, the "pending" badge as a button, and a SCOPED copy of
+   the kc screen rules (.d7-scr) the two screens use.   Ported from the D7 prototype's d7/d7-flow.css; the prototype bar, the approval view, the Filed & drafts screen and the banner are not ported.
+   EVERY rule is scoped to a class or id that only exists in KC mode (.d7-*, #d7*, body[data-d7-screen], body.d7-on), so a legacy quote and Brilliance Steel look exactly as before (spec 4.2).
+   Never printed.
+   ============================================================================================================== */
+
+/* ---------- 1. a screen is open: the builder's own content is put away; the top bar, the toasts, the modals and the screen stay (spec 5 packet C: body[data-d7-screen] hides .main) ---------- */
+body[data-d7-screen] .main,body[data-d7-screen] .running-total-pill{display:none!important;}
+body[data-d7-screen] .d7-screen-open{display:block;}
+.d7-scr{max-width:1360px;margin:0 auto;padding:12px 10px;}
+.d7-scr[hidden]{display:none!important;}
+@media(max-width:768px){ .d7-scr{padding:8px 6px;} }
+
+/* ---------- 1b. the screen buttons of the top bar and of the phone menu (drawn by D7.flow.syncButtons only when the feature is live and the role may use them) ---------- */
+.topbar-right .d7-topbtn{white-space:nowrap;}
+.topbar-right .d7-topbtn[aria-pressed="true"]{background:rgba(255, 255, 255, .18);}
+.mtb-row.d7-mtbrow[aria-pressed="true"]{font-weight:800;}
+/* the "↺ now ₱x" of a line that keeps the price it was filed with (adapter.lineRow) */
+.d7-cfgrow .kc-held-now{font-size:11px;font-weight:700;color:var(--dark-blue);white-space:nowrap;}
+.d7-cfgrow .kc-held-btn{font-size:14px;min-width:30px;min-height:30px;vertical-align:middle;}
+
+/* ---------- 2. buttons used by the modal, the approval link panel and the screens ---------- */
+.d7-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:8px 16px;border-radius:8px;border:1.5px solid var(--mid-blue);background:#fff;color:var(--dark-blue);
+  font:inherit;font-size:13px;font-weight:700;cursor:pointer;text-transform:none;letter-spacing:0;text-decoration:none;}
+.d7-btn:hover{background:var(--light-blue);}
+.d7-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.d7-btn.primary{background:var(--dark-blue);border-color:var(--dark-blue);color:#fff;}
+.d7-btn.primary:hover{background:var(--mid-blue);}
+.d7-btn.green{background:var(--green);border-color:var(--green);color:#fff;}
+.d7-btn.green:hover{background:#1f8f4e;}
+.d7-btn.warn{background:#fdf2e2;border-color:#f0cf95;color:#7a5300;}
+.d7-btn.sm{min-height:34px;padding:5px 11px;font-size:12px;}
+.d7-btn:disabled{opacity:.5;cursor:default;}
+@media(max-width:768px){ .d7-btn{min-height:44px;} .d7-btn.sm{min-height:44px;} }
+
+/* ---------- 3. the generic modal: the approval link ---------- */
+.d7-modal{position:fixed;inset:0;z-index:2700;background:rgba(15,30,50,.55);display:flex;align-items:center;justify-content:center;padding:16px;}
+.d7-modal[hidden]{display:none!important;}
+.d7-modal-card{background:#fff;border-radius:12px;width:100%;max-width:680px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.35);overflow:hidden;outline:none;color:var(--text);}
+.d7-modal-card.wide{max-width:1100px;}
+.d7-modal-head{background:var(--dark-blue);color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0;}
+.d7-modal-head h2{font-size:15px;font-weight:700;letter-spacing:.2px;margin:0;}
+.d7-x{background:rgba(255, 255, 255, .14);border:none;color:#fff;font-size:18px;line-height:1;width:40px;height:40px;border-radius:8px;cursor:pointer;flex-shrink:0;}
+.d7-x:hover,.d7-x:focus-visible{background:rgba(255, 255, 255, .28);outline:none;}
+.d7-modal-body{padding:16px;overflow:auto;flex:1;font-size:13px;line-height:1.5;}
+.d7-modal-foot{padding:12px 16px;border-top:1px solid var(--gray-mid);display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;background:#f7f9fd;}
+.d7-lbl{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);margin:12px 0 4px;}
+.d7-lbl:first-child{margin-top:0;}
+.d7-row{display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;}
+.d7-row > input,.d7-row > textarea{flex:1 1 220px;min-width:0;}
+.d7-link-in{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px!important;}
+.d7-msg-in{font-size:13px!important;line-height:1.45;resize:vertical;min-height:84px;}
+.d7-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;border-radius:20px;padding:3px 11px;border:1px solid transparent;}
+.d7-status.pending{background:#fdf2e2;color:#a1610a;border-color:#f0cf95;}
+.d7-status.approved{background:#e6f7ee;color:#1f8f4e;border-color:#a8e0c2;}
+.d7-status.returned{background:#fdecea;color:#b03024;border-color:#f3b8b1;}
+.d7-note{background:#eef5fc;border:1px solid #9dc3e6;color:#1E3A5F;border-radius:8px;padding:8px 11px;font-size:12px;font-weight:600;line-height:1.45;margin-top:10px;}
+.d7-note.warn{background:#fdf2e2;border-color:#f0cf95;color:#7a5300;}
+.d7-kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;font-size:13px;margin:0;}
+.d7-kv dt{color:var(--gray-dark);font-weight:600;white-space:nowrap;}
+.d7-kv dd{margin:0;font-weight:600;overflow-wrap:anywhere;}
+.d7-big{font-size:26px;font-weight:800;color:var(--dark-blue);font-variant-numeric:tabular-nums;line-height:1.15;}
+.d7-json-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
+.d7-json-cols h3{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--mid-blue);margin:0 0 5px;}
+pre.d7-json{font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#0f1b2d;color:#d6e4f0;border-radius:8px;padding:10px;overflow:auto;max-height:55vh;white-space:pre-wrap;word-break:break-word;margin:0;}
+.d7-json-note{font-size:12px;font-weight:600;border-radius:8px;padding:6px 10px;margin:0 0 10px;}
+.d7-json-note.ok{background:#e6f7ee;color:#1f8f4e;border:1px solid #a8e0c2;}
+.d7-json-note.bad{background:#fdecea;color:#b03024;border:1px solid #f3b8b1;}
+.d7-denied{background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:8px;padding:10px 12px;font-size:12.5px;font-weight:600;}
+.d7-tpl{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--gray-mid);border-radius:9px;padding:9px 11px;margin-bottom:8px;flex-wrap:wrap;}
+.d7-tpl b{font-size:13.5px;}
+.d7-tpl small{display:block;color:var(--gray-dark);font-size:11.5px;}
+@media(max-width:768px){
+  .d7-modal{padding:0;align-items:flex-end;}
+  .d7-modal-card,.d7-modal-card.wide{max-width:none;max-height:94vh;border-radius:16px 16px 0 0;}
+  .d7-json-cols{grid-template-columns:1fr;}
+  .d7-modal-foot .d7-btn{flex:1 1 auto;}
+}
+
+/* ---------- 4. the pending badge is a button (it opens the approval link panel) ---------- */
+#filedBadge[data-d7-link]{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
+/* On a phone the builder's top bar does not wrap, and "⏳ Pending Approval" next to the "Saved ✓" chip is wider than 375 px: the whole page then widens and the phone zooms out. Let the bar wrap. */
+@media(max-width:768px){
+  body.d7-on .topbar{flex-wrap:wrap!important;}
+  body.d7-on .topbar-right{flex-wrap:wrap!important;flex:1 1 auto;justify-content:flex-end;min-width:0;}
+  body.d7-on .topbar-right .filed-badge,body.d7-on .topbar-right .draft-save-chip{white-space:normal;text-align:center;}
+}
+
+/* ---------- 5. scoped copy of the kc screen rules (the kc stylesheet scopes its own to #kcPanel), so the two screens look as designed ---------- */
+.d7-scr .section{background:#fff;border-radius:9px;padding:12px 16px;margin-bottom:9px;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+.d7-scr .cfg-link{background:none;border:none;padding:2px 4px;font-family:inherit;font-size:11.5px;font-weight:700;color:var(--mid-blue);text-decoration:underline;cursor:pointer;border-radius:4px;text-transform:none;letter-spacing:0;}
+.d7-scr .cfg-link:hover,.d7-scr .cfg-link:focus-visible{background:var(--light-blue);outline:none;}
+.d7-scr .cfg-notice{background:#fdf2e2;color:#7a5300;border:1px solid #f0cf95;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px;font-weight:600;line-height:1.45;}
+.d7-scr .cfg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;}
+.d7-scr .cfg-group{border:1px solid var(--gray-mid);border-radius:9px;padding:9px 10px 10px;background:#fbfcfe;min-width:0;}
+.d7-scr .cfg-group.cfg-wide{grid-column:1/-1;}
+.d7-scr .cfg-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+.d7-scr .cfg-staff-chip{font-size:10px;font-weight:800;color:#8a5a00;background:#fff3d6;border:1px solid #f0cf95;border-radius:8px;padding:0 7px;text-transform:none;letter-spacing:0;cursor:help;}
+.d7-scr .cfg-hintline{font-size:11px;color:var(--gray-dark);margin-top:5px;line-height:1.35;}
+.d7-scr .cfg-slot-ctl{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;}
+.d7-scr .cfg-mini{min-height:36px;padding:6px 14px;border-radius:18px;border:1.5px solid var(--mid-blue);background:#fff;color:var(--dark-blue);font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;text-transform:none;letter-spacing:0;}
+.d7-scr .cfg-mini:hover{background:var(--light-blue);}
+.d7-scr .cfg-mini:disabled{opacity:.35;cursor:default;background:#fff;}
+.d7-scr .cfg-errbox{background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:8px;padding:7px 10px;margin-top:8px;font-size:12px;font-weight:600;}
+.d7-scr .kc-code{font-size:10.5px;font-weight:800;background:var(--accent);color:#1a1a1a;border-radius:5px;padding:2px 7px;}
+.d7-scr .kc-opt{display:flex;flex-direction:column;gap:2px;font-size:10px;}
+.d7-scr .kc-opt select,.d7-scr .kc-opt input{font-size:12.5px;padding:5px 6px;}
+.d7-scr .kc-sm{font-size:11px;color:var(--gray-dark);line-height:1.35;}
+.d7-scr .kc-cost{width:100%;margin-top:6px;border-collapse:collapse;}
+.d7-scr .kc-cost td{font-size:11px;padding:4px 5px;vertical-align:top;}
+.d7-scr .kc-cost td:last-child{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.d7-scr .kc-cost tr.tot td{font-weight:800;color:var(--dark-blue);background:#f0f4ff;}
+.d7-scr .kc-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.d7-scr .kc-empty{text-align:center;color:var(--gray-dark);padding:26px 8px!important;}
+.d7-scr .kc-tblwrap{overflow-x:auto;}
+.d7-scr .kc-edit{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.d7-scr .kc-plbar{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin:10px 0;}
+.d7-scr .kc-pl{min-width:860px;}
+.d7-scr .kc-pl td{vertical-align:middle;font-size:12.5px;}
+.d7-scr .kc-pl .edit-price{max-width:120px;}
+.d7-scr .edit-price{border:1.5px dashed var(--orange)!important;border-radius:4px;width:100%;text-align:right;padding:4px 5px;font-variant-numeric:tabular-nums;}
+.d7-scr .kc-cat{font-size:10.5px;font-weight:700;background:var(--light-blue);color:var(--mid-blue);border-radius:10px;padding:2px 8px;white-space:nowrap;}
+.d7-scr tr.kc-noprice td{background:#fff6f5;}
+.d7-scr tr.kc-hist td{background:#f7f9fd;}
+.d7-scr .kc-plgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;}
+.d7-scr .kc-pladd{margin-bottom:10px;}
+.d7-scr .kc-levels{display:flex;align-items:center;gap:10px;}
+.d7-scr .kc-levels input{width:90px!important;font-size:16px;font-weight:700;text-align:center;}
+.d7-scr .kc-eng{font-size:10px;font-weight:800;color:#8a5a00;background:#fff3d6;border:1px solid #f0cf95;border-radius:8px;padding:0 7px;text-transform:none;letter-spacing:0;}
+.d7-scr .kc-sample{font-size:10px;font-weight:800;color:#a1610a;background:#fdf2e2;border-radius:8px;padding:0 7px;}
+.d7-scr .kc-chk-pass{color:var(--green);font-weight:800;}
+.d7-scr .kc-chk-fail{color:var(--red);font-weight:800;}
+.d7-scr .ms-chip{font-size:11px;font-weight:700;border-radius:20px;padding:4px 11px;white-space:nowrap;display:inline-block;}
+.d7-scr .ms-chip.ok{background:#e6f7ee;color:#1f8f4e;border:1px solid #a8e0c2;}
+.d7-scr .ms-chip.warn{background:#fdf2e2;color:#a1610a;border:1px solid #f0cf95;}
+.d7-scr .ms-chip.bad{background:#fdecea;color:#b03024;border:1px solid #f3b8b1;}
+.d7-scr .kc-tbl{min-width:620px;}
+@media(max-width:768px){
+  .d7-scr .cfg-grid{grid-template-columns:1fr;}
+  .d7-scr .cfg-mini{min-height:44px;}
+  .d7-scr .cfg-link{min-height:44px;display:inline-flex;align-items:center;padding:0 10px;}
+  .d7-scr .kc-pl{min-width:0;}
+  .d7-scr .kc-pl th:nth-child(1),.d7-scr .kc-pl td:nth-child(1),.d7-scr .kc-pl th:nth-child(3),.d7-scr .kc-pl td:nth-child(3),
+  .d7-scr .kc-pl th:nth-child(7),.d7-scr .kc-pl td:nth-child(7),.d7-scr .kc-pl th:nth-child(8),.d7-scr .kc-pl td:nth-child(8){display:none;}
+  .d7-scr .kc-pl tr.kc-hist td{display:table-cell!important;}
+  .d7-scr .kc-pl th:nth-child(5),.d7-scr .kc-pl td:nth-child(5){display:none;}
+  .d7-scr .kc-pl .edit-price{width:100px!important;max-width:none;}
+  .d7-scr .kc-pl td{padding:6px 4px;}
+}
+
+/* ---------- 6. never printed ---------- */
+@media print{ #d7Modal,.d7-scr,.d7-topbtn,.d7-mtbrow{display:none!important;} }

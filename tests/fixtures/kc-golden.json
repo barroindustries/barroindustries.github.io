@@ -1,0 +1,677 @@
+{
+ "_meta": {
+  "what": "GOLDEN money figures of the configurator engine: every product and every start pill, priced with the SYNTHETIC fixture (tests/fixtures/kc-prices.fixture.json). Made-up numbers, not real prices.",
+  "how": "Generated once by running the UNTOUCHED D7 prototype engine (the 12 engine files of the D7 copy as they were on 2026-11-19 at 15:34, before Round 5) with the fixture swapped in for the prices; the generator script is kept outside the repository. Money is rounded to 2 decimals; unit is the whole-peso unit price; missing is the length of the missing list; listAdj is the list-price adjustment of a list-priced start.",
+  "proves": "tests/kc-engine.test.mjs requires the live engine (price-free, KCRules arithmetic, minified bundle) to reproduce every entry below exactly: the price-stripping port changed no arithmetic.",
+  "round5": "The four start pills that owner Round 5 changed ON PURPOSE (salamander body 660 x 400 x 400 and its list row for both mountings, Q60; hot holding cabinet 600 mm electric with its heater, Q61 and the owner ruling after Round 5; dimsum steamer with 1 boiler now has a list row, Q63) cannot come from the D7 reference. Each carries d7 (what the untouched D7 engine gave: it must now be different) and live (the figure of the live engine, pinned here to catch a regression: it is NOT a D7 figure). The live figures are checked independently by the hand-worked arithmetic in tests/kc-engine.test.mjs, which works them out line by line from the fixture.",
+  "a1": "Addendum 1 A1: every configured product with a Standard Price List code now sells from the list (list price of the base model + the per-metre length rate + what the options add by formula). The D7 reference has no such rule, so for these start pills the entry under products keeps ONLY the formula figures (M, projectCost, selling, priced, missing), which are exactly D7's because the formula did not change, and the unit comes from a1: d7Unit is what D7 gave (the formula price), code the list code, stdLen the standard length in mm (null: none), lengthAdj the per-metre length adjustment, listAdj the adjustment of the formula selling price, unit the list-based unit (pinned against regression: it is NOT a D7 figure). tests/kc-engine.test.mjs works each of them out by hand from the fixture rows."
+ },
+ "products": {
+  "prep": {
+   "basic": {
+    "M": 3873.6,
+    "projectCost": 5539.25,
+    "selling": 11078.51,
+    "priced": true,
+    "missing": 0
+   },
+   "blank": {
+    "M": 2343.67,
+    "projectCost": 3351.44,
+    "selling": 6702.89,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "station": {
+   "stall": {
+    "M": 14223.73,
+    "projectCost": 23469.16,
+    "selling": 46938.32,
+    "unit": 46940,
+    "priced": true,
+    "missing": 0
+   },
+   "line": {
+    "M": 19505.49,
+    "projectCost": 32184.06,
+    "selling": 64368.11,
+    "unit": 64370,
+    "priced": true,
+    "missing": 0
+   },
+   "condo": {
+    "M": 9362.77,
+    "projectCost": 15448.56,
+    "selling": 30897.12,
+    "unit": 30900,
+    "priced": true,
+    "missing": 0
+   },
+   "family": {
+    "M": 16598.56,
+    "projectCost": 27387.63,
+    "selling": 54775.26,
+    "unit": 54780,
+    "priced": true,
+    "missing": 0
+   },
+   "blank": {
+    "M": 4794.67,
+    "projectCost": 7911.2,
+    "selling": 15822.4,
+    "unit": 15820,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "sink": {
+   "dish2": {
+    "M": 4979.05,
+    "projectCost": 8215.43,
+    "selling": 16430.86,
+    "priced": true,
+    "missing": 0
+   },
+   "hand": {
+    "M": 3055.77,
+    "projectCost": 5042.03,
+    "selling": 10084.05,
+    "priced": true,
+    "missing": 0
+   },
+   "pot": {
+    "M": 3358.33,
+    "projectCost": 5541.24,
+    "selling": 11082.48,
+    "priced": true,
+    "missing": 0
+   },
+   "blank": {
+    "M": 3038.42,
+    "projectCost": 5013.39,
+    "selling": 10026.77,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "hood": {
+   "wall": {
+    "M": 19677.53,
+    "projectCost": 36796.98,
+    "selling": 73593.95,
+    "priced": true,
+    "missing": 0
+   },
+   "island": {
+    "M": 28164.26,
+    "projectCost": 52667.17,
+    "selling": 105334.33,
+    "unit": 105330,
+    "priced": true,
+    "missing": 0
+   },
+   "chimney": {
+    "M": 4594.35,
+    "projectCost": 8591.43,
+    "selling": 17182.87,
+    "unit": 17180,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "vent": {
+   "blank": {
+    "M": 25749.3,
+    "projectCost": 48151.19,
+    "selling": 96302.38,
+    "unit": 96300,
+    "priced": true,
+    "missing": 0
+   },
+   "ex1": {
+    "M": 25693.82,
+    "projectCost": 48047.44,
+    "selling": 96094.87,
+    "unit": 96090,
+    "priced": true,
+    "missing": 0
+   },
+   "ex2": {
+    "M": 53258.57,
+    "projectCost": 99593.52,
+    "selling": 199187.03,
+    "unit": 199190,
+    "priced": true,
+    "missing": 0
+   },
+   "ex3": {
+    "M": 63315.76,
+    "projectCost": 118400.47,
+    "selling": 236800.94,
+    "unit": 236800,
+    "priced": true,
+    "missing": 0
+   },
+   "ex4": {
+    "M": 72634.61,
+    "projectCost": 135826.71,
+    "selling": 271653.43,
+    "unit": 271650,
+    "priced": true,
+    "missing": 0
+   },
+   "ex5": {
+    "M": 73494.1,
+    "projectCost": 137433.97,
+    "selling": 274867.95,
+    "unit": 274870,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "rack": {
+   "rack": {
+    "M": 2688.9,
+    "projectCost": 3845.13,
+    "selling": 7690.26,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "cabinet": {
+   "cabinet": {
+    "M": 3610.03,
+    "projectCost": 5956.56,
+    "selling": 11913.11,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "trolley": {
+   "utility": {
+    "M": 2472.96,
+    "projectCost": 4080.38,
+    "selling": 8160.76,
+    "priced": true,
+    "missing": 0
+   },
+   "luggage": {
+    "M": 2780.83,
+    "projectCost": 4588.38,
+    "selling": 9176.75,
+    "priced": true,
+    "missing": 0
+   },
+   "food": {
+    "M": 2661.21,
+    "projectCost": 4390.99,
+    "selling": 8781.99,
+    "priced": true,
+    "missing": 0
+   },
+   "dish": {
+    "M": 4100.09,
+    "projectCost": 6765.15,
+    "selling": 13530.29,
+    "priced": true,
+    "missing": 0
+   },
+   "tray": {
+    "M": 2532.8,
+    "projectCost": 4179.12,
+    "selling": 8358.23,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "dishrack": {
+   "std": {
+    "M": 1572.49,
+    "projectCost": 2594.61,
+    "selling": 5189.22,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "caddy": {
+   "std": {
+    "M": 98.37,
+    "projectCost": 140.67,
+    "selling": 281.35,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "chef_hp": {
+   "2": {
+    "M": 13812.71,
+    "projectCost": 25829.78,
+    "selling": 51659.55,
+    "unit": 24500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -27159.55
+   },
+   "4": {
+    "M": 25272.71,
+    "projectCost": 47259.98,
+    "selling": 94519.95,
+    "unit": 26000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -68519.95
+   },
+   "6": {
+    "M": 37167.26,
+    "projectCost": 69502.78,
+    "selling": 139005.57,
+    "unit": 27500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -111505.57
+   }
+  },
+  "chef_lp": {
+   "2": {
+    "M": 13838.71,
+    "projectCost": 25878.4,
+    "selling": 51756.79,
+    "unit": 20000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -31756.79
+   },
+   "4": {
+    "M": 25324.71,
+    "projectCost": 47357.22,
+    "selling": 94714.43,
+    "unit": 21500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -73214.43
+   },
+   "6": {
+    "M": 37245.26,
+    "projectCost": 69648.64,
+    "selling": 139297.29,
+    "unit": 23000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -116297.29
+   }
+  },
+  "chef_wok": {
+   "1": {
+    "M": 8913.24,
+    "projectCost": 16667.77,
+    "selling": 33335.53,
+    "unit": 32000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -1335.53
+   },
+   "2": {
+    "M": 15102.87,
+    "projectCost": 28242.37,
+    "selling": 56484.73,
+    "unit": 33500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -22984.73
+   },
+   "3": {
+    "M": 21873.5,
+    "projectCost": 40903.44,
+    "selling": 81806.87,
+    "unit": 35000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -46806.87
+   }
+  },
+  "chef_pot": {
+   "1": {
+    "M": 7715.73,
+    "projectCost": 14428.41,
+    "selling": 28856.82,
+    "unit": 36500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": 7643.18
+   },
+   "2": {
+    "M": 14004.79,
+    "projectCost": 26188.96,
+    "selling": 52377.92,
+    "unit": 38000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -14377.92
+   }
+  },
+  "chef_griddle": {
+   "60": {
+    "M": 11215.01,
+    "projectCost": 20972.07,
+    "selling": 41944.13,
+    "unit": 39500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -2444.13
+   },
+   "90": {
+    "M": 16202.35,
+    "projectCost": 30298.39,
+    "selling": 60596.77,
+    "unit": 41000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -19596.77
+   }
+  },
+  "chef_fryer": {
+   "1": {
+    "M": 12427.6,
+    "projectCost": 23239.61,
+    "selling": 46479.22,
+    "unit": 42500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -3979.22
+   },
+   "2": {
+    "M": 23371.58,
+    "projectCost": 43704.86,
+    "selling": 87409.72,
+    "unit": 44000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -43409.72
+   }
+  },
+  "chef_noodle": {
+   "6": {
+    "M": 17329.07,
+    "projectCost": 32405.37,
+    "selling": 64810.73,
+    "unit": 48500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -16310.73
+   }
+  },
+  "chef_rice": {
+   "6": {
+    "M": 19361.89,
+    "projectCost": 36206.73,
+    "selling": 72413.47,
+    "unit": 50000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -22413.47
+   },
+   "12": {
+    "M": 29024.94,
+    "projectCost": 54276.64,
+    "selling": 108553.29,
+    "unit": 51500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -57053.29
+   }
+  },
+  "chef_dimsum": {
+   "2": {
+    "M": 17412.76,
+    "projectCost": 32561.87,
+    "selling": 65123.73,
+    "unit": 53000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -12123.73
+   }
+  },
+  "chef_bain": {
+   "3": {
+    "M": 15016.19,
+    "projectCost": 28080.27,
+    "selling": 56160.53,
+    "unit": 54500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -1660.53
+   },
+   "4": {
+    "M": 16199.7,
+    "projectCost": 30293.43,
+    "selling": 60586.86,
+    "unit": 60590,
+    "priced": true,
+    "missing": 0
+   }
+  },
+  "chef_combi": {
+   "1800": {
+    "M": 36109.63,
+    "projectCost": 67525.01,
+    "selling": 135050.01,
+    "unit": 57500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -77550.01
+   }
+  }
+ },
+ "round5": {
+  "chef_sal/wall": {
+   "d7": {
+    "M": 16734.61,
+    "projectCost": 31293.73,
+    "selling": 62587.45,
+    "unit": 45500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -17087.45
+   },
+   "live": {
+    "M": 16696.7,
+    "projectCost": 31222.83,
+    "selling": 62445.65,
+    "unit": 45500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -16945.65
+   }
+  },
+  "chef_sal/cooktop": {
+   "d7": {
+    "M": 13621.59,
+    "projectCost": 25472.38,
+    "selling": 50944.76,
+    "unit": 45500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -5444.76
+   },
+   "live": {
+    "M": 13574.02,
+    "projectCost": 25383.42,
+    "selling": 50766.84,
+    "unit": 45500,
+    "priced": true,
+    "missing": 0,
+    "listAdj": -5266.84
+   }
+  },
+  "chef_dimsum/1": {
+   "d7": {
+    "M": 9448.19,
+    "projectCost": 17668.12,
+    "selling": 35336.23,
+    "unit": 35340,
+    "priced": true,
+    "missing": 0
+   },
+   "live": {
+    "M": 9448.19,
+    "projectCost": 17668.12,
+    "selling": 35336.23,
+    "unit": 59000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": 23663.77
+   }
+  },
+  "chef_hold/std": {
+   "d7": {
+    "M": 9163.95,
+    "projectCost": 17136.58,
+    "selling": 34273.16,
+    "unit": 56000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": 21726.84
+   },
+   "live": {
+    "M": 4278.81,
+    "projectCost": 8001.37,
+    "selling": 16002.73,
+    "unit": 56000,
+    "priced": true,
+    "missing": 0,
+    "listAdj": 39997.27
+   }
+  }
+ },
+ "a1": {
+  "prep/basic": {
+   "d7Unit": 11080,
+   "code": "PS-PT-1200",
+   "stdLen": 1200,
+   "lengthAdj": 22,
+   "listAdj": 53420.18,
+   "unit": 64500
+  },
+  "prep/blank": {
+   "d7Unit": 6700,
+   "code": "PS-PT-1200",
+   "stdLen": 1200,
+   "lengthAdj": 22,
+   "listAdj": 53420.18,
+   "unit": 60120
+  },
+  "sink/dish2": {
+   "d7Unit": 16430,
+   "code": "WS-SK2-1200",
+   "stdLen": 1200,
+   "lengthAdj": 0,
+   "listAdj": 82720.36,
+   "unit": 99150
+  },
+  "sink/hand": {
+   "d7Unit": 10080,
+   "code": "WS-HS-400",
+   "stdLen": 400,
+   "lengthAdj": 0,
+   "listAdj": 94590.65,
+   "unit": 104670
+  },
+  "sink/pot": {
+   "d7Unit": 11080,
+   "code": "WS-SK1-600",
+   "stdLen": 600,
+   "lengthAdj": 0,
+   "listAdj": 84973.23,
+   "unit": 96060
+  },
+  "sink/blank": {
+   "d7Unit": 10030,
+   "code": "WS-SK1-600",
+   "stdLen": 600,
+   "lengthAdj": 0,
+   "listAdj": 84973.23,
+   "unit": 95000
+  },
+  "hood/wall": {
+   "d7Unit": 73590,
+   "code": "VN-HD-1800",
+   "stdLen": 1800,
+   "lengthAdj": 520,
+   "listAdj": 35426.05,
+   "unit": 109020
+  },
+  "rack/rack": {
+   "d7Unit": 7690,
+   "code": "PS-RK-1200",
+   "stdLen": 1200,
+   "lengthAdj": 0,
+   "listAdj": 60309.74,
+   "unit": 68000
+  },
+  "cabinet/cabinet": {
+   "d7Unit": 11910,
+   "code": "PS-CB-1200",
+   "stdLen": 1200,
+   "lengthAdj": 0,
+   "listAdj": 62086.89,
+   "unit": 74000
+  },
+  "trolley/utility": {
+   "d7Unit": 8160,
+   "code": "PS-TR-UT",
+   "stdLen": null,
+   "lengthAdj": 0,
+   "listAdj": 71839.24,
+   "unit": 80000
+  },
+  "trolley/luggage": {
+   "d7Unit": 9180,
+   "code": "PS-TR-LG",
+   "stdLen": null,
+   "lengthAdj": 0,
+   "listAdj": 75323.25,
+   "unit": 84500
+  },
+  "trolley/food": {
+   "d7Unit": 8780,
+   "code": "PS-TR-FS",
+   "stdLen": null,
+   "lengthAdj": 0,
+   "listAdj": 72718.01,
+   "unit": 81500
+  },
+  "trolley/dish": {
+   "d7Unit": 13530,
+   "code": "PS-TR-DC",
+   "stdLen": null,
+   "lengthAdj": 0,
+   "listAdj": 69469.71,
+   "unit": 83000
+  },
+  "trolley/tray": {
+   "d7Unit": 8360,
+   "code": "PS-TR-TR",
+   "stdLen": null,
+   "lengthAdj": 0,
+   "listAdj": 77641.77,
+   "unit": 86000
+  },
+  "dishrack/std": {
+   "d7Unit": 5190,
+   "code": "PS-DR-PL",
+   "stdLen": null,
+   "lengthAdj": 0,
+   "listAdj": 82310.78,
+   "unit": 87500
+  },
+  "caddy/std": {
+   "d7Unit": 280,
+   "code": "PS-CD-4",
+   "stdLen": null,
+   "lengthAdj": 0,
+   "listAdj": 93218.65,
+   "unit": 93500
+  }
+ }
+}

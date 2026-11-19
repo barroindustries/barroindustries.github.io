@@ -376,3 +376,16 @@ describe('the file itself — ES5, DOM-free, price-free, a UMD module', () => {
     assert.equal(out, 'undefined');
   });
 });
+
+describe('KC integration (2026-11-19): a configurator line is never "no finish"', () => {
+  it('a line with kcKind satisfies the finish check; the same line without it does not', async () => {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const QS2 = req('../js/qb-spec-sheet.js');
+    const base = { name: 'Prep table', category: 'fabricated', dims: '1200 x 600 x 850 mm', specs: 'Top 1.5 mm', madeToOrder: true };
+    const kc = Object.assign({ kcKind: 'table' }, base);
+    assert.equal(QS2.completeness(kc).missing.includes('finish'), false);
+    assert.equal(QS2.quality([kc]).weak.some((w) => w.missing.includes('finish')), false);
+    assert.equal(QS2.completeness(Object.assign({}, base, { kcKind: '  ' })).missing.includes('finish'), QS2.completeness(base).missing.includes('finish'));
+  });
+});

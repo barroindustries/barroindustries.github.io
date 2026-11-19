@@ -1,0 +1,211 @@
+/* qb/kc/kc-d7.css: the kc panel, the tab row, the cards and the catalogue list, inside the LIVE quote builder (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md section 4.2).   Ported from the D7 prototype's kc/kc-d7.css.
+   EVERY rule is scoped to #kcPanel, #kcBackdrop, .kc-*, .cfg-* inside #kcPanel, body.d7-on or the ids of the KC hosts, so a legacy quote and Brilliance Steel look exactly as before.
+   Derived from ../kc/kc.css. KEPT: every `kc-` rule (the panel, the cards, the tabs, the description block, the price-list screen's rules that kc/admin-d7.js uses) and the panel container rules, with #configPanel -> #kcPanel
+   and #cfgBackdrop -> #kcBackdrop. DROPPED: everything "copied from quote-builder-v2.html" (the copy has the originals: :root, *, body, .topbar, .btn*, .main, .section, label, input, table, th, td, .cat-tab*, .search-*, .sd-*,
+   .calc-*, .ms-chip*, .del-btn, .spec-*, .edit-price, .handoff-bar*, .mtb-*), the mock paper (.paper, .lh, .qt, .gt, .strip, .inc, .kc-modal*), the items-table rules (.kc-tbl*, .kc-tot ...: the builder's table is the table)
+   and the .cfg-* rules the copy already defines identically for the website panel (they apply inside #kcPanel as they are). A .cfg-* rule that the copy does not have is scoped to #kcPanel, so the website panel does not change.
+   This file loads after the copy's own <style>, so an equal-specificity rule here wins. */
+
+/* ── the panel container: the website panel's #configPanel rules, for #kcPanel (inline on a desktop, a full-width bottom sheet at <=768px) ── */
+#kcPanel{display:none;background:#fff;border:2px solid var(--mid-blue);border-radius:12px;margin-top:10px;box-shadow:0 4px 18px rgba(30,58,95,.14);outline:none;scroll-margin-top:70px;}
+#kcPanel.open{display:block;}
+#kcBackdrop{display:none;}
+body.d7-on #itemsSection{scroll-margin-top:70px;}
+#kcPanel .cfg-pill:disabled{opacity:.55;cursor:not-allowed;background:var(--gray-light);}
+#kcPanel .cfg-dims.cfg-wide{grid-column:1/-1;margin-top:0;}
+
+/* ── the tab row (#catTabs) and the cards (#d7Cards): under D7 the host is a plain block; the row scrolls sideways ── */
+body.d7-on #catTabs{display:block;margin-bottom:0;min-width:0;max-width:100%;}
+body.d7-on #d7Cards{margin:0 0 10px;min-width:0;}
+.kc-tabs{display:flex;gap:4px;border-bottom:2px solid var(--light-blue);margin:0 0 10px;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.kc-tab{flex:0 0 auto;padding:8px 14px;border:none;background:transparent;font:inherit;font-size:12.5px;font-weight:700;color:var(--gray-dark);cursor:pointer;border-radius:8px 8px 0 0;white-space:nowrap;min-height:38px;}
+.kc-tab:hover{color:var(--dark-blue);}
+.kc-tab[aria-selected="true"]{background:var(--dark-blue);color:#fff;}
+.kc-tab .kc-count{font-size:10px;font-weight:700;opacity:.7;margin-left:5px;}
+.kc-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin:0 0 10px;}
+.kc-card{border:1.5px solid var(--gray-mid);border-radius:10px;background:#fff;padding:9px 10px;display:flex;flex-direction:column;gap:5px;min-width:0;}
+.kc-card.kc-on{border-color:var(--dark-blue);box-shadow:0 0 0 2px var(--light-blue);}
+.kc-card-t{font-size:13px;font-weight:800;color:var(--dark-blue);line-height:1.25;}
+.kc-card-from{font-size:11.5px;color:var(--gray-dark);font-variant-numeric:tabular-nums;}
+.kc-card-models{display:flex;flex-direction:column;gap:3px;}
+.kc-card-model{display:flex;justify-content:space-between;gap:8px;border:1px solid var(--gray-mid);background:var(--gray-light);border-radius:6px;padding:5px 7px;font:inherit;font-size:11.5px;cursor:pointer;text-align:left;}
+.kc-card-model b{font-variant-numeric:tabular-nums;white-space:nowrap;}
+.kc-card-na{border-style:dashed;background:var(--gray-light);color:var(--gray-dark);}
+.kc-card-na .kc-card-t{color:var(--gray-dark);}
+.kc-addcustom{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;}
+
+/* ── the catalogue items of the active tab (#d7Catalogue, drawn by d7/d7-adapter.js) ── */
+#d7Catalogue{margin:0 0 10px;min-width:0;}
+.d7-cat{border:1px solid var(--gray-mid);border-radius:10px;background:#fff;}
+.d7-cat > summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 12px;min-height:44px;font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--mid-blue);}
+.d7-cat > summary::-webkit-details-marker{display:none;}
+.d7-cat > summary::before{content:'▸';font-size:11px;}
+.d7-cat[open] > summary::before{content:'▾';}
+.d7-cat-n{font-size:10px;font-weight:700;background:var(--light-blue);color:var(--dark-blue);border-radius:10px;padding:1px 8px;letter-spacing:0;}
+.d7-cat-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--gray-dark);font-size:11.5px;}
+.d7-cat-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0 18px;padding:0 12px 6px;}
+.d7-cat-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid #f0f2f7;min-width:0;}
+.d7-cat-info{min-width:0;flex:1 1 auto;}
+.d7-cat-name{font-size:13px;font-weight:600;line-height:1.3;}
+.d7-cat-meta{font-size:11px;color:var(--gray-dark);margin-top:1px;font-variant-numeric:tabular-nums;}
+.d7-cat-act{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
+.d7-cfgrow .kc-link-chip{align-self:center;}
+
+/* ── the panel's pieces ── */
+.kc-code{font-size:10.5px;font-weight:800;background:var(--accent);color:#1a1a1a;border-radius:5px;padding:2px 7px;}
+.kc-layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:12px;align-items:start;}
+.kc-aside{position:sticky;top:112px;display:flex;flex-direction:column;gap:10px;min-width:0;}
+.kc-draw{color:var(--dark-blue);background:#fff;border:1px solid var(--gray-mid);border-radius:8px;padding:6px;overflow-x:auto;}
+.kc-draw svg{display:block;width:100%;height:auto;min-width:240px;}
+.kc-start{display:flex!important;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;flex:1 1 170px!important;}
+.kc-start small{font-size:11px;font-weight:600;opacity:.75;}
+.cfg-pill .kc-soon{display:block;font-size:10px;font-weight:700;color:var(--orange);}
+.kc-slot{width:176px;}
+.kc-opt{display:flex;flex-direction:column;gap:2px;font-size:10px;}
+.kc-opt select,.kc-opt input{font-size:12.5px;padding:5px 6px;}
+.kc-w{display:flex;align-items:center;gap:5px;text-transform:none;letter-spacing:0;font-size:12px;color:var(--gray-dark);white-space:nowrap;}
+.kc-w input{font-variant-numeric:tabular-nums;width:76px;flex:0 0 76px;}
+.kc-sm{font-size:11px;color:var(--gray-dark);line-height:1.35;}
+.kc-check{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--text);cursor:pointer;}
+.kc-locked{background:var(--gray-light);border-style:dashed;}
+.kc-used{font-weight:600;}
+.kc-used.over{color:var(--red);font-weight:700;} .kc-used.left{color:#a1610a;} .kc-used.ok{color:var(--green);}
+.kc-side + .kc-side{margin-top:10px;}
+.kc-side-h{font-size:11px;font-weight:700;color:var(--dark-blue);margin:0 0 5px;}
+.kc-msgs{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
+.kc-msgs:empty{display:none;}
+.kc-msgs .cfg-errbox,.kc-msgs .cfg-notice{margin:0;}
+.kc-review{background:#eef5fc;border:1.5px solid #9dc3e6;color:#1E3A5F;border-radius:8px;padding:8px 11px;font-size:12px;font-weight:600;line-height:1.45;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;}
+.kc-review.done{background:#e6f7ee;border-color:#a8e0c2;color:#1f8f4e;}
+.kc-specs{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:12px;margin:6px 0 0;}
+.kc-specs dt{color:var(--gray-dark);font-weight:600;white-space:nowrap;} .kc-specs dd{margin:0;}
+.kc-group-sum{cursor:pointer;list-style:none;}
+.kc-group-sum::-webkit-details-marker{display:none;}
+.kc-group-sum::after{content:'▾';margin-left:auto;font-size:12px;}
+details:not([open]) > .kc-group-sum::after{content:'▸';}
+.kc-cost{width:100%;margin-top:6px;}
+.kc-cost td{font-size:11px;padding:4px 5px;vertical-align:top;}
+.kc-cost td:last-child{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.kc-cost tr.tot td{font-weight:800;color:var(--dark-blue);background:#f0f4ff;}
+.kc-i{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:var(--light-blue);color:var(--mid-blue);font-size:10px;font-weight:800;cursor:help;text-transform:none;letter-spacing:0;}
+.kc-later{font-size:11px;color:var(--gray-dark);margin-top:8px;line-height:1.4;}
+.kc-modcta{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;justify-content:space-between;}
+.kc-phase ul{margin:6px 0 0 18px;font-size:12.5px;line-height:1.6;}
+.kc-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.kc-sub{margin-top:8px;border-top:1px dashed var(--gray-mid);padding-top:6px;}
+.kc-sub summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--mid-blue);}
+.kc-edit{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.kc-edit textarea{font-size:12.5px;resize:vertical;}
+.kc-xrow{display:grid;grid-template-columns:110px minmax(0,1fr) 30px;gap:5px;}
+.kc-x{border:1px solid var(--gray-mid);background:var(--gray-light);border-radius:6px;cursor:pointer;}
+.kc-costed td{vertical-align:middle;}
+.kc-costed td:nth-child(2){white-space:nowrap;}
+.kc-costed td:first-child{font-size:11px;}
+.kc-costed input{padding:4px 5px;font-size:12px;}
+.kc-costed td:first-child input,.kc-costed td:first-child select{min-width:130px;font-size:11.5px;padding:4px;}
+.kc-added td{background:#f4f8fd;}
+.kc-part{border:1px solid var(--gray-mid);border-radius:8px;padding:7px 8px;background:#fff;}
+.kc-part .kc-costed{margin-top:5px;}
+.kc-part .kc-costed td{padding:3px 3px;border-bottom:1px dashed var(--gray-mid);}
+.kc-part .kc-costed select{min-width:0;width:100%;max-width:140px;}
+.kc-part .kc-costed input{width:56px!important;}
+select.kc-ed{border-color:var(--orange)!important;background:#fff6ec;}
+input.kc-ed{border-color:var(--orange)!important;background:#fff6ec;}
+.kc-scr{display:inline-flex;gap:4px;background:#fff;border:1px solid #f0cf95;border-radius:8px;padding:3px;flex-wrap:wrap;}
+.kc-scr button{border:none;background:transparent;border-radius:6px;padding:5px 10px;font:inherit;font-size:12px;font-weight:700;color:#7a5300;cursor:pointer;}
+.kc-scr button[aria-pressed="true"]{background:var(--dark-blue);color:#fff;}
+.kc-rec{display:block;font-size:9.5px;font-weight:800;color:var(--green);letter-spacing:.3px;text-transform:uppercase;margin-top:1px;}
+.cfg-pill[aria-pressed="true"] .kc-rec{color:#9fe0b8;}
+.kc-later-chip{border-style:dashed!important;color:var(--gray-dark)!important;border-color:var(--gray-mid)!important;font-weight:600!important;}
+.kc-more{margin-top:2px;}
+.kc-more summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mid-blue);}
+.kc-more[open]{display:flex;flex-direction:column;gap:5px;}
+.kc-plbar{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin:10px 0;}
+.kc-pl{min-width:860px;}
+.kc-pl td{vertical-align:middle;font-size:12.5px;}
+.kc-pl .edit-price{max-width:120px;}
+.kc-cat{font-size:10.5px;font-weight:700;background:var(--light-blue);color:var(--mid-blue);border-radius:10px;padding:2px 8px;white-space:nowrap;}
+tr.kc-noprice td{background:#fff6f5;}
+tr.kc-hist td{background:#f7f9fd;}
+.kc-plgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;}
+.kc-pladd{margin-bottom:10px;}
+.kc-levels{display:flex;align-items:center;gap:10px;}
+.kc-levels input{width:90px!important;font-size:16px;font-weight:700;text-align:center;}
+.kc-part-l{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);}
+.kc-part-t{font-size:12.5px;line-height:1.4;color:var(--text);margin-top:2px;}
+.kc-addm{font-size:11px;padding:2px 4px;margin-top:3px;}
+.kc-dim-unit{text-transform:none;}
+
+/* the description block (panel preview and the line on the quote): material | use, bold title, subtitle, Dimensions, Specs, Notes */
+.kc-d-mat{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--mid-blue);}
+.kc-d-title{font-size:14px;font-weight:800;color:var(--text);line-height:1.3;margin-top:1px;}
+.kc-d-sub{font-size:12px;color:var(--gray-dark);line-height:1.4;margin-top:1px;}
+.kc-d-row{font-size:11.5px;line-height:1.4;margin-top:3px;color:var(--text);}
+.kc-d-row > b{color:var(--dark-blue);}
+.kc-d-para > span{color:var(--gray-dark);font-weight:700;}
+.kc-d-specs li{margin:0;} .kc-d-specs li span{color:var(--gray-dark);font-weight:600;}
+/* a drawing thumbnail and the print grid (chunk D's photo cell may use them) */
+.kc-print{display:grid;grid-template-columns:200px minmax(0,1fr);gap:14px;align-items:start;}
+.kc-thumbrow{grid-template-columns:150px minmax(0,1fr);gap:12px;}
+.kc-thumb{color:var(--dark-blue);background:#fff;border:1px solid var(--gray-mid);border-radius:6px;padding:4px;}
+.kc-thumb svg{display:block;width:100%;height:auto;max-height:170px;}
+.kc-print .kc-d-specs{columns:1;}
+@media(max-width:700px){.kc-print{grid-template-columns:110px minmax(0,1fr);gap:10px;}}
+
+/* C0 additions: tooltip line under a dropdown, chips, the calculation table, the Checks pass / fail colours */
+.kc-tipline{font-size:10.5px;color:var(--gray-dark);line-height:1.3;}
+.kc-eng{font-size:10px;font-weight:800;color:#8a5a00;background:#fff3d6;border:1px solid #f0cf95;border-radius:8px;padding:0 7px;}
+.kc-sample{font-size:10px;font-weight:800;color:#a1610a;background:#fdf2e2;border-radius:8px;padding:0 7px;}
+.kc-link-chip{font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px;background:#eef5fc;color:#1E3A5F;border:1px solid #9dc3e6;}
+.kc-calc{width:100%;margin-top:6px;} .kc-calc td{font-size:12px;padding:4px 5px;} .kc-calc td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;}
+.kc-chk-pass{color:var(--green);font-weight:800;} .kc-chk-fail{color:var(--red);font-weight:800;}
+
+@media(max-width:1100px){
+  .kc-layout{grid-template-columns:1fr;}
+  .kc-aside{position:static;}
+}
+
+/* ── phone (<=768px): the panel is a full-width bottom sheet (sticky header, scrolling body, sticky footer with the live price and the Add / Update button); every target is 44px ── */
+@media(max-width:768px){
+  #kcPanel.open{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:0;top:auto;z-index:1200;margin:0;
+    max-height:92vh;max-height:92dvh;border:none;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.35);}
+  #kcPanel.open .cfg-head{border-radius:16px 16px 0 0;position:sticky;top:0;}
+  #kcPanel.open .cfg-scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0;overscroll-behavior:contain;}
+  #kcPanel.open .cfg-foot{margin-top:0;border-radius:0;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));box-shadow:0 -4px 12px rgba(0,0,0,.08);}
+  body.kc-sheet-open{overflow:hidden;}
+  body.kc-sheet-open #kcBackdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1190;}
+  #kcPanel .cfg-pill{min-height:44px;font-size:14px;}
+  #kcPanel .cfg-check{min-height:44px;}
+  #kcPanel .cfg-mini{min-height:44px;}
+  #kcPanel .cfg-stepper button{min-height:44px;width:46px;}
+  #kcPanel .cfg-slot-mv button{min-height:44px;}
+  #kcPanel select,#kcPanel input:not([type="checkbox"]):not([type="radio"]){min-height:44px;}
+  #kcPanel .cfg-link{min-height:44px;padding:0 10px;display:inline-flex;align-items:center;}
+  #kcPanelFoot .cfg-actions{width:100%;flex:1 1 100%;}
+  #kcPanelFoot .cfg-actions .btn{flex:1 1 0;white-space:nowrap;}
+  .kc-slot{width:180px;}
+  .kc-start{flex:1 1 100%!important;}
+  .kc-lp{display:none;}
+  .kc-pl{min-width:0;}
+  .kc-pl th:nth-child(1),.kc-pl td:nth-child(1),.kc-pl th:nth-child(3),.kc-pl td:nth-child(3),.kc-pl th:nth-child(7),.kc-pl td:nth-child(7),.kc-pl th:nth-child(8),.kc-pl td:nth-child(8){display:none;}
+  .kc-pl tr.kc-hist td{display:table-cell!important;}
+  .kc-pl th:nth-child(5),.kc-pl td:nth-child(5){display:none;}
+  .kc-pl .edit-price{width:100px!important;max-width:none;}
+  .kc-pl td{padding:6px 4px;}
+  .kc-tab{min-height:44px;padding:8px 12px;}
+  .kc-cards{grid-template-columns:1fr;}
+  .kc-card{flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;}
+  .kc-card-models{flex:1 1 100%;}
+  .kc-card .cfg-mini{min-height:44px;}
+  .kc-card-model{min-height:44px;align-items:center;}
+  .d7-cat-list{grid-template-columns:1fr;}
+  .d7-cat-row{flex-wrap:wrap;}
+  .d7-cat-act .cfg-mini,.d7-cat-act .cfg-link{min-height:44px;display:inline-flex;align-items:center;}
+  .d7-cfgrow .cfg-link{min-height:44px;display:inline-flex;align-items:center;padding:0 10px;}
+}
+
+@media print{#kcPanel,#kcBackdrop,body.d7-on #catTabs,#d7Cards,#d7Catalogue{display:none!important;}}
+
+/* ── the one line of the card area while the prices are not in ("Loading prices…" / "Prices could not be loaded…"), drawn by host-d7.js (spec 2.2) ── */
+.kc-pricestate{grid-column:1/-1;font-size:12.5px;font-weight:700;border-radius:8px;padding:8px 12px;margin:2px 0 8px;background:#eef5fc;border:1px solid #9dc3e6;color:#1E3A5F;}
+.kc-pricestate.bad{background:#fdf2e2;border-color:#f0cf95;color:#7a5300;}

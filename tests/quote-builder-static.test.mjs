@@ -252,64 +252,76 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 50: the newest What\'s New entry is version 50 (Preview\'s Back to the form stays on screen, owner Q70), dated; entry 49 (the timeline rule, quotations "as issued", the printed page tail), 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
+  it('TUTORIAL_VERSION is 51: the newest What\'s New entry is version 51 (the Barro Kitchens configurators in the live builder, dated the day they open), then 50 (Preview\'s Back to the form stays on screen, owner Q70); entry 49 (the timeline rule, quotations "as issued", the printed page tail), 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 50);
+    assert.equal(b.run('TUTORIAL_VERSION'), 51);
     const wn = b.plain('WHATS_NEW');
-    assert.equal(wn[0].ver, 50);
-    assert.equal(wn[0].date, '2026-11-19');
-    assert.equal(wn[0].items.length, 1, 'one bullet: the Back to the form button');
-    assert.ok(wn[0].items[0].includes('✎ Back to the form button now stays on screen'), 'What\'s New 50 names the fix in user language');
-    assert.equal(wn[1].ver, 49, '49 stays as history: this change is a new entry');
-    assert.equal(wn[2].ver, 48, '48 stays as history: this change is a new entry');
-    assert.equal(wn[3].ver, 47, '47 stays as history');
-    assert.equal(wn[4].ver, 46, '46 stays as history');
-    assert.equal(wn[5].ver, 45, '45 stays as history');
-    assert.equal(wn[6].ver, 44, '44 stays as history');
-    assert.equal(wn[7].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
-    assert.equal(wn[1].date, '2026-11-05');
+    // 51 — the configurators (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md): one bullet per change, in plain user language, no figure, no word "prototype"; the date is the day they open
+    assert.equal(wn[0].ver, 51);
+    assert.equal(wn[0].date, '2026-11-20');
+    assert.equal(wn[0].items.length, 6, 'six bullets: the tabs, the pricing, the one print format, the approval, the markup, old quotes');
+    const t51 = wn[0].items.join(' ');
+    for (const must of ['seven tabs', 'Prep and storage', 'Mechanical Systems', 'Add custom item', 'prices itself from the materials price list', 'Chef Mode', 'Standard Product Price List', 'Catalogue items keep their catalogue price', 'one format', 'centavos',
+      'Workforce Copy', 'goes to the President for approval', 'Messenger or Viber', 'keeps its approval', 'one markup for a quote', 'a discount stops at the project cost', 'Quotes, drafts and templates made before today open and price exactly as before']) {
+      assert.ok(t51.includes(must), `What's New 51 does not say: ${must}`);
+    }
+    assert.equal(/prototype/i.test(t51), false, 'no "Prototype:" wording');
+    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(t51), false, 'What\'s New 51 states no peso figure');
+    // 50 — owner Q70 (it shipped before this change and stays as history)
+    assert.equal(wn[1].ver, 50);
+    assert.equal(wn[1].date, '2026-11-19');
+    assert.equal(wn[1].items.length, 1, 'one bullet: the Back to the form button');
+    assert.ok(wn[1].items[0].includes('✎ Back to the form button now stays on screen'), 'What\'s New 50 names the fix in user language');
+    assert.equal(wn[2].ver, 49, '49 stays as history: this change is a new entry');
+    assert.equal(wn[3].ver, 48, '48 stays as history: this change is a new entry');
+    assert.equal(wn[4].ver, 47, '47 stays as history');
+    assert.equal(wn[5].ver, 46, '46 stays as history');
+    assert.equal(wn[6].ver, 45, '45 stays as history');
+    assert.equal(wn[7].ver, 44, '44 stays as history');
+    assert.equal(wn[8].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
     assert.equal(wn[2].date, '2026-11-05');
-    assert.match(wn[3].date, /^2026-10-\d\d$/);
+    assert.equal(wn[3].date, '2026-11-05');
+    assert.match(wn[4].date, /^2026-10-\d\d$/);
     assert.deepEqual(wn.map((e) => e.ver), [...wn.map((e) => e.ver)].sort((x, y) => y - x), 'newest first');
     // 49 — the owner's timeline ruling and the as-issued rule, in plain user language: one bullet per change
-    const t49 = wn[1].items.join(' ');
+    const t49 = wn[2].items.join(' ');
     for (const must of ['at least 25 working days (Sundays not counted)', 'Barro Kitchens and Barro Industries quotations', '12 working days plus 3 for every ₱20,000 of materials, if that is longer', 'estimated completion date', 'priority-order threshold',
-      'the printed timeline note says so', 'Brilliant Steel is unchanged', 'filed before the warranty plan existed', 'keeps the warranty and site-requirements wording and the timeline it was issued with', '“As issued”', 'Pick a Warranty plan',
+      'the printed timeline note says so', 'Brilliance Steel is unchanged', 'filed before the warranty plan existed', 'keeps the warranty and site-requirements wording and the timeline it was issued with', '“As issued”', 'Pick a Warranty plan',
       'bottom margin of every page', 'close the “Our standard” page']) {
       assert.ok(t49.includes(must), `What's New 49 does not say: ${must}`);
     }
-    assert.equal(wn[1].items.length, 3, 'three bullets: the timeline rule, quotations as issued, the printed page tail');
+    assert.equal(wn[2].items.length, 3, 'three bullets: the timeline rule, quotations as issued, the printed page tail');
     // 48 — QB-SELLING-QUOTE-SPEC Phase 1, in plain user language: one bullet per change
-    const t48 = wn[2].items.join(' ');
+    const t48 = wn[3].items.join(' ');
     for (const must of ['spec sheet', 'dimension legend', 'one-line summary', 'Details ▸', 'hairline is the standard', 'brushed, mirror, satin', 'Includes, Not included', '25 working days minimum, from downpayment and approved drawings',
       '“Our standard” page', 'Warranty plan', '6-month service warranty', 'Full kitchen', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'The Warranty term now states the 6-month service warranty',
-      'names the company that is quoting', 'no size, no specs, no finish, no photo', 'Quote strength', 'will not file a made-to-order line that has no size', 'PREP_WASHING', 'current quote number', 'Brilliant Steel quotes are unchanged']) {
+      'names the company that is quoting', 'no size, no specs, no finish, no photo', 'Quote strength', 'will not file a made-to-order line that has no size', 'PREP_WASHING', 'current quote number', 'Brilliance Steel quotes are unchanged']) {
       assert.ok(t48.includes(must), `What's New 48 does not say: ${must}`);
     }
-    assert.equal(wn[2].items.length, 6, 'six bullets: the sheet, Details, Our standard, the warranty plan, the chips and the check, the small fixes');
-    const t47 = wn[3].items.join(' ');
+    assert.equal(wn[3].items.length, 6, 'six bullets: the sheet, Details, Our standard, the warranty plan, the chips and the check, the small fixes');
+    const t47 = wn[4].items.join(' ');
     assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b|\d\s?%|\bper cent\b/i.test(t47), false, 'the What\'s New entry states no figure');
-    assert.deepEqual(wn[3].items, ['The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.']);
-    const t46 = wn[4].items.join(' ');
+    assert.deepEqual(wn[4].items, ['The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.']);
+    const t46 = wn[5].items.join(' ');
     for (const must of ['Configured lines now carry a proper name on the quote', '"SS Range Stove"', '"SS Range Stove Combination (Griller, Fryer)"', '"SS Griddle"', '"SS Lava-Rock Griller"', '"Gas Deck Oven"',
       'the name updates when you re-configure the line', 'Every configured product starts with a Material row', 'Stainless Steel 304 Food Grade as standard', 'Stainless Steel 316 Laboratory Grade',
       'a staff-only choice (the website never offers it)', 'shows "Priced after review" until Finance enters the 316 percentage for that product in Inventory › Family pricing']) {
       assert.ok(t46.includes(must), `What's New 46 does not say: ${must}`);
     }
     assert.equal(/316 amount/.test(wn.map((e) => e.items.join(' ')).join(' ')), false, 'no What\'s New entry still calls the 316 premium an amount');
-    assert.equal(wn[4].items.length, 2, 'two bullets: the line names, and the Material row');
-    const t45 = wn[5].items.join(' ');
+    assert.equal(wn[5].items.length, 2, 'two bullets: the line names, and the Material row');
+    const t45 = wn[6].items.join(' ');
     for (const must of ['Five more products can be configured right in the builder', 'dish tables, wok ranges, griddles / grillers / fryers, gas deck ovens and range hoods', 'an option Finance has not priced yet asks you for a price instead of guessing',
       '"⚙ convert to configured"', 'Some choices only show when they apply', 'fry baskets for a fryer', 'pre-rinse sink on the soiled side of a dish table', 'a size an option does not allow is flagged as you type', '"Use N mm"',
       'a slim hood is at most 500 mm deep', 'a deck oven\'s width follows its trays per deck']) {
       assert.ok(t45.includes(must), `What's New 45 does not say: ${must}`);
     }
-    assert.equal(wn[5].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
-    const t44 = wn[6].items.join(' ');
-    for (const must of ['partner portal is retired', 'Brilliant Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
+    assert.equal(wn[6].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
+    const t44 = wn[7].items.join(' ');
+    for (const must of ['partner portal is retired', 'Brilliance Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
       assert.ok(t44.includes(must), `What's New 44 does not say: ${must}`);
     }
-    const text = wn[7].items.join(' ');
+    const text = wn[8].items.join(' ');
     for (const must of ['Configure a sink, prep table, stove, cabinet, wall shelf or rack', 'Priced after review', 'Apply cost-based to all', 'estimate range', 'links it back', 'hello@barroindustries.com']) {
       assert.ok(text.includes(must), `What's New 43 does not say: ${must}`);
     }
@@ -323,8 +335,8 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal(/may be hidden depending on your account/.test(helpBody), false);
     const steps = makeEnv().plain('TOUR_STEPS');
     assert.equal(steps.some((s) => /partner/i.test(s.title + ' ' + s.body)), false, 'a guided-demo step still mentions partners');
-    assert.match(helpBody, /<strong>Pick the company<\/strong>[\s\S]*?Brilliant Steel quote hides the cost calculator and BOM; each line gets a <em>pass-through<\/em> tick/);
-    assert.match(steps.find((s) => s.target === '#coBK').body, /On Brilliant Steel the cost calculator stays out of the way and each line gets a pass-through tick/);
+    assert.match(helpBody, /<strong>Pick the company<\/strong>[\s\S]*?Brilliance Steel quote hides the cost calculator and BOM; each line gets a <em>pass-through<\/em> tick/);
+    assert.match(steps.find((s) => s.target === '#coBK').body, /On Brilliance Steel the cost calculator stays out of the way and each line gets a pass-through tick/);
   });
 
   it('the guided demo has a "Configure a product" step on #configPanel, inside the workspace, that needs the configurator, right after "Add items"', () => {
@@ -557,7 +569,7 @@ describe('static — what the builder may name (spec §2.3 / the pricing-core gu
 
   it('the strip list, the auto-pricer and the cost basis name what the spec says they name', () => {
     const b = makeEnv();
-    assert.match(b.run('buildQuotePayload.toString()'), /priceManual, _bomOpen, _uid, _miscId, _cfg, \.\.\.rest/);
+    assert.match(b.run('buildQuotePayload.toString()'), /priceManual, _bomOpen, _uid, _miscId, _cfg, _kc, \.\.\.rest/);   // _kc: a configured (KC) line's runtime figures are stripped too (the configurators port, D7:E18)
     assert.match(b.run('applyComputedPricing.toString()'), /QBConfigured\.isAutoPriceable/);
     assert.equal(/item\.id==='MISCFEE' \|\| item\.priceManual\) return/.test(b.run('applyComputedPricing.toString()')), false, 'the old two-clause test is still there');
     assert.match(b.run('itemCostBasis.toString()'), /item\.familyId[\s\S]*QBConfigured\.costBasisFor/);
@@ -3828,7 +3840,7 @@ describe('SELLING QUOTE — the tutorial (TUTORIAL_VERSION 49, Help and the demo
     const help = (HTML.match(/<div class="modal-body" id="helpBody">[\s\S]*?<h4>What's new<\/h4>/) || [''])[0];
     const li = (HTML.match(/<li><strong>Details ▸ on each line<\/strong>[\s\S]*?<\/li>/) || [''])[0];
     for (const must of ['spec sheet', 'Details ▸', 'finish', 'hairline is the standard', 'brushed, mirror, satin', 'Includes', 'Not included', 'extra rows', '25 working days minimum, from downpayment and approved drawings', '⚙ configure regenerates its includes, not-included and lead time from the new options (your finish stays)',
-      'no size', 'no specs', 'no finish', 'no photo', 'Quote strength n/10', 'custom wording', '↺ regenerate', 'dimension legend', 'Brilliant Steel quotes are not changed by any of this']) assert.ok(li.includes(must), `Help bullet does not say: ${must}`);
+      'no size', 'no specs', 'no finish', 'no photo', 'Quote strength n/10', 'custom wording', '↺ regenerate', 'dimension legend', 'Brilliance Steel quotes are not changed by any of this']) assert.ok(li.includes(must), `Help bullet does not say: ${must}`);
     assert.match(help, /<strong>Warranty plan<\/strong> is the standard 6-month service warranty, or <em>Full kitchen<\/em> — the 6-month warranty plus 12 months of preventive maintenance service \(PMS\) with KitchenShield™ — and a tick prints the <strong>“Our standard” page<\/strong> after the terms/);
     assert.match(help, /A made-to-order line with no size blocks filing; lines still missing specs or a finish are only listed \(you can file anyway\)\./);
     assert.ok(help.indexOf('Details ▸ on each line') > help.indexOf('Configure a product') && help.indexOf('Details ▸ on each line') < help.indexOf('Pricing is automatic'));
@@ -3849,7 +3861,7 @@ describe('SELLING QUOTE — the tutorial (TUTORIAL_VERSION 49, Help and the demo
     assert.match(steps[at('.line-details-toggle')].body, /hairline is the standard/);
     assert.match(steps[at('.line-details-toggle')].body, /A made-to-order line with no size cannot be filed\./);
     assert.match(steps[at('#termsOptionsBox')].body, /Full kitchen — the 6-month warranty plus 12 months of preventive maintenance service \(PMS\) with KitchenShield™/);
-    assert.match(steps[at('#termsOptionsBox')].body, /Brilliant Steel quotes do not get it\./);
+    assert.match(steps[at('#termsOptionsBox')].body, /Brilliance Steel quotes do not get it\./);
     assert.ok(HTML.includes('class="cfg-link line-details-toggle"') && HTML.includes('id="termsOptionsBox"'));
     const verify = steps.find((s) => s.target === '#btnVerify').body;
     assert.match(verify, /lists the lines that still lack specs or a finish \(a warning — you can file anyway\), blocks a made-to-order line that has no size/);
@@ -4026,9 +4038,9 @@ describe('TIMELINE — lead = max(25, 12 + 3 × ⌊materials ÷ ₱20,000⌋) wo
   it('the timeline rule lives in the builder only: neither money-core.js nor pricing-core.js carries it, and the earlier text is gone from the live copy (Help and the demo name the rule in force)', () => {
     for (const f of ['js/money-core.js', 'js/pricing-core.js']) assert.equal(/autoLeadDays|20000|LEAD_MIN_WORKING_DAYS/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), false, f);
     const help = (HTML.match(/<div class="modal-body" id="helpBody">[\s\S]*?<h4>What's new<\/h4>/) || [''])[0];
-    assert.match(help, /The <strong>project timeline<\/strong> is 25 working days minimum \(or 12 working days \+ 3 per ₱20,000 of materials, if longer; Sundays never counted\) on Barro Kitchens and Barro Industries quotations; Brilliant Steel keeps minimum 2 weeks \+ 3 per ₱20,000\./);
+    assert.match(help, /The <strong>project timeline<\/strong> is 25 working days minimum \(or 12 working days \+ 3 per ₱20,000 of materials, if longer; Sundays never counted\) on Barro Kitchens and Barro Industries quotations; Brilliance Steel keeps minimum 2 weeks \+ 3 per ₱20,000\./);
     const steps = makeEnv().plain('TOUR_STEPS');
-    assert.match(steps.find((s) => s.target === '#diSection').body, /the ↻ Auto button computes the lead: 25 working days minimum, or 12 working days plus 3 per ₱20,000 of materials if that is longer, Sundays excluded \(Brilliant Steel and quotations issued before the warranty plan keep the earlier rule: minimum 2 weeks plus 3 per ₱20,000\)/);
+    assert.match(steps.find((s) => s.target === '#diSection').body, /the ↻ Auto button computes the lead: 25 working days minimum, or 12 working days plus 3 per ₱20,000 of materials if that is longer, Sundays excluded \(Brilliance Steel and quotations issued before the warranty plan keep the earlier rule: minimum 2 weeks plus 3 per ₱20,000\)/);
     assert.equal(/minimum 2 weeks plus 3 working days per ₱20,000 of materials, Sundays excluded\./.test(HTML), false);
     // the markup's own button starts on the current rule
     assert.match(HTML, /<button class="btn btn-outline" style="background:var\(--dark-blue\);" id="autoLeadBtn" onclick="autoFillLead\(\)" title="25 working days minimum[^"]*">↻ Auto \(25 working days min\., no Sundays\)<\/button>/);
