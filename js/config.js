@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.389';
+window.APP_VERSION = '14.0.390';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1011,7 +1011,8 @@ window.isQuoteWon  = q => !!(q && (q.salesOrderId || q.status === 'won' || q.sta
 // with BOTH salesOrderId and status:'rejected' would otherwise satisfy isQuoteLost
 // too (double-counted in win-rate). Excluding isQuoteWon(q) here keeps won/lost
 // mutually exclusive; isQuoteOpen's own won/lost exclusion is unaffected.
-window.isQuoteLost = q => !!(q && q.status === 'rejected' && !window.isQuoteWon(q));
+// 'lost' (Sales quick fixes 2026-11-19): a quote Sales marked Lost, with a reason, from the quote card.
+window.isQuoteLost = q => !!(q && (q.status === 'rejected' || q.status === 'lost') && !window.isQuoteWon(q));
 window.isQuoteOpen = q => !!q && !window.isQuoteWon(q) && !window.isQuoteLost(q);
 // THE one client-name normalizer — every join and dedupe uses this, nothing else.
 window.clientNameKey = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
