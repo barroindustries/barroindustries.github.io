@@ -664,9 +664,14 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     return id.split(/[_\s]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
   // a kc1 line's model code (doc.code, e.g. "WT-1800"), printed in small grey before the name as the quotation does; '' for a legacy or custom line
-  // OFF until the owner approves an item code on the printed SO / JO (asked 2026-11-20 by the quick-fixes session). Flip to true on his yes.
-  FC.SHOW_ITEM_CODES = false;
-  FC.itemCode = (it) => { if (!FC.SHOW_ITEM_CODES) return ''; const d = it && it.doc; return d && typeof d === 'object' ? str(d.code).trim() : ''; };
+  // ON: owner approved 2026-11-20 ("Yes, completr thr works", relayed by the quick-fixes session; Round 5 Q62: the price-list codes are the
+  // real codes and are printed). The switch stays so a code can be taken off every form at once.
+  FC.SHOW_ITEM_CODES = true;
+  FC.itemCode = (it) => {
+    if (!FC.SHOW_ITEM_CODES || !it) return '';
+    const d = it.doc && typeof it.doc === 'object' ? it.doc : null;
+    return str((d && d.code) || it.code).trim();
+  };
 
   // ── sales_order ──────────────────────────────────────────────────────────────────────────────────────────
   // item specs: same precedence as production.js joScopeRow (edited spec text, then the spec list, then the plain string)

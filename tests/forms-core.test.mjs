@@ -600,9 +600,9 @@ describe('6. assigning serials (fake Firestore, never throws)', () => {
 // and (on the workforce copies) drop every price.
 describe('kc1 lines: section names, codes and quantities on every form', () => {
   const FC = setupForms();
-  // codes print only once the owner says yes (FC.SHOW_ITEM_CODES ships false); these tests run with it ON, and the last one pins the default
+  // codes print (owner yes 2026-11-20; FC.SHOW_ITEM_CODES ships true) — every test restores the switch in case one turns it off
   beforeEach(() => { FC.SHOW_ITEM_CODES = true; });
-  afterEach(() => { FC.SHOW_ITEM_CODES = false; });
+  afterEach(() => { FC.SHOW_ITEM_CODES = true; });
   const kcItems = () => [
     { id: 'KC', kcKind: 'table', kcId: 'kc1', category: 'prep', name: 'Work table with undershelf', dims: '1800 x 700 x 850 mm', specEdit: 'SS304 1.2 mm top', specStr: '', qty: 2, unit: 'pc', unitPrice: 21000, amount: 42000, priceBasis: 'configured',
       doc: { code: 'WT-1800', material: 'SS304', use: 'commercial', title: 'Work table with undershelf', specs: 'SS304 1.2 mm top' } },
@@ -655,7 +655,11 @@ describe('kc1 lines: section names, codes and quantities on every form', () => {
     assert.equal(p.ok, true, p.error);
     assert.deepEqual(p.data.lines.map((l) => [l.catLabel, l.code]), [['Prep and storage', 'WT-1800'], ['Cooking', 'GR-2B'], ['Prep and storage', 'SK-1B'], ['Exhaust System', '']]);
   });
-  it('SHIPS WITH CODES OFF (owner approval pending): no code on any form, sections still named', () => {
+  it('SHIPS WITH CODES ON (owner 2026-11-20); a plain `code` is the fallback; switching it off removes every code and keeps the sections', () => {
+    assert.match(read('js/forms-core.js'), /FC\.SHOW_ITEM_CODES = true;/);
+    assert.equal(FC.itemCode({ doc: { code: 'PS-PT-1200' } }), 'PS-PT-1200');
+    assert.equal(FC.itemCode({ code: 'LEG-01' }), 'LEG-01', 'a legacy line with a top-level code');
+    assert.equal(FC.itemCode({ doc: { code: 'A' }, code: 'B' }), 'A', 'doc.code wins');
     FC.SHOW_ITEM_CODES = false;
     assert.equal(FC.itemCode({ doc: { code: 'WT-1800' } }), '');
     const fx = fixtures(); const project = { ...fx.project, items: kcItems(), jobOrder: { ...fx.project.jobOrder, items: undefined } };
@@ -665,6 +669,5 @@ describe('kc1 lines: section names, codes and quantities on every form', () => {
       assert.ok(!html.includes('class="cd"') && !html.includes('WT-1800'), id);
       assert.ok(html.includes('Prep and storage'), id);
     }
-    assert.match(read('js/forms-core.js'), /FC\.SHOW_ITEM_CODES = false;/);
   });
 });
