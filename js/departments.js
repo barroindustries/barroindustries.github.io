@@ -3510,107 +3510,224 @@ window.ensureOrderTracking = async function(o){
   return tRef.id;
 };
 
-// Convert a won quote into a Sales Order: capture payment + receipt, route to Finance.
-async function openSalesOrderModal(d, currentUser, currentRole, container){
-  const total = parseFloat(d.total)||0;
-  // v12 WS36 — the quote's payment terms can't ride the dataset bag (nested object);
-  // fetch the quote doc directly to prefill the DP%. Best-effort — never blocks the modal.
-  let quotePay = null;
-  // v14 sales-pipeline gap fix — carry the quote's line items forward onto the
-  // sales_order AND job_project (below) so Production sees WHAT to build without
-  // dereferencing back to a possibly-stale/re-revised quote doc. Reuses the SAME
-  // quote fetch already done for quotePay — no extra read.
-  let quoteItems = [];
-  try { const qs = await db.collection(window.quoteCollectionFor(d.co)).doc(d.id).get();
-        if (qs.exists) { quotePay = qs.data().payment || null; quoteItems = Array.isArray(qs.data().items) ? qs.data().items : []; } } catch(_) {}
+// ═══════════════════════════════════════════════════════════════════════════
+//  SALES FLOW — Record payment → the President confirms → Sales generates the sales order and job order
+//  (specs/SALES-QUICK-FIXES-SPEC-2026-11-19.md). The pure rules live in js/sales-flow-core.js (window.SalesFlow);
+//  this file is the screens: the Record payment modal, the Sales Orders page, the confirmation / rejection sheets,
+//  the "Payments to confirm" list, and the Generate sheet.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Who is looking, in the shape SalesFlow.canConfirmPayment wants (§14.2.1). Built fresh per render, never cached.
+// isFinanceTier is deliberately narrower than isFinancePriv(), which is also true for every manager: a manager outside
+// Finance is not the President's stand-in.
+function salesFlowViewer() {
+  const role = window.currentRole || '';
+  return {
+    uid: (window.currentUser && window.currentUser.uid) || '',
+    isPresident: typeof isRealPresident === 'function' && isRealPresident(),
+    isFinanceTier: role === 'finance' || ((window.currentDepts || []).includes('Finance') && role !== 'secretary'),
+  };
+}
+
+// FLOW-FORM-HOOK — the shared form engine (js/forms.js) is merged separately and loads lazily. When the file is absent
+// ensureScript rejects. Every caller wraps this in try/catch, so a missing or failing engine can never fail Generate or
+// Confirm, and the Job Order button falls back to the existing print.
+window.flowForms = function () { return window.ensureScript('js/forms.js').then(function () { return window.Forms; }); };
+
+// An order's fields as the quote card's dataset would carry them (openSalesOrderModal reads id / qno / client / clientId / total / co).
+function datasetFromOrder(o) {
+  return { id: o.quoteId, qno: o.quoteNumber, client: o.clientName, clientId: o.clientId || '', total: o.contractAmount, co: o.company };
+}
+
+// Record a client's payment against a filed quote (§5.2). Creates the job project and the sales order as 'pending';
+// NOTHING reaches the ledger here, for anyone — the President confirms in the app (openPaymentConfirmSheet).
+// With `editOrder` (an existing, unconfirmed order) it edits / resubmits the payment instead and writes nothing else.
+async function openSalesOrderModal(d, currentUser, currentRole, container, editOrder){
+  const SF = window.SalesFlow;
+  const isEdit = !!editOrder;
+  const qColl = window.quoteCollectionFor(d.co);
+  // The quote doc: its total IS the contract (no input anywhere), plus the DP terms, the line items carried onto the
+  // order and the job (so Production sees WHAT to build without dereferencing a possibly re-revised quote) and the
+  // revision chain's root. Best-effort: a failed read never blocks the modal (the contract falls back to the card's total).
+  let quoteDoc = null;
+  if (!isEdit) {
+    try { const qs = await db.collection(qColl).doc(d.id).get(); if (qs.exists) quoteDoc = { id: qs.id, ...qs.data() }; } catch(_) {}
+  }
+  const quotePay = quoteDoc ? (quoteDoc.payment || null) : null;
+  const quoteItems = (quoteDoc && Array.isArray(quoteDoc.items)) ? quoteDoc.items : [];
+  const contract = isEdit ? (Number(editOrder.contractAmount) || 0)
+    : (quoteDoc ? SF.quoteTotal(quoteDoc) : (parseFloat(d.total) || 0));
+  // The quote's own payment terms (same arithmetic the old modal used to PRE-FILL its DP% box) — now simply recorded; nothing to type.
   const dpPrefill = quotePay
     ? (quotePay.downPaymentMode === 'custom'
-        ? (total > 0 ? +(100*(quotePay.downPayment||0)/total).toFixed(1) : '')
+        ? (contract > 0 ? +(100*(quotePay.downPayment||0)/contract).toFixed(1) : '')
         : (parseFloat(quotePay.downPaymentMode) || ''))
     : '';
-  const _panel = openPage(`${emojiIcon('🧾',16)} Create Sales Order`, `
+  const dpPercent = Math.max(0, Math.min(100, parseFloat(dpPrefill)||0)) || null;
+
+  const v0 = isEdit ? editOrder : {};
+  const selStyle = 'padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)';
+  const _panel = openPage(`${emojiIcon('💵',16)} ${isEdit ? 'Edit payment' : 'Record payment'}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Client <strong>${escHtml(d.client||'')}</strong> · Quote ${escHtml(d.qno||'')}</div>
-    <div class="form-group"><label>Project / Scope</label><input id="so-project" value="${escHtml((d.client||'')+' — '+(d.qno||''))}"/></div>
+    <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)">Contract amount</div>
+      <div style="font-size:20px;font-weight:700">₱${fmt(contract)}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Taken from the quote total. To change it, make a New Revision of the quote and have it approved.</div>
+    </div></div>
     <div class="form-row">
-      <div class="form-group"><label>Contract Amount (₱)</label><input id="so-contract" type="number" step="0.01" value="${total}" inputmode="decimal"/></div>
-      <div class="form-group"><label>Payment Received (₱)</label><input id="so-paid" type="number" step="0.01" placeholder="e.g. downpayment" inputmode="decimal"/></div>
+      <div class="form-group"><label>Payment received (₱)</label><input id="so-paid" type="number" step="0.01" min="0" inputmode="decimal" placeholder="e.g. downpayment" value="${isEdit ? escHtml(String(v0.paymentReceived ?? '')) : ''}"/></div>
+      <div class="form-group"><label>Date paid</label><input id="so-paydate" type="date" value="${escHtml((isEdit && v0.paymentDate) || today())}"/></div>
     </div>
-    <div class="form-group"><label>Downpayment % of contract (optional)</label>
-      <input id="so-dp-pct" type="number" min="0" max="100" step="0.5" value="${dpPrefill}" inputmode="decimal" placeholder="e.g. 40"/>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Prefilled from the quote's payment terms — drives the Downpayment Invoice on the project.</div>
+    <div class="form-group"><label>Payment method</label>
+      <select id="so-method" style="${selStyle}">${['Bank Transfer','GCash','Cash','Cheque','Other'].map(m=>`<option ${v0.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select>
     </div>
-    <div class="form-group"><label>Payment Method</label>
-      <select id="so-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option><option>Other</option></select>
-    </div>
-    <div class="form-group"><label>VAT treatment (amount received)</label>
-      <select id="so-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-        <option value="inclusive" selected>VAT-inclusive — 12% already in the amount</option>
-        <option value="exclusive">VAT-exclusive — add 12% on top</option>
-        <option value="exempt">VAT-exempt / Zero-rated — no VAT</option>
+    <div class="form-group"><label>VAT treatment</label>
+      <select id="so-vat" style="${selStyle}">
+        <option value="inclusive" ${(!v0.vatTreatment||v0.vatTreatment==='inclusive')?'selected':''}>VAT-inclusive — 12% already in the amount</option>
+        <option value="exclusive" ${v0.vatTreatment==='exclusive'?'selected':''}>VAT-exclusive — add 12% on top</option>
+        <option value="exempt" ${v0.vatTreatment==='exempt'?'selected':''}>VAT-exempt / Zero-rated — no VAT</option>
       </select>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Only used if this order can be auto-recorded to Finance below (same treatment Finance's own Record Sale uses).</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">What the quote said. This is asked once; nobody re-enters it.</div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label>Target Date (for Production)</label><input id="so-target-date" type="date"/></div>
-      <div class="form-group"><label>Priority (for Production)</label>
-        <select id="so-priority" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          <option value="">Not set yet</option>
-          <option value="Urgent">Urgent</option>
-          <option value="High">High</option>
-          <option value="Normal">Normal</option>
-          <option value="Low">Low</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule + what/how to build, etc."></textarea></div>
-    <div style="font-size:11px;color:var(--text-muted);margin:-6px 0 8px">Target date, priority and notes must be filled in before the job leaves Design for Production — set them now if you already know them, or Design will be asked for them at hand-off.</div>
-    <div class="form-group"><label>Receipt / Proof of Payment</label><div id="so-receipt-upload"></div></div>
+    <div class="form-group"><label>Reference no. / BIR OR no. (if Finance issued one)</label><input id="so-orref" placeholder="Bank or GCash reference, or the OR number from Finance" value="${escHtml(v0.orRef||'')}"/></div>
+    <div class="card" style="margin:6px 0 12px"><div class="card-body" style="padding:8px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:2px 12px">
+      <span style="color:var(--text-muted)">Recorded total</span><span id="so-sum-rec" style="text-align:right;font-weight:700;color:var(--success)"></span>
+      <span style="color:var(--text-muted)">Net of VAT</span><span id="so-sum-net" style="text-align:right"></span>
+      <span style="color:var(--text-muted)">Output VAT (12%)</span><span id="so-sum-vat" style="text-align:right"></span>
+      <span style="color:var(--text-muted)">Balance after this</span><span id="so-sum-bal" style="text-align:right;font-weight:700"></span>
+      <span id="so-sum-pct" style="grid-column:1 / -1;font-size:11px;color:var(--text-muted)"></span>
+    </div></div>
+    <div class="form-group"><label>Receipt / proof of payment</label>
+      ${isEdit && v0.receiptUrl ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Current receipt: <a href="${escHtml(safeHttpUrl(v0.receiptUrl))}" target="_blank" rel="noopener">${escHtml(v0.receiptName||'View')}</a> — upload another to replace it.</div>` : ''}
+      <div id="so-receipt-upload"></div></div>
+    <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px">The President confirms this payment in the app. After that you generate the sales order and job order.</div>
     <div id="so-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, `<button class="btn-primary" id="so-save">${isEdit ? 'Save and resubmit' : 'Record payment — send to President'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('so-receipt-upload',(r)=>{receipt=r;},{label:'Upload receipt (photo/PDF)',accept:'image/*,.pdf',dept:'Finance',subfolder:'SalesOrders'});
   // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
-  // DOM for ~300ms; convert a second won quote inside that window and two panels
+  // DOM for ~300ms; record a second payment inside that window and two panels
   // carry the same ids, with document.getElementById() resolving into the DYING
-  // one. Money-critical here: the save would read the PREVIOUS quote's contract
-  // amount, payment received and DP% and write them onto THIS order + ledger.
+  // one. Money-critical here: the save would read the PREVIOUS quote's amount,
+  // VAT treatment and method and write them onto THIS order.
   const $ = (id) => _panel.querySelector('#' + id);
+  // Live summary: the SAME numbers the confirmation will use (SalesFlow.validatePayment is the one amount check).
+  const recompute = () => {
+    const v = SF.validatePayment({ contract, entered: parseFloat($('so-paid').value)||0, vatTreatment: $('so-vat').value, hasReceipt: true });
+    const pct = SF.dpPercentOf(v.recorded, contract);
+    $('so-sum-rec').textContent = '₱' + fmt(v.recorded);
+    $('so-sum-net').textContent = '₱' + fmt(v.net);
+    $('so-sum-vat').textContent = '₱' + fmt(v.vat);
+    $('so-sum-bal').textContent = '₱' + fmt(Math.max(0, contract - v.recorded));
+    $('so-sum-pct').textContent = pct == null ? '' : 'This is ' + pct + '% of the contract';
+  };
+  $('so-paid').addEventListener('input', recompute);
+  $('so-vat').addEventListener('change', recompute);
+  recompute();
+  const rerender = () => {
+    if (typeof container === 'undefined' || !container) return;
+    if (isEdit) { window.renderSalesOrders(container); return; }
+    // BK and BI both live in bk_quotes, so both re-render the internal (Barro Kitchens) quotations summary — which badges the BI rows.
+    if (window.isInternalQuoteCompany(d.co)) renderBKQuotationsSummary(container, currentUser, currentRole);
+    else renderBSQuotationsSummary(container, currentUser, currentRole);
+  };
   $('so-save').addEventListener('click', () => window.busy($('so-save'), async ()=>{
     const err=$('so-err');
+    const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+    err.classList.add('hidden');
     if (parseInt($('so-receipt-upload')?.dataset.busy, 10) > 0) { Notifs.showToast('Wait for the upload to finish','error'); return; }
-    const contract=parseFloat($('so-contract').value)||0;
-    const paid=parseFloat($('so-paid').value)||0;
-    const project=$('so-project').value.trim();
-    if(!project){ err.textContent='Project is required.'; err.classList.remove('hidden'); return; }
-    const dpPercent = Math.max(0, Math.min(100, parseFloat($('so-dp-pct').value)||0)) || null;
-    // Sales→Production handoff fields (owner's rule) — optional here (Sales may not
-    // know the target date yet), but REQUIRED before this order can actually be sent
-    // to Production; see ensureProdHandoffFields/transferOrderToProduction below.
-    const targetDate = $('so-target-date').value || '';
-    const priority = $('so-priority').value || '';
-    const notes = $('so-notes').value.trim();
+    const entered = parseFloat($('so-paid').value) || 0;
+    const vatTreatment = $('so-vat').value;
+    const paymentMethod = $('so-method').value;
+    const orRef = ($('so-orref').value || '').trim();
+    const paymentDate = $('so-paydate').value || today();
+    const receiptUrl = (receipt && receipt.url) || (isEdit ? (editOrder.receiptUrl || null) : null) || null;
+    const receiptName = (receipt && receipt.name) || (isEdit ? (editOrder.receiptName || null) : null) || null;
+    // b) the one amount check: over-contract, no amount, no receipt — never the old free-typed contract
+    const v = SF.validatePayment({ contract, entered, vatTreatment, hasReceipt: !!receiptUrl });
+    if (!v.ok) { fail(v.error); return; }
+    const who = userProfile?.displayName || currentUser.email;
+    const nowIso = new Date().toISOString();
+    const fmtAmt = window.fmtN2(v.recorded);
+    // N1 / N4 to the President and N1F (the FYI that lets Finance step in ONLY if he cannot be reached): the same two messages for a new
+    // payment (resubmits 0) and for a corrected one. A failed notification never fails the write.
+    const tellAboutPayment = async (orderId, resubmits) => {
+      const line = `${who}: ${d.client} — ₱${fmtAmt} by ${paymentMethod} (${d.qno}).`;
+      await safeNotify(() => Notifs.sendToOwner({ title: resubmits ? '💵 Payment corrected — please confirm' : '💵 Payment to confirm',
+        body: resubmits ? line : line + ' Tap to confirm.',
+        icon:'💵', type:'payment_confirm', link:'approvals', dedupKey:`payconf-${orderId}-${resubmits}` }));
+      await safeNotify(() => Notifs.sendToDept('Finance', { title:'💵 Payment recorded — President to confirm',
+        body: line + ' No action needed unless the President cannot be reached.',
+        icon:'💵', type:'payment_confirm', link:'sales-orders', dedupKey:`payfyi-${orderId}-${resubmits}` }));
+    };
     try{
-      // 1) create the master project (the spine that ties the whole job together)
-      const proj = await createJobProject({ ...d, total:contract, dpPercent, items: quoteItems, targetDate, priority, notes });
-      // 2) sales order, linked to the project
-      const ref=await db.collection('sales_orders').add({
+      // ── EDIT / RESUBMIT: only the payment fields move; the project, the quote and the tracker are not touched ──
+      if (isEdit) {
+        const oref = db.collection('sales_orders').doc(editOrder.id);
+        const cur = await oref.get();                       // fresh read first
+        if (!cur.exists) { fail('This order no longer exists.'); return; }
+        const prev = cur.data();
+        if (prev.status === 'recorded') { Notifs.showToast('This payment was already confirmed.', 'error'); closeModal(); rerender(); return; }
+        const pc = prev.paymentConfirm || {};
+        const resubmits = (pc.resubmits || 0) + 1;
+        await oref.update({
+          paymentReceived: entered, paymentMethod, vatTreatment, orRef, paymentDate, receiptUrl, receiptName,
+          status: 'pending',
+          paymentConfirm: { requestedAt: nowIso, requestedBy: currentUser.uid, requestedByName: who, decision: null, resubmits, prevReason: pc.reason || '' },
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        window.logAudit && window.logAudit('update','sales_order',editOrder.id,{ paymentResubmitted:true, paid:entered, resubmits });
+        await tellAboutPayment(editOrder.id, resubmits);          // N4 (+ N1F): the President is asked again
+        if (typeof dbCacheInvalidate==='function') { dbCacheInvalidate('sales_orders'); dbCacheInvalidate('approvals-pending:sales_orders-pending'); }
+        Notifs.success('Payment updated — sent to the President again');
+        rerender();
+        closeModal();
+        return;
+      }
+
+      // b2) ONE ORDER PER QUOTE CHAIN (§14.3.2). A New Revision of an already-ordered quote offers this button again, and
+      // the same-quote guard in createJobProject cannot see it: a second order for the same job would post a second SO- income row.
+      // Checked before any write. Fails closed: if the chain cannot be read, nothing is recorded.
+      const root = quoteDoc && (quoteDoc.rootQuoteId || quoteDoc.id);
+      if (root) {
+        let sibs;
+        try {
+          let sq = db.collection(qColl).where('rootQuoteId','==',root);
+          // bk_quotes reads are creator-or-admin in firestore.rules: a non-admin's chain query has to be scoped to their own
+          // quotes or the rules refuse it outright (and a refused guard blocks every payment they record).
+          if (qColl === 'bk_quotes' && !['president','manager','secretary'].includes(window.currentRole || '')) sq = sq.where('createdBy','==',currentUser.uid);
+          sibs = await sq.get();
+        } catch(_) { fail('Could not check earlier revisions — try again.'); return; }
+        if (sibs.docs.some(x => x.id !== quoteDoc.id && x.data().salesOrderId)) {
+          fail('An earlier revision of this quote already has a sales order. A price change after payment is handled on that order, not by recording a new one. Ask the President.');
+          return;
+        }
+      }
+
+      // 1) create the master project (the spine that ties the whole job together). flowVersion 2 keeps it away from Production until Generate.
+      const proj = await createJobProject({ ...d, total:contract, dpPercent, items: quoteItems, targetDate:'', priority:'', notes:'', flowVersion:2 });
+      // 2) sales order, linked to the project — 'pending' until the President confirms. contractAmount is ALWAYS the quote total.
+      const orderDoc = {
         projectId:proj.id, quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
         clientId: d.clientId || null,
-        project, contractAmount:contract, paymentReceived:paid, items:quoteItems,
-        paymentMethod:$('so-method').value,
-        notes, targetDate, priority,
-        receiptUrl:receipt?.url||null, receiptName:receipt?.name||null,
-        status:'pending', createdBy:currentUser.uid, createdByName:userProfile?.displayName||currentUser.email,
+        rootQuoteId: (quoteDoc && (quoteDoc.rootQuoteId || quoteDoc.id)) || null,
+        project: (d.client||'')+' — '+(d.qno||''),
+        contractAmount:contract, paymentReceived:entered, paymentMethod, vatTreatment, orRef, paymentDate,
+        items:quoteItems, notes:'', targetDate:'', priority:'',
+        receiptUrl, receiptName,
+        status:'pending', flowVersion:2,
+        paymentConfirm:{ requestedAt:nowIso, requestedBy:currentUser.uid, requestedByName:who, decision:null, resubmits:0 },
+        createdBy:currentUser.uid, createdByName:who,
         createdAt:firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      const ref = await db.collection('sales_orders').add(orderDoc);
       // 3) stamp the back-links onto the quote IN THE CORRECT COLLECTION (was
       //    hardcoded to bs_quotes). Routed through the shared registry, so BI
       //    (Barro Industries, filed alongside BK) resolves without a third arm.
-      const qc = window.quoteCollectionFor(d.co);
-      try{ await db.collection(qc).doc(d.id).update({ salesOrderId:ref.id, projectId:proj.id, status:'won' }); if (qc==='bs_quotes') window.invalidateBsQuotesCache(currentUser.uid); }catch(_){}
-      // 4) record the Sales Order on the project's document register + link the SO id
-      try{ await db.collection('job_projects').doc(proj.id).update({ salesOrderId:ref.id,
-        documents:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order', ref:proj.projectNo, at:new Date().toISOString(), by:userProfile?.displayName||currentUser.email }) }); }catch(_){}
+      try{ await db.collection(qColl).doc(d.id).update({ salesOrderId:ref.id, projectId:proj.id, status:'won' }); if (qColl==='bs_quotes') window.invalidateBsQuotesCache(currentUser.uid); }catch(_){}
+      // 4) link the order id onto the project. The "Sales Order" document row is NOT written here any more: it
+      //    moves to Generate, when the sales order and job order actually exist.
+      try{ await db.collection('job_projects').doc(proj.id).update({ salesOrderId:ref.id }); }catch(_){}
       // 4b) CRM: a client with a signed order is WON — keeps client stage and the
       // quote-outcome win rate from drifting apart (v12 WS32 decision 8).
       try {
@@ -3621,17 +3738,16 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
         }
       } catch(_){ /* best-effort — never block the order */ }
-      // 5) client order-tracking link — created once the downpayment is captured.
-      //    Public, unguessable token; client-SAFE fields only (no cost/margin).
-      let trackUrl='';
+      // 5) client order-tracking link. Public, unguessable token; client-SAFE fields only (no cost/margin).
+      //    An unconfirmed payment is not shown to the client: paid 0, balance = the whole contract.
       try{
         const tRef = db.collection('order_tracking').doc(await uniqueTrackCode());
         const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
         await tRef.set({
           orderId:ref.id, projectId:proj.id, orderNo:proj.projectNo, clientName:d.client||'',
-          company:window.quoteCompanyLabel(d.co), scope:project,
+          company:window.quoteCompanyLabel(d.co), scope:orderDoc.project,
           status:'confirmed', stageStamps:{ confirmed:dayStr },
-          contractAmount:contract, paid:paid, balance:Math.max(0,contract-paid),
+          contractAmount:contract, paid:0, balance:contract,
           orderDate:dayStr, expectedDate:null,
           publicNote:'Thank you for your order! This page updates as your order moves through production and delivery.',
           createdAt:firebase.firestore.FieldValue.serverTimestamp(),
@@ -3639,81 +3755,18 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         });
         await db.collection('sales_orders').doc(ref.id).update({ trackingToken:tRef.id }).catch(()=>{});
         await db.collection('job_projects').doc(proj.id).update({ trackingToken:tRef.id }).catch(()=>{});
-        trackUrl = window.orderTrackUrl(tRef.id);
       }catch(_){ /* tracking is best-effort — never block the order */ }
-      const who=userProfile?.displayName||currentUser.email;
-      // 5b) FINANCE AUTO-RECORD — closes the "Finance re-enters it" gap. Post ONLY
-      // what was actually collected (never the full contract — the balance stays
-      // AR on the project; never invented revenue), via the SAME deterministic ref
-      // ('SO-<salesOrderId>') openRecordSaleModal's manual "Record Sale" path
-      // already posts to (see its `ledgerRef` a few functions below) — Ledger's
-      // deterministic-id read-then-write means a re-run can never double-post.
-      // Deliberately gated to callers who already hold Finance/admin rights
-      // (mirrors firestore.rules' canFinance()): the ledger's OWN rules gate both
-      // its read (the service's legacy-ref dedupe guard) and its create to
-      // canFinance()/isAdmin() only, and widening that so every Sales-staff or
-      // partner order-creator could write straight to the books — self-reported
-      // amount, no verification — is exactly the kind of money-safety regression
-      // "be conservative" rules out. So this is pure best-effort: it silently
-      // succeeds when the creator IS Finance/admin (a common real case — a
-      // manager or Finance-dept staffer converting the quote themselves), and
-      // is a no-op (rules deny it) for everyone else, who fall through to the
-      // EXACT unchanged manual "Record Sale" queue that existed before this
-      // change — zero regression risk either way.
-      let autoPosted = false;
-      // isFinancePriv() is canEditDept('Finance'), which resolves to exactly the
-      // same set this used to spell out by hand (president/owner/manager/finance
-      // OR a Finance-DEPARTMENT member) MINUS the Corporate Secretary — who the
-      // hand-rolled version admitted through the department leg the moment their
-      // profile listed Finance, posting straight to the ledger. Owner ruling 3.
-      const canAutoPostLedger = isFinancePriv();
-      if (canAutoPostLedger && paid > 0 && paid <= contract + 0.01) {
-        try {
-          const vatTreatment = $('so-vat').value;
-          const { recorded, net, vat:vatAmount } = window.vatSplit(paid, vatTreatment);
-          await window.Ledger.upsertByRef(`SO-${ref.id}`, () => ({
-            ref: `SO-${ref.id}`, date: today(), kind: 'credit',
-            accountType: 'income', account: 'Sales Revenue', category: 'Sales Revenue',
-            description: `Sales order — ${d.client}${d.qno?' ('+d.qno+')':''}`,
-            amount: recorded, source: 'Sales', projectId: proj.id,
-            extra: { net, vatAmount, vatTreatment, autoPosted: true }
-          }));
-          await db.collection('sales_orders').doc(ref.id).update({
-            status:'recorded', recordedAmount:recorded, recordedAt:firebase.firestore.FieldValue.serverTimestamp(),
-            recordedBy:who, autoRecorded:true
-          });
-          // Sync the project's collected/AR the same way openRecordSaleModal does —
-          // read-then-increment (not a blind set) even though this is the project's
-          // very first payment, so this stays correct if that ever isn't true.
-          const pSnap = await db.collection('job_projects').doc(proj.id).get();
-          const curCollected = pSnap.exists ? (pSnap.data().amountCollected||0) : 0;
-          const newCollected = curCollected + recorded;
-          const newAR = Math.max(0, contract - newCollected);
-          await db.collection('job_projects').doc(proj.id).update({
-            amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-            payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount:recorded, vatAmount, net, method:$('so-method').value, orRef:'', date:today(), by:who, ledgerId:window.Ledger._sanitize(`SO-${ref.id}`), auto:true }),
-            timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale auto-recorded ₱${window.fmtN2(recorded)} at order creation`, by:who })
-          });
-          autoPosted = true;
-        } catch(_){ /* rules deny it for a non-Finance creator — falls back to the unchanged manual Record Sale queue */ }
-      }
-      window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid, projectNo:proj.projectNo, autoPosted});
-      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body: autoPosted
-          ? `${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} auto-recorded to the ledger). Project ${proj.projectNo}. Verify the receipt.`
-          : `${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} received). Project ${proj.projectNo}. Record income + verify receipt.`,
-        icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
-      // Production is no longer notified at SO creation — it now hears about a job
-      // exactly once, at the Design→Production handoff (transferOrderToProduction).
-      try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${window.fmtN2(contract)} closed by ${who}.`, icon:'🤝', type:'sales_order', link:'projects-lifecycle' }); }catch(_){}
-      Notifs.success('Sales order + project '+proj.projectNo+' created'+(autoPosted?' + sale recorded':''));
-      if (typeof container!=='undefined' && container) {
-        // BK and BI both live in bk_quotes, so both re-render the internal
-        // (Barro Kitchens) quotations summary — which badges the BI rows.
-        if (window.isInternalQuoteCompany(d.co)) renderBKQuotationsSummary(container, currentUser, currentRole);
-        else renderBSQuotationsSummary(container, currentUser, currentRole);
-      }
-      // Surface the shareable client tracking link (falls back to just closing).
-      if (trackUrl) window.showOrderTrackModal(trackUrl, proj.projectNo);
+      // NOTHING is posted to the ledger here, for anyone (the old auto-record is gone): the President confirms first.
+      window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid:entered, projectNo:proj.projectNo});
+      // N1 (the President) + N1F (FYI to Finance). They replace the old "New Sales Order" Finance ping and the "Quote won" owner ping.
+      await tellAboutPayment(ref.id, 0);
+      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('sales_orders'); dbCacheInvalidate('job_projects'); dbCacheInvalidate('approvals-pending:sales_orders-pending'); }
+      Notifs.success('Payment recorded — waiting for confirmation');
+      rerender();
+      // If the President recorded it himself, he confirms it in one more tap. ⚠ REPLACE the Record payment page with the
+      // confirm sheet — never closeModal()-then-open: dismissTop() is history.back(), which is ASYNC, so the queued back
+      // lands AFTER the new panel is pushed and pops the panel that was just opened.
+      if (typeof isRealPresident === 'function' && isRealPresident()) window.openPaymentConfirmSheet({ id:ref.id, ...orderDoc }, rerender, { replace:true });
       else closeModal();
     }catch(ex){
       // Money-critical fix — createJobProject's pre-write guard (production.js)
@@ -3741,7 +3794,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         }
         return;
       }
-      err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden');
+      fail('Failed: '+(ex.message||ex.code));
     }
   }));
 }
@@ -3899,44 +3952,111 @@ window.deleteSalesOrder = async function(o, onDone) {
 
 window.renderSalesOrders = async function(container){
   const c = container || deptContainer();
-  // Anyone non-partner can SEE the list (read rule). Recording posts to the ledger,
-  // which is open to finance/admin roles OR Finance-DEPARTMENT staff (matching the
-  // canFinance() Firestore rule), so a Finance-dept member can register the sale.
-  // isFinancePriv() is that same set — and, unlike the literal it replaced, it
-  // drops the Corporate Secretary, whom canFinance() also excludes: the old
-  // department leg handed them Record Sale / To Production the moment their
-  // profile listed Finance, and the ledger write would then have been refused.
+  const SF = window.SalesFlow;
+  const viewer = salesFlowViewer();
+  // Anyone non-partner can SEE the list (read rule). isFinancePriv() is canEditDept('Finance'): it drops the Corporate
+  // Secretary, whom canFinance() also excludes (owner ruling 3) — and it is true for every manager, which is why the
+  // payment-confirmation stand-in uses viewer.isFinanceTier instead.
   const isFin = isFinancePriv();
+  const isPres = viewer.isPresident;
+  const isSalesActor = canEditDept('Sales') && (window.currentRole || '') !== 'secretary';
   c.innerHTML=window.skeletonHtml('table');
   // Priority is read from and written to the LINKED job_project, not
   // sales_orders.priority. Two reasons: the project is the spine record
   // Production plans off (so Sales and Production can never see different
-  // priorities for one job), and firestore.rules gates a sales_orders update to
-  // finance/design — a Sales rep tapping a star on their own order would be
-  // denied, whereas job_projects allows any non-partner staff a non-money write.
-  const [snap, projSnap] = await Promise.all([
-    db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-    dbCachedGet('job_projects', ()=>db.collection('job_projects').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]}))
-  ]);
+  // priorities for one job), and a sales_orders update by Sales is limited to
+  // the payment and hand-off fields (firestore.rules soSalesUpdate) — a Sales rep tapping a
+  // star on their own order would be denied, whereas job_projects allows any
+  // non-partner staff a non-money write.
+  // The orders ARE this page: a failed read says so (with a retry) instead of passing for "No sales orders yet". The job read only feeds the priority stars.
+  let snap, projSnap;
+  try {
+    [snap, projSnap] = await Promise.all([
+      db.collection('sales_orders').orderBy('createdAt','desc').get(),
+      dbCachedGet('job_projects', ()=>db.collection('job_projects').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]}))
+    ]);
+  } catch (e) {
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load sales orders</h4><p>${escHtml(e.message||String(e))}</p><button type="button" class="btn-secondary btn-sm so-retry-btn" style="margin-top:14px">Try again</button></div>`;
+    c.querySelectorAll('.so-retry-btn').forEach(b => b.addEventListener('click', () => window.renderSalesOrders(container)));
+    return;
+  }
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
   const projById = {};
   projSnap.docs.forEach(d=>{ projById[d.id] = { id:d.id, ...d.data() }; });
-  const pending = orders.filter(o=>o.status!=='recorded');
+  const toConfirm = orders.filter(o=>['awaiting_confirmation','rejected','legacy_pending'].includes(SF.orderState(o))).length;
   const totalContract = orders.reduce((s,o)=>s+(o.contractAmount||0),0);
   const totalRecorded = orders.filter(o=>o.status==='recorded').reduce((s,o)=>s+(o.recordedAmount||o.paymentReceived||0),0);
+  const rerender = () => window.renderSalesOrders(container);
+
+  // The status cell: the one state badge (SalesFlow.orderState), plus who decided / why it was sent back.
+  const statusCell = (o, st, meta) => {
+    const pc = o.paymentConfirm || {};
+    // max-width + wrapping: on a phone this cell is sized to its content (see .table-cards td.tc-net), so a long reason would otherwise push the card wider than the screen
+    const sub = (txt, color) => `<div style="font-size:11px;color:${color};margin-top:3px;max-width:190px;white-space:normal;overflow-wrap:anywhere">${txt}</div>`;
+    let h = `<span class="badge ${meta.cls}">${escHtml(meta.label)}</span>`;
+    if (o.autoRecorded) h += `<span class="badge badge-blue" style="font-size:9px;margin-left:4px" title="Posted to the ledger automatically when the order was created">${emojiIcon('⚡',9)} auto</span>`;
+    if (st === 'rejected') h += sub(escHtml(pc.reason || ''), 'var(--danger)');
+    if (['confirmed','in_design','in_production'].includes(st) && pc.onBehalf) h += sub(`Confirmed by ${escHtml(pc.decidedByName || '')} (Finance)`, 'var(--text-muted)');
+    if (st === 'awaiting_confirmation' && viewer.isFinanceTier && !viewer.isPresident && viewer.uid && o.createdBy === viewer.uid) h += sub('You recorded this payment, so the President confirms it.', 'var(--text-muted)');
+    return h;
+  };
+  // FLOW-FORM-HOOK: Sales Order / Payment Acknowledgement buttons from the form engine — only when it is ALREADY loaded
+  // (the engine is never loaded just to draw a button). Absent or failing: nothing is rendered.
+  const formBtns = (o) => {
+    try {
+      const F = window.Forms;
+      if (!F || typeof F.buttonHtml !== 'function' || o.flowVersion !== 2) return '';
+      const fc = { orderId: o.id, projectId: o.projectId || null };
+      return (o.status === 'recorded' ? String(F.buttonHtml('payment_ack', fc) || '') : '') + (o.releasedAt ? String(F.buttonHtml('sales_order', fc) || '') : '');
+    } catch (_) { return ''; }
+  };
+  // The action cell, by state (§5.3). Sales fixes the payment; the President (or Finance standing in) decides; Sales generates.
+  const actionCell = (o, st) => {
+    const isMine = !!viewer.uid && o.createdBy === viewer.uid;
+    // The President decides, he does not edit another person's payment; Sales / managers may edit until it is confirmed.
+    const canEditPay = (isMine || isSalesActor) && !(isPres && !isMine);
+    const b = [`<button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>`];
+    if (st === 'awaiting_confirmation') {
+      if (SF.canConfirmPayment(o, viewer)) {
+        b.push(`<button class="btn-success btn-sm so-confirm-btn" data-id="${o.id}">Confirm payment</button>`);
+        b.push(`<button class="btn-secondary btn-sm so-reject-btn" data-id="${o.id}">Reject</button>`);
+      }
+      if (canEditPay) b.push(`<button class="btn-secondary btn-sm so-editpay-btn" data-id="${o.id}">Edit payment</button>`);
+    } else if (st === 'rejected') {
+      if (canEditPay) b.push(`<button class="btn-primary btn-sm so-editpay-btn" data-id="${o.id}">Fix &amp; resubmit</button>`);
+    } else if (st === 'confirmed') {
+      if (isSalesActor || isPres) b.push(`<button class="btn-primary btn-sm so-generate-btn" data-id="${o.id}">Generate SO &amp; JO</button>`);
+      // legacy orders (recorded by Finance's Record Sale) keep Finance's own hand-off to Design
+      if (!o.flowVersion && isFin && !isSalesActor) b.push(`<button class="btn-secondary btn-sm so-design-btn" data-id="${o.id}">${emojiIcon('🎨',16)} To Design</button>`);
+    } else if (st === 'legacy_pending') {
+      if (isFin) b.push(`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`);
+    } else if (st === 'in_design') {
+      b.push(`<span title="With the Design team">${emojiIcon('🎨',16)}</span>`);
+      // Nobody is assumed to be in the Design department (owner, 2026-11-19: F6 is on hold). Sales or the President can always
+      // attach the drawing themselves and release the job to Production, so "Not drawn yet" never waits on Design staffing.
+      if (o.flowVersion === 2 && (isSalesActor || isPres)) b.push(`<button class="btn-primary btn-sm so-attach-btn" data-id="${o.id}" title="Attach the drawing yourself and send this job straight to Production">Attach drawing</button>`);
+    } else if (st === 'in_production') {
+      if (isSalesActor || isPres) b.push(`<button class="btn-secondary btn-sm so-jo-btn" data-id="${o.id}">Job Order</button>`);
+      else if (isFin) b.push(emojiIcon('✓',16));
+    }
+    b.push(formBtns(o));
+    if (isPres) b.push(`<button class="btn-danger btn-sm so-del-btn" data-id="${o.id}" title="Delete this sales order and everything it created">${emojiIcon('🗑',14)}</button>`);
+    return `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end">${b.join('')}</div>`;
+  };
+
   c.innerHTML = `
-    <div class="page-header"><h2>${emojiIcon('🧾',20)} Sales Orders</h2><span style="font-size:12px;color:var(--text-muted)">Record the sale &amp; payment, then hand off to Design</span></div>
+    <div class="page-header"><h2>${emojiIcon('🧾',20)} Sales Orders</h2><span style="font-size:12px;color:var(--text-muted)">Sales records the payment · the President confirms · Sales generates the sales order &amp; job order</span></div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card"><div class="kpi-label">Orders</div><div class="kpi-value">${orders.length}</div></div>
-      <div class="kpi-card warn"><div class="kpi-label">To Record</div><div class="kpi-value">${pending.length}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">To confirm</div><div class="kpi-value">${toConfirm}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Contract ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalContract)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Recorded ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalRecorded)}</div></div>
     </div>
     <div class="card"><div class="card-body" style="padding:0">
-    ${!orders.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>`:
+    ${!orders.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No sales orders yet</h4><p>They appear here when a payment is recorded on a quote.</p></div>`:
     `<div class="table-wrap"><table class="data-table table-cards">
       <thead><tr><th>Date</th><th>Client / Project</th><th>Priority</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th><th></th></tr></thead>
-      <tbody>${orders.map(o=>`<tr class="so-row">
+      <tbody>${orders.map(o=>{ const st = SF.orderState(o), meta = SF.ORDER_STATE_META[st]; return `<tr class="so-row">
         <td class="tc-avatar" style="white-space:nowrap">${o.createdAt?.toDate?o.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''}</td>
         <td class="tc-name"><strong>${escHtml(o.clientName||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
         <td class="tc-detail" data-label="Priority">${(()=>{
@@ -3950,13 +4070,13 @@ window.renderSalesOrders = async function(container){
             : escHtml(pr.priority||'—');
         })()}</td>
         <td class="tc-detail" data-label="Contract">₱${fmt(o.contractAmount||0)}</td>
-        <td class="tc-detail" data-label="Received">₱${fmt(o.recordedAmount||o.paymentReceived||0)}</td>
+        <td class="tc-detail" data-label="Received">₱${fmt(o.recordedAmount||o.paymentReceived||0)}${st==='awaiting_confirmation'?' <span style="font-size:10px;color:var(--text-muted)">unconfirmed</span>':''}</td>
         <td class="tc-detail" data-label="Method" style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
         <td class="tc-detail" data-label="Receipt">${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:'—'}</td>
         <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(o.createdByName||'')}</td>
-        <td class="tc-net"><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.autoRecorded?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px" title="Posted to the ledger automatically when the order was created">${emojiIcon('⚡',9)} auto</span>`:''}${o.sentToDesign&&!o.sentToProduction?`<span class="badge badge-purple" style="font-size:9px;margin-left:4px">${emojiIcon('🎨',9)} in design</span>`:''}${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
-        <td class="tc-actions" style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(o.sentToProduction?`${emojiIcon('✓',16)}`:(o.sentToDesign?`<span title="With the Design team">${emojiIcon('🎨',16)}</span>`:`<button class="btn-secondary btn-sm so-design-btn" data-id="${o.id}">${emojiIcon('🎨',16)} To Design</button>`))}`:''}${(typeof isRealPresident==='function'&&isRealPresident())?` <button class="btn-danger btn-sm so-del-btn" data-id="${o.id}" title="Delete this sales order and everything it created">${emojiIcon('🗑',14)}</button>`:''}</td>
-      </tr>`).join('')}</tbody>
+        <td class="tc-net">${statusCell(o, st, meta)}</td>
+        <td class="tc-actions">${actionCell(o, st)}</td>
+      </tr>`; }).join('')}</tbody>
     </table></div>`}
     </div></div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
@@ -3970,27 +4090,445 @@ window.renderSalesOrders = async function(container){
   // Stars repaint themselves in place — no re-render, so a planner re-ranking
   // several orders keeps their scroll position and any expanded rows.
   window.bindPriorityStars && window.bindPriorityStars(c);
+  // FLOW-FORM-HOOK: wire the form buttons (only drawn when the engine was already loaded).
+  try { if (window.Forms && typeof window.Forms.bind === 'function') window.Forms.bind(c); } catch (_) {}
+  const byId = (b) => orders.find(x=>x.id===b.dataset.id);
   // Tracking link is available to every viewer of this list (non-partner).
   c.querySelectorAll('.so-link-btn').forEach(b=>b.addEventListener('click', async ()=>{
-    const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
+    const o = byId(b); if(!o) return;
     const orig=b.innerHTML; b.disabled=true; b.textContent='…';
     try{ const tok = await window.ensureOrderTracking(o); window.showOrderTrackModal(window.orderTrackUrl(tok), o.clientName||o.project||''); }
     catch(e){ Notifs.showToast('Could not create link: '+(e.message||e.code),'error'); }
     b.disabled=false; b.innerHTML=orig;
   }));
   c.querySelectorAll('.so-del-btn').forEach(b=>b.addEventListener('click', ()=>{
-    const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
-    window.deleteSalesOrder(o, ()=>window.renderSalesOrders(container));
+    const o = byId(b); if(!o) return;
+    window.deleteSalesOrder(o, rerender);
   }));
+  // The President's one-tap confirmation (or Finance standing in); each card is gated again inside the sheet and the core.
+  c.querySelectorAll('.so-confirm-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.openPaymentConfirmSheet(o, rerender); }));
+  c.querySelectorAll('.so-reject-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.rejectOrderPayment(o, rerender); }));
+  // Sales fixes the payment (Edit payment / Fix & resubmit) — the same modal, in edit mode.
+  c.querySelectorAll('.so-editpay-btn').forEach(b=>b.addEventListener('click', ()=>{
+    // `c`, not `container`: the router calls this page with no argument, and the modal re-renders THIS page when the payment is resubmitted.
+    const o = byId(b); if(o) openSalesOrderModal(datasetFromOrder(o), window.currentUser, window.currentRole, c, o);
+  }));
+  c.querySelectorAll('.so-generate-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.openGenerateOrderSheet(o, rerender); }));
+  c.querySelectorAll('.so-attach-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.openAttachDrawingSheet(o, rerender); }));
+  // Job Order — the form engine when it is there (FLOW-FORM-HOOK); any failure falls back to the existing print.
+  c.querySelectorAll('.so-jo-btn').forEach(b=>b.addEventListener('click', ()=>window.busy(b, async ()=>{
+    const o = byId(b); if(!o) return;
+    try { const F = await window.flowForms(); await F.open('job_order', { orderId: o.id, projectId: o.projectId || null }); return; }
+    catch (_) { /* no form engine, or it failed: print the job order the way it always printed */ }
+    try {
+      await window.ensureScript('js/screens/production.js');
+      const ps = o.projectId ? await db.collection('job_projects').doc(o.projectId).get() : null;
+      if (!ps || !ps.exists) { Notifs.showToast('This order has no job to print.', 'error'); return; }
+      window.printJobOrder({ id: ps.id, ...ps.data() }, []);
+    } catch (e) { Notifs.showToast('Could not open the job order: ' + (e.message || e.code), 'error'); }
+  })));
   if(isFin){
     c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', ()=>{
-      const o = orders.find(x=>x.id===b.dataset.id); if(o) openRecordSaleModal(o, container);
+      const o = byId(b); if(o) openRecordSaleModal(o, container);
     }));
     c.querySelectorAll('.so-design-btn').forEach(b=>b.addEventListener('click', async ()=>{
-      const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
+      const o = byId(b); if(!o) return;
       await window.transferOrderToDesign(o); window.renderSalesOrders(container);
     }));
   }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  THE PRESIDENT'S CONFIRMATION (§5.4) — one tap. Finance may stand in only when he cannot be reached (owner ruling F2).
+//  The ledger row and the project's collected / AR post TOGETHER, exactly once (SalesFlow.runConfirmation); this
+//  function is the sheet around it — nothing here writes to the ledger or the project directly.
+// ═══════════════════════════════════════════════════════════════════════════
+window.openPaymentConfirmSheet = async function(o, onDone, opts){
+  const SF = window.SalesFlow;
+  onDone = onDone || (()=>{});
+  const viewer = salesFlowViewer();
+  const contract = Number(o.contractAmount) || 0;
+  const v = SF.validatePayment({ contract, entered: o.paymentReceived, vatTreatment: o.vatTreatment || 'inclusive', hasReceipt: true });
+  const pct = SF.dpPercentOf(v.recorded, contract);
+  const pc = o.paymentConfirm || {};
+  const standIn = viewer.isFinanceTier && !viewer.isPresident;
+  // The company account that received the money is part of the confirmation. If the account list cannot be read, say so rather than
+  // open a sheet that would either hide the choice or block the tap with no way forward.
+  let accounts = [], bankOpts = '';
+  let saved = ''; try { saved = localStorage.getItem('bi.payConfirm.bank') || ''; } catch(_) {}
+  try {
+    accounts = await window.BankAccounts.list();
+    if (accounts.length) bankOpts = await window.BankAccounts.optionsHTML(saved);
+  } catch (e) {
+    Notifs.showToast('Could not load the company bank accounts — check your connection and try again.', 'error');
+    return;
+  }
+  const hasBanks = accounts.length > 0;
+  const when = pc.requestedAt ? new Date(pc.requestedAt).toLocaleString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+  const _panel = openPage('Confirm payment — ' + escHtml(o.clientName||''), `
+    ${standIn ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">The President normally confirms payments. Confirm only if he cannot be reached. He will be told that you confirmed it.</div>` : ''}
+    <div style="margin-bottom:12px">
+      <div style="font-size:22px;font-weight:700">₱${fmt(v.recorded)}</div>
+      <div style="font-size:12px;color:var(--text-muted)">${escHtml(o.paymentMethod||'')} · paid ${escHtml(o.paymentDate||'—')} · OR ${escHtml(o.orRef||'—')}</div>
+    </div>
+    <div style="font-size:12px;display:grid;gap:6px;margin-bottom:12px">
+      <div>Contract ₱${fmt(contract)} · this payment is ${pct == null ? '—' : pct}% · balance after ₱${fmt(Math.max(0, contract - v.recorded))}</div>
+      <div>Net ₱${fmt(v.net)} · VAT ₱${fmt(v.vat)} (${escHtml(o.vatTreatment||'inclusive')})</div>
+      <div>Recorded by ${escHtml(o.createdByName||'')}${when ? ' · ' + escHtml(when) : ''}</div>
+      ${pc.resubmits > 0 ? `<div style="color:var(--warning)">Resubmitted — earlier reason: ${escHtml(pc.prevReason||'—')}</div>` : ''}
+    </div>
+    ${o.receiptUrl ? `<div style="margin-bottom:12px"><a class="btn-secondary btn-sm" target="_blank" rel="noopener" href="${escHtml(safeHttpUrl(o.receiptUrl))}">View receipt</a></div>` : ''}
+    ${hasBanks ? `<div class="form-group"><label>Deposited to</label>
+      <select id="pc-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>` : ''}
+    <div id="pc-err" class="error-msg hidden"></div>
+  `, `<button class="btn-success" id="pc-confirm" style="min-height:44px">Confirm payment</button><button class="btn-secondary" id="pc-reject">Reject</button><button class="btn-secondary" onclick="closeModal()">Close</button>`, opts);
+  const $ = (id) => _panel.querySelector('#' + id);
+  $('pc-reject').addEventListener('click', async () => {
+    if (await window.rejectOrderPayment(o, onDone)) closeModal();
+  });
+  $('pc-confirm').addEventListener('click', () => window.busy($('pc-confirm'), async () => {
+    const err = $('pc-err');
+    const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+    err.classList.add('hidden');
+    const vNow = salesFlowViewer();
+    // 1) who may decide. A stale screen cannot post: the core checks again before anything is written.
+    // ONE tap for the President and for Finance standing in (owner ruling SF4): no extra dialog. Finance's confirmation is
+    // still recorded as hers (decidedByRole 'finance', onBehalf true), the sheet carries a small note, and the President is told.
+    if (!SF.canConfirmPayment(o, vNow)) { Notifs.showToast('You cannot confirm this payment.', 'error'); return; }
+    // 2) which company account received it
+    const sel = hasBanks ? ($('pc-bank')?.value || '') : '';
+    if (hasBanks && !sel) { fail('Select the company account that received this payment.'); return; }
+    const acct = await window.BankAccounts.pick(sel);
+    if (sel) { try { localStorage.setItem('bi.payConfirm.bank', sel); } catch(_) {} }
+    const who = userProfile?.displayName || currentUser.email;
+    let projNo = '';
+    // 3) the single confirmation path — real dependencies injected (the core is tested with fakes)
+    const deps = {
+      getOrder: async (id) => { const s = await db.collection('sales_orders').doc(id).get(); return s.exists ? { id: s.id, ...s.data() } : null; },
+      getProject: async (id) => { const s = await db.collection('job_projects').doc(id).get(); if (!s.exists) return null; projNo = s.data().projectNo || ''; return { id: s.id, ...s.data() }; },
+      ledgerPost: (entry) => window.Ledger.post(entry),
+      ledgerAmount: async (ref) => { const s = await db.collection('ledger').doc(window.Ledger._sanitize(ref)).get(); const n = s.exists ? Number(s.data().amount) : NaN; return Number.isFinite(n) ? n : null; },
+      updateOrder: (id, patch) => db.collection('sales_orders').doc(id).update(patch),
+      syncTracking: (token, patch) => window.syncOrderTracking(token, patch),
+      sanitize: (ref) => window.Ledger._sanitize(ref),
+      union: (x) => firebase.firestore.FieldValue.arrayUnion(x),
+      serverTime: () => firebase.firestore.FieldValue.serverTimestamp(),
+      ctx: { today: today(), nowIso: new Date().toISOString(), who, whoUid: currentUser.uid, acct, bankTag: window.BankAccounts.tag(acct, 'in'), viewer: vNow }
+    };
+    let res;
+    try { res = await SF.runConfirmation(o.id, deps); }
+    catch (ex) { fail('Failed: ' + (ex.message || ex.code)); return; }
+    // 4) what happened
+    if (res.ok) {   // posted | repaired
+      const amount = res.amount;
+      const role = vNow.isPresident ? 'president' : 'finance';
+      const whoLabel = vNow.isPresident ? 'the President' : `Finance (${who})`;
+      const amt = window.fmtN2(amount);
+      const client = o.clientName || '';
+      if (res.code === 'posted') window.logAudit && window.logAudit('create', 'ledger', window.Ledger._sanitize('SO-' + o.id), { source:'sales_order', amount, client, confirmedByRole: role });
+      // N2 → the person who recorded it (unless they confirmed it), N3 → Finance (FYI), N9 → the President when Finance stood in.
+      if (o.createdBy && o.createdBy !== vNow.uid) await safeNotify(() => Notifs.send(o.createdBy, { title:'✅ Payment confirmed',
+        body:`${client} — ₱${amt} confirmed by ${whoLabel}. Generate the sales order and job order.`, icon:'✅', type:'payment_confirmed', link:'sales-orders', dedupKey:`payok-${o.id}` }));
+      await safeNotify(() => Notifs.sendToDept('Finance', { title:'💵 Payment confirmed',
+        body:`${client} (${projNo || o.quoteNumber || ''}) — ₱${amt} confirmed by ${whoLabel} and posted to the ledger. No action needed.`, icon:'💵', type:'payment_confirmed', link:'sales-orders', dedupKey:`payfin-${o.id}` }));
+      if (!vNow.isPresident) await safeNotify(() => Notifs.sendToOwner({ title:`✅ Payment confirmed by ${who} (Finance)`,
+        body:`${client} (${o.quoteNumber || ''}) — ₱${amt} by ${o.paymentMethod || ''}, recorded by ${o.createdByName || ''}. Confirmed in your place and posted to the ledger.`, icon:'✅', type:'payment_confirmed', link:'sales-orders', dedupKey:`payown-${o.id}` }));
+      if (typeof dbCacheInvalidate === 'function') ['ledger', 'job_projects', 'sales_orders', 'approvals-pending:sales_orders-pending'].forEach(k => dbCacheInvalidate(k));
+      closeModal();
+      Notifs.success(res.code === 'posted' ? 'Payment confirmed and posted to the ledger' : 'Already in the ledger — order marked confirmed');
+      onDone();
+      // FLOW-FORM-HOOK: number the Payment Acknowledgement. Never fails the confirmation; absent engine → nothing.
+      try { const F = await window.flowForms(); await F.assignNumbers(['payment_ack'], { orderId: o.id }); } catch (_) {}
+      return;
+    }
+    switch (res.code) {
+      case 'already-confirmed': closeModal(); Notifs.showToast('This payment was already confirmed.', 'error'); onDone(); break;
+      case 'not-pending':       Notifs.showToast('This payment was sent back to Sales. It must be resubmitted first.', 'error'); onDone(); break;
+      case 'invalid-payment':   fail(res.error); break;
+      default:                  Notifs.showToast('This order cannot be confirmed here.', 'error');   // legacy-order, not-found, not-allowed
+    }
+  }));
+};
+
+// Reject a recorded payment (§5.4): it goes back to Sales with a reason; nothing is written to the ledger, the project,
+// the quote or the tracker. Gated by the same canConfirmPayment as Confirm. Resolves true when the payment was sent back.
+window.rejectOrderPayment = async function(o, onDone){
+  const SF = window.SalesFlow;
+  onDone = onDone || (()=>{});
+  const viewer = salesFlowViewer();
+  if (!SF.canConfirmPayment(o, viewer)) { Notifs.showToast('You cannot reject this payment.', 'error'); return false; }
+  const reason = await promptDialog({ title:'Reject payment', message:'Tell Sales what to fix.', placeholder:'e.g. amount does not match the receipt', required:true, multiline:true, confirmLabel:'Reject' });
+  if (reason == null || !String(reason).trim()) return false;          // cancelled
+  try {
+    const oref = db.collection('sales_orders').doc(o.id);
+    const snap = await oref.get();                                      // fresh read
+    if (!snap.exists) { Notifs.showToast('This order no longer exists.', 'error'); onDone(); return false; }
+    const cur = snap.data();
+    if (cur.status === 'recorded') { Notifs.showToast('Already confirmed — it cannot be rejected.', 'error'); onDone(); return false; }
+    if (cur.status !== 'pending') { Notifs.showToast('This payment is not waiting for confirmation.', 'error'); onDone(); return false; }
+    const who = userProfile?.displayName || currentUser.email;
+    const nowIso = new Date().toISOString();
+    const why = String(reason).trim();
+    const pcur = cur.paymentConfirm || {};
+    await oref.update({ status:'payment_rejected', paymentConfirm: { ...pcur, decision:'rejected', reason: why, ...SF.decisionStamp(viewer, who, nowIso) } });
+    window.logAudit && window.logAudit('update', 'sales_order', o.id, { paymentRejected:true });
+    const resubmits = pcur.resubmits || 0;
+    const whoLabel = viewer.isPresident ? 'the President' : `Finance (${who})`;
+    const client = cur.clientName || o.clientName || '', qno = cur.quoteNumber || o.quoteNumber || '';
+    const amt = window.fmtN2(SF.validatePayment({ contract: cur.contractAmount, entered: cur.paymentReceived, vatTreatment: cur.vatTreatment || 'inclusive', hasReceipt: true }).recorded);
+    // N5 → whoever recorded it; N10 → the President when Finance sent it back.
+    if (cur.createdBy && cur.createdBy !== viewer.uid) await safeNotify(() => Notifs.send(cur.createdBy, { title:'↩️ Payment sent back',
+      body:`${client} (${qno}), sent back by ${whoLabel}: ${why}`, icon:'↩️', type:'payment_rejected', link:'sales-orders', dedupKey:`payrej-${o.id}-${resubmits}` }));
+    if (!viewer.isPresident) await safeNotify(() => Notifs.sendToOwner({ title:`↩️ Payment sent back by ${who} (Finance)`,
+      body:`${client} (${qno}) — ₱${amt}: ${why}`, icon:'↩️', type:'payment_rejected', link:'sales-orders', dedupKey:`payrejown-${o.id}-${resubmits}` }));
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('approvals-pending:sales_orders-pending'); dbCacheInvalidate('sales_orders'); }
+    Notifs.success('Sent back to Sales');
+    onDone();
+    return true;
+  } catch (ex) {
+    Notifs.showToast('Could not send it back: ' + (ex.message || ex.code), 'error');
+    return false;
+  }
+};
+
+// Orders waiting for a decision, newest first (30 s cache; invalidated by every confirm / reject / resubmit). Never throws.
+async function _loadPendingPaymentConfirmations(){
+  const snap = await dbCachedGet('approvals-pending:sales_orders-pending', () => db.collection('sales_orders').where('status', '==', 'pending').get(), 30000);
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .filter(o => window.SalesFlow.orderState(o) === 'awaiting_confirmation')
+    .sort((a, b) => ((b.createdAt && b.createdAt.seconds) || 0) - ((a.createdAt && a.createdAt.seconds) || 0));
+}
+window.pendingPaymentConfirmations = async function(){
+  try { return await _loadPendingPaymentConfirmations(); }
+  catch (e) { console.warn('[payments to confirm] could not load', e); return []; }
+};
+
+// The "Payments to confirm" card (Approvals page). Renders for the President, or for the finance tier as his stand-in —
+// and lists only the orders THIS viewer may decide (never one a finance user recorded herself). Empty → an empty host.
+window.renderPaymentConfirmList = async function(host, opts){
+  if (!host) return;
+  opts = opts || {};
+  const SF = window.SalesFlow;
+  const viewer = salesFlowViewer();
+  if (!viewer.isPresident && !viewer.isFinanceTier) { host.innerHTML = ''; return; }
+  let all;
+  try { all = await _loadPendingPaymentConfirmations(); }
+  catch (e) {
+    console.warn('[payments to confirm] could not load', e);
+    // A failed read must not look like "nothing to confirm": say so, and let the President try again.
+    host.innerHTML = `<div class="card" style="margin-bottom:12px;border:1.5px solid var(--warning)"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:12px">${emojiIcon('⚠️',14)} Could not load the payments waiting for confirmation.</span><button type="button" class="btn-secondary btn-sm pcl-retry" style="min-height:44px">Try again</button></div></div>`;
+    host.querySelectorAll('.pcl-retry').forEach(b => b.addEventListener('click', () => { if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:sales_orders-pending'); window.renderPaymentConfirmList(host, opts); }));
+    return;
+  }
+  const list = all.filter(o => SF.canConfirmPayment(o, viewer));
+  if (!list.length) { host.innerHTML = ''; return; }
+  const standIn = viewer.isFinanceTier && !viewer.isPresident;
+  const onDone = opts.onDone || (() => window.renderPaymentConfirmList(host, opts));
+  host.innerHTML = `
+    <div class="card" style="margin-bottom:12px;border:1.5px solid var(--warning)">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="font-size:13px">${emojiIcon('💵',13)} ${standIn ? 'Payments to confirm — President\'s stand-in' : 'Payments to confirm'}</h3><span class="badge badge-orange">${list.length}</span></div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+        ${standIn ? `<div style="font-size:12px;color:var(--text-muted)">The President normally confirms payments. Confirm only if he cannot be reached. He will be told that you confirmed it.</div>` : ''}
+        ${list.map(o => {
+          const rec = SF.validatePayment({ contract: o.contractAmount, entered: o.paymentReceived, vatTreatment: o.vatTreatment || 'inclusive', hasReceipt: true }).recorded;
+          return `<div class="item-card">
+            <div class="item-title" style="font-size:13px">${escHtml(o.clientName||'')} — ${escHtml(o.quoteNumber||'')}</div>
+            <div class="item-meta" style="margin-top:4px"><span>₱${fmt(rec)}</span><span>${escHtml(o.paymentMethod||'')}</span><span>recorded by ${escHtml(o.createdByName||'')}</span><span>${escHtml(o.paymentDate||'')}</span></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+              <button class="btn-success btn-sm pcl-open" data-id="${o.id}" style="min-height:44px">Confirm payment</button>
+              <button class="btn-secondary btn-sm pcl-reject" data-id="${o.id}">Reject</button>
+            </div></div>`;
+        }).join('')}
+      </div></div>`;
+  host.querySelectorAll('.pcl-open').forEach(b => b.addEventListener('click', () => { const o = list.find(x => x.id === b.dataset.id); if (o) window.openPaymentConfirmSheet(o, onDone); }));
+  host.querySelectorAll('.pcl-reject').forEach(b => b.addEventListener('click', () => { const o = list.find(x => x.id === b.dataset.id); if (o) window.rejectOrderPayment(o, onDone); }));
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  GENERATE SALES ORDER & JOB ORDER (§5.5) — Sales hands the job to Production itself. No Finance step.
+//  Only for a confirmed order that nobody has sent on. The drawing is attached HERE (owner ruling F5).
+// ═══════════════════════════════════════════════════════════════════════════
+// The drawing record stamped on the order and the job, and the line it adds to the job's document list.
+function _soDrawingStamp(source, dwg, who, nowIso) {
+  return { source, url: dwg.url, name: dwg.name || '', at: nowIso, by: (window.currentUser && window.currentUser.uid) || '', byName: who };
+}
+function _soDrawingDoc(source, name, who, nowIso) {
+  return { type: source === 'client' ? 'Client drawing' : 'Drawing', ref: name || '', at: nowIso, by: who };
+}
+window.openGenerateOrderSheet = function(o, onDone){
+  const SF = window.SalesFlow;
+  onDone = onDone || (()=>{});
+  if (!SF.canGenerate(o)) { Notifs.showToast(SF.transferBlockReason(o) || 'This order was already sent on.', 'error'); return; }
+  let dwg = null;
+  const items = Array.isArray(o.items) ? o.items : [];
+  const selStyle = 'padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)';
+  const _panel = openPage('Generate sales order & job order', `
+    <div style="font-size:12px;margin-bottom:12px"><strong>${escHtml(o.clientName||'')}</strong> · ${escHtml(o.quoteNumber||'')} · ${items.length} item(s)
+      <div style="color:var(--text-muted);margin-top:2px">Payment confirmed ₱${fmt(o.recordedAmount||0)} of ₱${fmt(o.contractAmount||0)}</div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Target date</label><input id="gen-date" type="date" value="${escHtml(o.targetDate||'')}"/></div>
+      <div class="form-group"><label>Priority</label>
+        <select id="gen-priority" style="${selStyle}">
+          <option value="">Select…</option>
+          ${['Urgent','High','Normal','Low'].map(pr=>`<option value="${pr}" ${o.priority===pr?'selected':''}>${pr}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Notes for Production</label><textarea id="gen-notes" rows="3" placeholder="What to build, special instructions…">${escHtml(o.notes||'')}</textarea></div>
+    <div class="form-group"><label>Drawings</label>
+      <label class="check-row" style="display:flex"><input type="radio" name="gen-dwg" value="client"/> The client supplied the drawing</label>
+      <label class="check-row" style="display:flex"><input type="radio" name="gen-dwg" value="in_house"/> Our drawing is already done</label>
+      <label class="check-row" style="display:flex"><input type="radio" name="gen-dwg" value="design"/> Not drawn yet — send to Design first</label>
+    </div>
+    <div id="gen-dwg-upload" class="hidden"></div>
+    <div id="gen-dwg-help" style="font-size:11px;color:var(--text-muted);margin:6px 0 10px"></div>
+    <div id="gen-err" class="error-msg hidden"></div>
+  `, `<button class="btn-primary" id="gen-save">Generate</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  if (window.Drive?.renderUploadArea) Drive.renderUploadArea('gen-dwg-upload', (r)=>{ dwg = r; }, { label:'Attach the drawing (PDF, image, DWG)', dept:'Design', subfolder:'Drawings' });
+  // ⚠ SCOPED TO THIS PANEL, NOT document (a closing sheet lingers ~300ms and would win a document-level lookup).
+  const $ = (id) => _panel.querySelector('#' + id);
+  const picked = () => (_panel.querySelector('input[name="gen-dwg"]:checked') || {}).value || '';
+  const HELP = {
+    client:   'Goes straight to Production. Rene sees the drawing on the job.',
+    in_house: 'Goes straight to Production. Rene sees the drawing on the job.',
+    // Nobody is assumed to be in Design (F6 on hold): the Sales Orders row keeps an "Attach drawing" action for this state.
+    design:   'Design prepares the drawings; you approve them on the job; then it goes to Production. If nobody is available to draw it, tap Attach drawing on the order and add the drawing yourself.'
+  };
+  const sync = () => {
+    const p = picked();
+    $('gen-dwg-upload').classList.toggle('hidden', !(p === 'client' || p === 'in_house'));
+    $('gen-dwg-help').textContent = HELP[p] || '';
+  };
+  _panel.querySelectorAll('input[name="gen-dwg"]').forEach(r => r.addEventListener('change', sync));
+  sync();
+  $('gen-save').addEventListener('click', () => window.busy($('gen-save'), async () => {
+    const err = $('gen-err');
+    const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+    err.classList.add('hidden');
+    const targetDate = $('gen-date').value;
+    const priority = $('gen-priority').value;
+    const notes = $('gen-notes').value.trim();
+    const source = picked();
+    // 1) validate
+    if (!targetDate || !priority || !notes) { fail('Target date, priority and notes are all required.'); return; }
+    if (!source) { fail('Say who made the drawing, or send it to Design first.'); return; }
+    const withDrawing = source === 'client' || source === 'in_house';
+    if (withDrawing) {
+      if (parseInt($('gen-dwg-upload')?.dataset.busy, 10) > 0) { fail('Wait for the upload to finish.'); return; }
+      if (!dwg || !dwg.url) { fail('Attach the drawing first.'); return; }
+    }
+    const who = userProfile?.displayName || currentUser.email;
+    const nowIso = new Date().toISOString();
+    // 2) a fresh read: another tap (or another person) may have sent it on already
+    let cur;
+    try {
+      const fs = await db.collection('sales_orders').doc(o.id).get();
+      cur = fs.exists ? { id: fs.id, ...fs.data() } : null;
+    } catch (ex) { fail('Could not read the order: ' + (ex.message || ex.code)); return; }
+    if (!cur || !SF.canGenerate(cur)) { Notifs.showToast('This order was already sent on.', 'error'); closeModal(); onDone(); return; }
+    // 3) the drawing record (a/b) — Production sees the file on the job
+    const handoffDrawing = withDrawing ? _soDrawingStamp(source, dwg, who, nowIso) : null;
+    // 4) what Production needs, onto the order and the job (and the drawing, with its document row)
+    try {
+      await db.collection('sales_orders').doc(cur.id).update({ targetDate, priority, notes, ...(handoffDrawing ? { handoffDrawing } : {}) });
+      if (cur.projectId) await db.collection('job_projects').doc(cur.projectId).update({ targetDate, priority, notes,
+        ...(handoffDrawing ? { handoffDrawing, documents: firebase.firestore.FieldValue.arrayUnion(_soDrawingDoc(source, handoffDrawing.name, who, nowIso)) } : {}) });
+      Object.assign(cur, { targetDate, priority, notes, ...(handoffDrawing ? { handoffDrawing } : {}) });
+    } catch (ex) { fail('Could not save: ' + (ex.message || ex.code)); return; }
+    // 5) the hand-off. Both helpers are idempotent, so a retry after a failure here is safe; they toast their own reason.
+    const ok = withDrawing ? await transferOrderToProduction(cur) : await window.transferOrderToDesign(cur);
+    if (ok === false) return;
+    // 6) the release stamp — the moment the job order exists (it is the clock Production's budget counts from)
+    try {
+      let projectNo = '';
+      if (cur.projectId) { const ps = await db.collection('job_projects').doc(cur.projectId).get(); if (ps.exists) projectNo = ps.data().projectNo || ''; }
+      await db.collection('sales_orders').doc(cur.id).update({ releasedAt: firebase.firestore.FieldValue.serverTimestamp(), releasedBy: currentUser.uid, releasedByName: who });
+      if (cur.projectId) await db.collection('job_projects').doc(cur.projectId).update({ releasedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        documents: firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order', ref: projectNo, at: nowIso, by: who }),
+        timeline: firebase.firestore.FieldValue.arrayUnion({ at: nowIso, event: 'Sales order & job order generated', by: who }) });
+    } catch (ex) { Notifs.showToast('The hand-off went through, but the release stamp could not be saved: ' + (ex.message || ex.code), 'error'); }
+    // 7) done
+    window.logAudit && window.logAudit('update', 'sales_order', cur.id, { generated:true, drawing: withDrawing ? source : 'design' });
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('sales_orders'); dbCacheInvalidate('job_projects'); }
+    closeModal();
+    Notifs.success(withDrawing ? 'Sales order and job order generated — sent to Production' : 'Sales order generated — sent to Design for drawings');
+    onDone();
+    // FLOW-FORM-HOOK: number and offer the forms (paths a/b: sales order + job order; path c: the sales order only).
+    // Wrapped end to end: a missing or failing form engine never fails Generate.
+    try {
+      const F = await window.flowForms();
+      const kinds = withDrawing ? ['sales_order', 'job_order'] : ['sales_order'];
+      await F.assignNumbers(kinds, { orderId: cur.id, projectId: cur.projectId });
+      await F.offer(withDrawing ? ['sales_order', 'job_order', 'handoff_pack'] : ['sales_order'], { orderId: cur.id, projectId: cur.projectId });
+    } catch (_) { /* no form engine (or it failed): Generate is complete either way */ }
+  }));
+};
+
+// "Not drawn yet — send to Design first" must never wait on Design staffing (owner, 2026-11-19: Rene is NOT being added to Design
+// yet, F6 is on hold). From the Sales Orders row, Sales (or the President) can attach the drawing to an order that is with Design and
+// send the job straight to Production. Same hand-off as Generate paths (a)/(b): the drawing is stamped on the order and the job, then
+// transferOrderToProduction runs (its gate accepts a hand-off drawing in place of the Design → Sales approval).
+window.openAttachDrawingSheet = function(o, onDone){
+  onDone = onDone || (()=>{});
+  const waitingForDrawing = (x) => !!x && x.flowVersion === 2 && x.status === 'recorded' && !!x.sentToDesign && !x.sentToProduction;
+  if (!waitingForDrawing(o)) { Notifs.showToast('This order is not waiting for drawings.', 'error'); return; }
+  let dwg = null;
+  const _panel = openPage('Attach drawing — send to Production', `
+    <div style="font-size:12px;margin-bottom:12px"><strong>${escHtml(o.clientName||'')}</strong> · ${escHtml(o.quoteNumber||'')}
+      <div style="color:var(--text-muted);margin-top:2px">This order was sent to Design for drawings. If the drawing already exists, attach it here and the job goes straight to Production.</div></div>
+    <div class="form-group"><label>Whose drawing is it?</label>
+      <label class="check-row" style="display:flex"><input type="radio" name="att-dwg" value="client"/> The client supplied the drawing</label>
+      <label class="check-row" style="display:flex"><input type="radio" name="att-dwg" value="in_house"/> Our drawing is done</label>
+    </div>
+    <div id="att-dwg-upload"></div>
+    <div style="font-size:11px;color:var(--text-muted);margin:6px 0 10px">Goes straight to Production. The drawing is attached to the job.</div>
+    <div id="att-err" class="error-msg hidden"></div>
+  `, `<button class="btn-primary" id="att-save">Attach &amp; send to Production</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  if (window.Drive?.renderUploadArea) Drive.renderUploadArea('att-dwg-upload', (r)=>{ dwg = r; }, { label:'Attach the drawing (PDF, image, DWG)', dept:'Design', subfolder:'Drawings' });
+  const $ = (id) => _panel.querySelector('#' + id);
+  $('att-save').addEventListener('click', () => window.busy($('att-save'), async () => {
+    const err = $('att-err');
+    const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+    err.classList.add('hidden');
+    const source = (_panel.querySelector('input[name="att-dwg"]:checked') || {}).value || '';
+    if (!source) { fail('Say whose drawing it is.'); return; }
+    if (parseInt($('att-dwg-upload')?.dataset.busy, 10) > 0) { fail('Wait for the upload to finish.'); return; }
+    if (!dwg || !dwg.url) { fail('Attach the drawing first.'); return; }
+    const who = userProfile?.displayName || currentUser.email;
+    const nowIso = new Date().toISOString();
+    let cur;
+    try {
+      const fs = await db.collection('sales_orders').doc(o.id).get();
+      cur = fs.exists ? { id: fs.id, ...fs.data() } : null;
+    } catch (ex) { fail('Could not read the order: ' + (ex.message || ex.code)); return; }
+    if (!waitingForDrawing(cur)) { Notifs.showToast('This order was already sent on.', 'error'); closeModal(); onDone(); return; }
+    const handoffDrawing = _soDrawingStamp(source, dwg, who, nowIso);
+    try {
+      await db.collection('sales_orders').doc(cur.id).update({ handoffDrawing });
+      if (cur.projectId) await db.collection('job_projects').doc(cur.projectId).update({ handoffDrawing,
+        documents: firebase.firestore.FieldValue.arrayUnion(_soDrawingDoc(source, handoffDrawing.name, who, nowIso)) });
+      cur.handoffDrawing = handoffDrawing;
+    } catch (ex) { fail('Could not save: ' + (ex.message || ex.code)); return; }
+    const ok = await transferOrderToProduction(cur);
+    if (ok === false) return;
+    // The Design board counts this order as "awaiting design" until it has a production hand-off: close that request too
+    // (best-effort — the board's rule lets only its creator, an admin or Design write it).
+    if (cur.designProjectId) {
+      try { await db.collection('projects').doc(cur.designProjectId).update({ needsDrawings: false, productionHandoffAt: nowIso, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }); } catch (_) {}
+    }
+    window.logAudit && window.logAudit('update', 'sales_order', cur.id, { drawingAttached: source, fromDesign: true });
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('sales_orders'); dbCacheInvalidate('job_projects'); dbCacheInvalidate('projects-unified'); }
+    closeModal();
+    Notifs.success('Drawing attached — sent to Production');
+    onDone();
+    // FLOW-FORM-HOOK: the job order now exists (the sales order was numbered at Generate). Wrapped end to end.
+    try {
+      const F = await window.flowForms();
+      await F.assignNumbers(['job_order'], { orderId: cur.id, projectId: cur.projectId });
+      await F.offer(['job_order', 'handoff_pack'], { orderId: cur.id, projectId: cur.projectId });
+    } catch (_) { /* no form engine (or it failed) */ }
+  }));
 };
 
 // vatSplit moved verbatim to js/money-core.js (v14 Wave 2 Batch A —
@@ -4209,6 +4747,8 @@ function ensureProdHandoffFields(o){
 // existing design project by salesOrderId instead of creating a twin.
 // Returns Promise<boolean> like transferOrderToProduction.
 window.transferOrderToDesign = async function(o){
+  // A flow-2 order cannot be handed on before the President (or Finance, standing in) has confirmed the payment.
+  const blk = window.SalesFlow.transferBlockReason(o); if (blk) { Notifs.showToast(blk,'error'); return false; }
   const who = userProfile?.displayName || currentUser.email;
   try{
     // 1) idempotence — an existing design project for this SO wins
@@ -4246,7 +4786,7 @@ window.transferOrderToDesign = async function(o){
         const upd = { designProjectId, updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
         if (ps.data().stage === 'won'){
           upd.stage = 'in_design';
-          upd.timeline = firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Design (sale recorded)', by:who });
+          upd.timeline = firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Design (payment confirmed)', by:who });
         }
         await db.collection('job_projects').doc(o.projectId).update(upd);
         if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('job_projects');
@@ -4259,7 +4799,7 @@ window.transferOrderToDesign = async function(o){
     if (o.trackingToken) window.syncOrderTracking(o.trackingToken, { status:'design' });
     // 7) notify the Design department (§6.1)
     try{ await Notifs.sendToDept('Design',{ title:'🎨 New order for design',
-      body:`${o.clientName||'Client'}${jobProjectNo?' ('+jobProjectNo+')':''} — sale recorded by Finance. Prepare the drawings, then send to Production.`,
+      body:`${o.clientName||'Client'}${jobProjectNo?' ('+jobProjectNo+')':''} — payment confirmed. Prepare the drawings, then send to Production.`,
       icon:'🎨', type:'project_stage', link:'dept:Design' }, { fallbackToOwner:true }); }catch(_){}
     window.logAudit && window.logAudit('update','sales_order',o.id,{ sentToDesign:true, designProjectId });
     if (typeof dbCacheInvalidate==='function'){ dbCacheInvalidate('projects-unified'); dbCacheInvalidate('sales_orders'); }
@@ -4272,6 +4812,8 @@ window.transferOrderToDesign = async function(o){
 // Returns false (no-op) if the Sales→Production handoff fields are missing and
 // the user cancels the fill-in prompt; true on a completed transfer.
 async function transferOrderToProduction(o){
+  // A flow-2 order cannot be handed on before the President (or Finance, standing in) has confirmed the payment.
+  const blk = window.SalesFlow.transferBlockReason(o); if (blk) { Notifs.showToast(blk,'error'); return false; }
   const ok = await ensureProdHandoffFields(o);
   if (!ok) return false;
   // Owner's flow, 2026-08-18: Design "passes to sales for approval, and once
@@ -4280,8 +4822,10 @@ async function transferOrderToProduction(o){
   // click through, and Sales had no say at any point. This is the real gate,
   // and it reads the job project because that is where the Sales sign-off is
   // recorded (see setDesignApproval, js/screens/production.js). An order marked
-  // noDrawingsNeeded is the documented way past it.
-  if (o.projectId && !o.noDrawingsNeeded) {
+  // noDrawingsNeeded is the documented way past it — and, since the Sales quick fixes
+  // (2026-11-19), so is a hand-off drawing Sales attached when generating the job order
+  // (the client's, or ours): Sales attaching it IS the sign-off.
+  if (o.projectId && !o.noDrawingsNeeded && !window.SalesFlow.hasHandoffDrawing(o)) {
     // jobDesignApproved lives in production.js, which is lazy (PERF-WAVE1).
     // Load it, and if it STILL isn't there, fail CLOSED — the catch below is
     // for Firestore read failures; letting a missing function fall through it
@@ -4314,7 +4858,7 @@ async function transferOrderToProduction(o){
       const stage=ps.exists?ps.data().stage:null;
       if(ps.exists && ['won','in_design'].includes(stage)){
         await db.collection('job_projects').doc(o.projectId).update({ stage:'in_production', updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-          timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Production (sale recorded)', by:who }) });
+          timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Production', by:who }) });
         if (typeof dbCacheInvalidate==='function'){ dbCacheInvalidate('job_projects'); dbCacheInvalidate('projects-unified'); }
       }
     }
@@ -4322,7 +4866,11 @@ async function transferOrderToProduction(o){
       sentToProductionAt:firebase.firestore.FieldValue.serverTimestamp(),
       designDoneAt:firebase.firestore.FieldValue.serverTimestamp(), designDoneBy:who });
     if(o.trackingToken) window.syncOrderTracking(o.trackingToken, { status:'production' });
-    try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — design complete${o.noDrawingsNeeded?' (no drawings needed)':''}. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
+    // No pesos in this body: Production-only staff read it, and they never see money.
+    const _how = window.SalesFlow.hasHandoffDrawing(o)
+      ? (o.handoffDrawing.source === 'client' ? 'client-supplied drawing attached' : 'drawing attached')
+      : (o.noDrawingsNeeded ? 'no drawings needed' : 'design complete');
+    try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — ${_how}. The job order is ready. Start the work order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     window.logAudit&&window.logAudit('update','sales_order',o.id,{ sentToProduction:true });
     return true;
   }catch(ex){ Notifs.showToast('Transfer failed: '+(ex.message||ex.code),'error'); return false; }
