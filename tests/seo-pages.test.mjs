@@ -884,11 +884,11 @@ describe('header and footer: the same on every page, "Get a quote" top right and
     assert.equal(f.size, 1, 'the footers differ');
   });
 
-  it('has the brand link home, the seven nav links, "Get a quote" to the intake as the button at the top right, then the menu button — and no Login anywhere in the header', () => {
+  it('has the brand link home, the eight nav links (Guides added 2026-11-19, owner), "Get a quote" to the intake as the button at the top right, then the menu button — and no Login anywhere in the header', () => {
     each((p) => {
       assert.ok(p.header.includes('<a href="/" id="site-brand">'));
       assert.deepEqual([...p.header.matchAll(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/g)][0][1].match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), [
-        '<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
+        '<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">Guides</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(p.header.includes('<button type="button" id="site-menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">'));
@@ -977,9 +977,9 @@ describe('the homepage and the catalogue are wired to the 12 pages (the pages li
   const nav = (html) => html.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
   const footLinks = (html) => html.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
   const hrefsIn = (html) => [...html.matchAll(/<a\b[^>]*\shref="([^"]+)"/g)].map((m) => m[1]);
-  const NAV = [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ']];
+  const NAV = [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'Guides'], ['/faq/', 'FAQ']];
 
-  it('has the same seven header links on the homepage, the catalogue and the 12 pages: Services, Products, Our work, Areas we serve, Catalogue, FAQ, Contact (an in-page anchor on the homepage, /#contact elsewhere), and "Get a quote" before the menu button', () => {
+  it('has the same eight header links on the homepage, the catalogue and the 12 pages: Services, Products, Our work, Areas we serve, Catalogue, Guides, FAQ, Contact (an in-page anchor on the homepage, /#contact elsewhere), and "Get a quote" before the menu button', () => {
     const labels = (html) => [...nav(html).matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
     assert.deepEqual(labels(homeHtml), [...NAV, ['#contact', 'Contact']].map((x) => x));
     assert.deepEqual(labels(catalogue), [...NAV, ['/#contact', 'Contact']]);
@@ -1161,7 +1161,11 @@ describe('scripts and styles: only the shared /js/site.js and /js/late-fonts.js,
     // the header is css/site.css's (one design for every public page): its rule for the narrowest phone, and the 900-1099px squeeze that keeps six links, the button and the whole wordmark on one row
     const site = read('css/site.css').replace(/\/\*[\s\S]*?\*\//g, '');
     assert.match(site, /@media \(max-width:359px\)\{[^@]*#site \.site-brand-name\{[^}]*white-space:normal/);
-    assert.match(site, /@media \(min-width:900px\) and \(max-width:1099px\)\{\s*#site #site-nav\{gap:14px;margin-right:4px\}\s*#site #site-nav a\{font-size:14px\}\s*#site \.site-brand-name\{font-size:20px\}\s*\}/);
+    // 2026-11-19 (Guides joined the header, eight links): the links show from 1100px, never wrap, and sit a little closer up to 1280px; below 1100px the menu button keeps them, so "Barro Industries" stays whole
+    assert.match(site, /@media \(min-width:900px\) and \(max-width:1099px\)\{[^}]*#site \.site-brand-name\{font-size:20px\}\s*\}/);
+    assert.match(site, /@media \(min-width:1100px\)\{\s*#site #site-menu-btn\{display:none\}\s*#site #site-nav\{display:flex;[^}]*\}\s*#site #site-nav a\{[^}]*white-space:nowrap\}/);
+    assert.match(site, /@media \(min-width:1100px\) and \(max-width:1279px\)\{[^}]*#site #site-nav\{gap:20px;margin-right:6px\}\s*\}/);
+    assert.ok(read('js/site.js').includes('if (window.innerWidth >= 1100) menu(false);'), 'site.js closes the phone menu at the width the links appear');
     // the footer: its eleven links wrap inside the right half from 900px at every width (so the address and the badges keep their room): there is no one-row layout any more
     assert.match(site, /@media \(min-width:900px\)\{[^@]*#site \.foot-in\{grid-template-columns:minmax\(0,1fr\) minmax\(0,1\.1fr\);[^}]*\}\s*#site \.foot-links\{justify-content:flex-end\}/);
     assert.ok(!/@media \(min-width:1100px\)\{\s*#site \.foot-in\{/.test(site), 'the footer has a one-row layout again: eleven links no longer fit beside the address');

@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-SqdKITF/P/EZqw1bynCr0WvOSHEOkez9u4M2SD4/Gdw=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-gRa7Fh3GLqFhDKKHRih9wgafN2qMZVcGmBr2S8E3IdY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Kitchen and Stainless-Steel Guides | Barro Industries</title>
 <meta name="description" content="Practical guides from Barro Kitchens (Barro Industries): kitchen layout, equipment, exhaust hoods, LPG gas lines, stainless steel care and SS304 vs SS316.">
 <link rel="canonical" href="https://barroindustries.com/guides/">
@@ -127,6 +127,48 @@
             "position": 8,
             "name": "Kitchen Ventilation Requirements in the Philippines: Sanitation Code, Fire Code and Exhaust",
             "url": "https://barroindustries.com/guides/kitchen-ventilation-requirements-philippines/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 9,
+            "name": "Stainless Steel Work Table Guide: Sizes, Shelves, Grade and Finish",
+            "url": "https://barroindustries.com/guides/stainless-steel-work-table-guide/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 10,
+            "name": "Commercial Kitchen Design and Build in the Philippines: The Process, Step by Step",
+            "url": "https://barroindustries.com/guides/commercial-kitchen-design-and-build-process/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 11,
+            "name": "Commercial Kitchen Sink Guide: Bowls, Drainboards and Hand-Wash Sinks",
+            "url": "https://barroindustries.com/guides/commercial-kitchen-sink-guide/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 12,
+            "name": "Fresh Air System for Kitchen Use: Why Your Exhaust Needs Makeup Air",
+            "url": "https://barroindustries.com/guides/kitchen-fresh-air-system-guide/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 13,
+            "name": "Custom Stainless Steel Fabrication in Manila: How to Order Work to Your Drawing",
+            "url": "https://barroindustries.com/guides/custom-stainless-steel-fabrication-guide/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 14,
+            "name": "Kitchen Exhaust Problems: Why Smoke, Heat and Smells Escape, and How to Fix Them",
+            "url": "https://barroindustries.com/guides/kitchen-exhaust-problems/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 15,
+            "name": "Commercial Bakery Equipment: Ovens, Proofing, Tables and Racks for a Bakery Kitchen",
+            "url": "https://barroindustries.com/guides/commercial-bakery-equipment-guide/"
           }
         ]
       }
@@ -587,10 +629,6 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 }
 @media (min-width:900px){
   #site{--site-head:72px}
-  #site #site-menu-btn{display:none}
-  #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
-  #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px}
-  #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
   #site .site-brand-name{font-size:21px}
   #hero{min-height:clamp(640px,86svh,940px)}
   #site .hero-bg{object-position:56% 52%}
@@ -610,11 +648,18 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .foot-legal{grid-column:1/-1}
 }
 @media (min-width:900px) and (max-width:1099px){
-  /* seven links, the button and the wordmark share one row: a little less room between the links keeps "Barro Industries" whole at 900px.
-     (The footer's eleven links wrap inside its right half at every width from 900px, so the address and the badges keep their room.) */
-  #site #site-nav{gap:14px;margin-right:4px}
-  #site #site-nav a{font-size:14px}
+  /* below 1100px the eight header links (Guides added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
   #site .site-brand-name{font-size:20px}
+}
+@media (min-width:1100px){
+  #site #site-menu-btn{display:none}
+  #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
+  #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px;white-space:nowrap}
+  #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
+}
+@media (min-width:1100px) and (max-width:1279px){
+  /* eight links, the button and the wordmark share one row: a little less room between the links keeps them on one line */
+  #site #site-nav{gap:20px;margin-right:6px}
 }
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -997,6 +1042,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <a href="/work/">Our work</a>
       <a href="/areas-we-serve/">Areas we serve</a>
       <a href="/catalogue/">Catalogue</a>
+      <a href="/guides/" aria-current="page">Guides</a>
       <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
@@ -1012,7 +1058,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><span aria-current="page">Guides</span></li></ol></nav>
       <p class="eyebrow">Guides</p>
       <h1>Guides for planning your kitchen</h1>
-      <p class="site-lead">Practical guides from the team that designs, fabricates and installs stainless-steel kitchens: how to plan a kitchen layout, what equipment a commercial kitchen needs, how to plan a commissary kitchen, how to choose an exhaust hood and an LPG gas line, how to clean stainless steel, and how to choose between SS304 and SS316.</p>
+      <p class="site-lead">Practical guides from the team that designs, fabricates and installs stainless-steel kitchens: planning a layout and a design-and-build project, choosing equipment, work tables, sinks and bakery equipment, exhaust hoods, fresh air and LPG gas lines, the ventilation rules in the Philippines, ordering custom fabrication, and caring for stainless steel.</p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?quote=1">Get a quote</a><a class="site-btn site-btn-outline" href="/services/">Our services</a></p>
     </div>
   </div>
@@ -1087,6 +1133,62 @@ body{margin:0;background:#fff;color:#0E1116}
         <div class="pg-card-body">
           <h3><a href="/guides/kitchen-ventilation-requirements-philippines/">Kitchen Ventilation Requirements in the Philippines: Sanitation Code, Fire Code and Exhaust</a></h3>
           <p>What the Sanitation Code, the Fire Code and the building office expect of a kitchen's exhaust, fresh air and fire protection, and an inspection checklist.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/ispsc/02-thumb.webp" srcset="/site/img/projects/ispsc/02-thumb.webp 600w, /site/img/projects/ispsc/02.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="600" height="450" alt="ISPSC 2026 — rows of stainless-steel work tables in the school room" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <h3><a href="/guides/stainless-steel-work-table-guide/">Stainless Steel Work Table Guide: Sizes, Shelves, Grade and Finish</a></h3>
+          <p>How to choose the layers and shelves, size, grade and finish of a stainless steel work table, with a checklist for ordering.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/dmmmsu/05-thumb.webp" srcset="/site/img/projects/dmmmsu/05-thumb.webp 600w, /site/img/projects/dmmmsu/05.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="600" height="450" alt="DMMMSU — installed stainless-steel tables and racks, wide view" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <h3><a href="/guides/commercial-kitchen-design-and-build-process/">Commercial Kitchen Design and Build in the Philippines: The Process, Step by Step</a></h3>
+          <p>What design-build means, the six steps from first meeting to handover, what to prepare at each, what a fit-out includes, and a checklist before you approve the drawings.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/ispsc/06-thumb.webp" srcset="/site/img/projects/ispsc/06-thumb.webp 450w, /site/img/projects/ispsc/06.webp 1200w" sizes="(min-width:900px) 520px, 100vw" width="450" height="600" alt="ISPSC 2026 — sink station with an overhead shelf" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <h3><a href="/guides/commercial-kitchen-sink-guide/">Commercial Kitchen Sink Guide: Bowls, Drainboards and Hand-Wash Sinks</a></h3>
+          <p>What each sink is for, how many bowls to choose, drainboards and dish tables, how to size a sink, and how it is built, drained and cared for.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/ispsc/05-thumb.webp" srcset="/site/img/projects/ispsc/05-thumb.webp 600w, /site/img/projects/ispsc/05.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="600" height="450" alt="ISPSC 2026 — cooking station with range oven and sink" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <h3><a href="/guides/kitchen-fresh-air-system-guide/">Fresh Air System for Kitchen Use: Why Your Exhaust Needs Makeup Air</a></h3>
+          <p>Why a kitchen exhaust needs makeup air, the signs of a starved kitchen, where the intake should go and how to balance exhaust and supply.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/dmmmsu/03-thumb.webp" srcset="/site/img/projects/dmmmsu/03-thumb.webp 600w, /site/img/projects/dmmmsu/03.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="600" height="450" alt="DMMMSU — stainless-steel tables and racks installed in the room" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <h3><a href="/guides/custom-stainless-steel-fabrication-guide/">Custom Stainless Steel Fabrication in Manila: How to Order Work to Your Drawing</a></h3>
+          <p>What to send a fabricator, how to measure and draw, SS304 or SS316, the finishes, what good welding looks like and the steps from drawing to installation.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/ispsc/07-thumb.webp" srcset="/site/img/projects/ispsc/07-thumb.webp 450w, /site/img/projects/ispsc/07.webp 1200w" sizes="(min-width:900px) 520px, 100vw" width="450" height="600" alt="ISPSC 2026 — range with an overhead shelf" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <h3><a href="/guides/kitchen-exhaust-problems/">Kitchen Exhaust Problems: Why Smoke, Heat and Smells Escape, and How to Fix Them</a></h3>
+          <p>Why smoke spills, the kitchen runs hot, smells spread and grease drips, with the likely cause and the fix for each.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/dmmmsu/02-thumb.webp" srcset="/site/img/projects/dmmmsu/02-thumb.webp 600w, /site/img/projects/dmmmsu/02.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="600" height="450" alt="DMMMSU — room installed with stainless-steel tables, racks and shelving" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <h3><a href="/guides/commercial-bakery-equipment-guide/">Commercial Bakery Equipment: Ovens, Proofing, Tables and Racks for a Bakery Kitchen</a></h3>
+          <p>How a bakery kitchen flows, which equipment each step needs, how to choose a gas deck oven, and how to plan the heat, gas and space around it.</p>
           <span class="link-arrow" aria-hidden="true">Read the guide</span>
         </div>
       </article>

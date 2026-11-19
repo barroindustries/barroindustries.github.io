@@ -203,13 +203,13 @@ describe('uniform with the website: the same header and the same footer as /serv
     for (const p of CONTENT) assert.equal(footer(read(p)), mine, `${p}: the footer differs from the project brief's`);
   });
 
-  it('header: the brand lockup, the seven nav links, "Get a quote" top right beside the menu button, no login control', () => {
+  it('header: the brand lockup, the eight nav links (Guides added 2026-11-19, owner), "Get a quote" top right beside the menu button, no login control', () => {
     const h = header(html);
     assert.match(h, /<a href="\/" id="site-brand"><img src="\/site\/img\/barro-kitchens-96\.webp" width="36" height="36" alt="Barro Industries logo">/);
     assert.match(h, /<span class="site-brand-name">Barro Industries<\/span>/);
     assert.equal((h.match(/<span data-brand>Barro Kitchens<\/span>/g) || []).length, 1);
     assert.deepEqual([...h.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]),
-      [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']]);
+      [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'Guides'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']]);
     assert.ok(h.indexOf('id="site-nav"') < h.indexOf('site-head-cta') && h.indexOf('site-head-cta') < h.indexOf('id="site-menu-btn"'));
     assert.match(h, /<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="\/catalogue\/\?quote=1">Get a quote<\/a>/);
     assert.ok(!/#login|Login|Staff|Team portal/.test(h));

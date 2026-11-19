@@ -1159,10 +1159,10 @@ describe('header and footer: the same on every page as /services/ (aria-current 
     });
   });
 
-  it('has the nav Services · Products · Our work · Areas we serve · Catalogue · FAQ · Contact, then "Get a quote" to the intake, then the menu button', () => {
+  it('has the nav Services · Products · Our work · Areas we serve · Catalogue · Guides · FAQ · Contact, then "Get a quote" to the intake, then the menu button', () => {
     each((p) => {
       const nav = p.header.match(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/)[1];
-      assert.deepEqual(nav.match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), ['<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
+      assert.deepEqual(nav.match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), ['<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">Guides</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(!/login/i.test(p.header));

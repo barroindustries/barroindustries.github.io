@@ -11,7 +11,7 @@
      shell for /catalogue/). <html data-view="site"> is static: it is what lets css/site.css show #site without the
      app's head script. No inline script; the one inline stylesheet is the generated PAGE-CSS block (scripts/inline-page-css.js, its sha256 in the CSP) and the Google Fonts are requested after the load (js/late-fonts.js; the <noscript> link is the same URL), so the CSP below needs neither 'unsafe-inline': it allows the Firebase
      SDK from gstatic and calls to the one functions host, and nothing more. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self' 'sha256-18WhQXd4IxUmqrDmoJL1hQdwsVu/waH+/BLsaWUTGIg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self' 'sha256-ma689xKFQZAnLbcOiHmvkoDRupQ0uBtyOBi2VKEIj+c=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- PERMANENT (owner ruling, 2026-10-22): "Barro Kitchens" is a permanent, historic name of the business, not only a swappable brand: it stays in this title and description (and in the homepage's alternateName) even after a rebrand. -->
 <title>Commercial Kitchen Equipment | Barro Kitchens by Barro Industries</title>
 <meta name="description" content="Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: sinks, work tables, gas stoves, range hoods and shelving.">
@@ -497,10 +497,6 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 }
 @media (min-width:900px){
   #site{--site-head:72px}
-  #site #site-menu-btn{display:none}
-  #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
-  #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px}
-  #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
   #site .site-brand-name{font-size:21px}
   #hero{min-height:clamp(640px,86svh,940px)}
   #site .hero-bg{object-position:56% 52%}
@@ -520,11 +516,18 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .foot-legal{grid-column:1/-1}
 }
 @media (min-width:900px) and (max-width:1099px){
-  /* seven links, the button and the wordmark share one row: a little less room between the links keeps "Barro Industries" whole at 900px.
-     (The footer's eleven links wrap inside its right half at every width from 900px, so the address and the badges keep their room.) */
-  #site #site-nav{gap:14px;margin-right:4px}
-  #site #site-nav a{font-size:14px}
+  /* below 1100px the eight header links (Guides added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
   #site .site-brand-name{font-size:20px}
+}
+@media (min-width:1100px){
+  #site #site-menu-btn{display:none}
+  #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
+  #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px;white-space:nowrap}
+  #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
+}
+@media (min-width:1100px) and (max-width:1279px){
+  /* eight links, the button and the wordmark share one row: a little less room between the links keeps them on one line */
+  #site #site-nav{gap:20px;margin-right:6px}
 }
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -1152,6 +1155,7 @@ html.qr-kb-open #qr-root .qr-preview{margin-bottom:8px}
       <a href="/work/">Our work</a>
       <a href="/areas-we-serve/">Areas we serve</a>
       <a href="/catalogue/" aria-current="page">Catalogue</a>
+      <a href="/guides/">Guides</a>
       <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
