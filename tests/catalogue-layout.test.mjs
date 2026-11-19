@@ -108,13 +108,17 @@ const cardOf = (html, id) => html.split('<li class="cat-card').slice(1).find((c)
 const CARDS = require('../scripts/catalogue-cards.js');
 const cardsOnPage = block.split('<li class="cat-card').slice(1).map((c) => c.split('</li>\n')[0] + '</li>');
 
-describe('every card is text plus (when mapped) its product photo: photo, a name, one line, three to five feature bullets, one price line (owner rulings 2026-11-19)', () => {
-  it('each card on the real page is  head (tag?, name, one line)  then  feature list  then (configurable cards) a "Learn more" link  then the price line — in that order, and nothing else', () => {
-    assert.equal(cardsOnPage.length, 30);
+describe('every card is text plus (when mapped) its product photo: photo, tag, name, code, one sentence, standard size, three or four specs, options, one price line (owner rulings 2026-11-19, Website Notes)', () => {
+  it('each card on the real page is  head (tags?, name, code?, one sentence)  then  size line?  then  spec list  then  options line?  then (configurable cards) a "Learn more" link  then the price line — in that order, and nothing else', () => {
+    assert.equal(cardsOnPage.length, 33);
     for (const c of cardsOnPage) {
       const key = (c.match(/data-(?:family|id|ask)="([^"]+)"/) || [])[1];
       const i = [c.indexOf('<div class="cat-head">'), c.indexOf('<ul class="cat-feat">'), c.indexOf('<p class="cat-from')];
-      assert.ok(i[0] > 0 && i[0] < i[1] && i[1] < i[2], `${key}: head, features, price line must come in that order`);
+      assert.ok(i[0] > 0 && i[0] < i[1] && i[1] < i[2], `${key}: head, specs, price line must come in that order`);
+      const size = c.indexOf('<p class="cat-size">'), opts = c.indexOf('<p class="cat-options">');
+      if (size >= 0) assert.ok(i[0] < size && size < i[1], `${key}: the size line sits between the head and the specs`);
+      if (opts >= 0) assert.ok(i[1] < opts && opts < i[2], `${key}: the options line sits between the specs and the price`);
+      assert.ok(c.indexOf('<p class="cat-code">') < 0 || (c.indexOf('<h3>') < c.indexOf('<p class="cat-code">') && c.indexOf('<p class="cat-code">') < c.indexOf('<p class="cat-lead">')), `${key}: the code line sits between the name and the sentence`);
       const learn = c.indexOf('<p class="cat-learn">');
       if (learn >= 0) assert.ok(i[1] < learn && learn < i[2], `${key}: "Learn more" belongs between the features and the price`);
       // the product photo (owner 2026-11-19 later: photos back) may only be the exact captioned figure, first in the card; otherwise only these elements
@@ -128,29 +132,36 @@ describe('every card is text plus (when mapped) its product photo: photo, a name
     }
   });
 
-  it('a configurable card has the "Configurable" tag and a link to its own product page; a fixed card has neither a tag nor a code on view (the code is searchable only)', () => {
+  it('a configurable card has the "Configurable" tag and a link to its own product page; a fixed card has no tag, and a code line only where the price list gives it a code (CK-SL, CK-RS-6)', () => {
     for (const c of cardsOnPage.filter((x) => /data-family="/.test(x))) {
       assert.ok(c.includes('<p class="cat-tag">Configurable</p>'));
       assert.ok(/<p class="cat-learn"><a class="link-arrow" href="\/products\/[a-z-]+\/">Learn more about [^<]+<\/a><\/p>/.test(c), 'no Learn more link');
     }
     for (const c of cardsOnPage.filter((x) => /^" data-id="/.test(x))) {
-      assert.ok(!c.includes('cat-tag') && !c.includes('cat-code'));
+      assert.ok(!c.includes('cat-tag'));
       const id = c.match(/data-id="([^"]+)"/)[1];
-      assert.ok(!stripTags(c.slice(c.indexOf('<div class="cat-head">'))).includes(id), `the code ${id} is on view`);
+      const code = CARDS.CARD_COPY[id].code;
+      assert.equal(c.includes('<p class="cat-code">'), !!code, `${id}: the code line iff the notes give a code`);
+      if (code) assert.ok(c.includes(`<p class="cat-code">${code}</p>`));
+      assert.ok(!stripTags(c.slice(c.indexOf('<div class="cat-head">'))).includes(id), `the master code ${id} is on view`);
       assert.ok(c.includes(`data-kw="${id}"`), 'the code is not a search keyword');
     }
   });
 
-  it('every word on a card comes from scripts/catalogue-cards.js: one line of description (not a paragraph), three to five bullets of at most 70 characters, no price word, no staff-only text', () => {
+  it('every word on a card comes from scripts/catalogue-cards.js: one sentence (not a paragraph), three or four specs of at most 70 characters, a well-formed code, size and options, no price word, no staff-only text', () => {
     const entries = [...Object.entries(CARDS.CARD_COPY), ...CARDS.PROJECT_CARDS.map((p) => [p.id, p])];
-    assert.equal(entries.length, 30);
+    assert.equal(entries.length, 33);
     for (const [id, c] of entries) {
-      assert.ok(c.desc && c.desc.length <= 90 && !/[.!?]\s+\S/.test(c.desc), `${id}: the description is not one short line`);
-      assert.ok(c.features.length >= 3 && c.features.length <= 5, `${id}: ${c.features.length} bullets`);
-      for (const t of c.features) assert.ok(t.length <= 70 && !/\.$/.test(t), `${id}: "${t}" is not a short bullet`);
-      const all = [c.desc, ...c.features].join(' ');
-      assert.ok(!B.MONEY_RE.test(all) && !B.FORMULA_RE.test(all) && !B.BRAND_RE.test(all) && !/\bstaff\b|top plate|1\.2 mm top/i.test(all), `${id}: a guarded word`);
-      assert.ok(block.includes(`<li>${B.esc(c.features[0])}</li>`), `${id}: its first bullet is not on the page`);
+      assert.ok(c.desc && c.desc.length <= 100 && !/[.!?]\s+\S/.test(c.desc), `${id}: the description is not one short sentence`);
+      assert.ok(!c.features, `${id}: the old feature bullets are gone`);
+      assert.ok(c.specs.length >= 3 && c.specs.length <= 4, `${id}: ${c.specs.length} specs`);
+      for (const t of c.specs) assert.ok(t.length <= 70 && !/\.$/.test(t), `${id}: "${t}" is not a short spec`);
+      if (c.code !== undefined) assert.match(c.code, /^[A-Z]{2}-[A-Z0-9]{2,5}(-[A-Z0-9]{1,5})?$/, `${id}: the code`);
+      const all = [c.desc, c.code, c.size, c.options, ...c.specs].filter(Boolean).join(' ');
+      assert.ok(!B.MONEY_RE.test(all) && !B.FORMULA_RE.test(all) && !B.BRAND_RE.test(all) && !/\bstaff\b|top plate|1\.2 mm top|premium|world-class|high.quality/i.test(all), `${id}: a guarded word`);
+      assert.ok(block.includes(`<li>${B.esc(c.specs[0])}</li>`), `${id}: its first spec is not on the page`);
+      assert.ok(!c.size || block.includes(`<p class="cat-size"><span>Standard size:</span> ${B.esc(c.size)}</p>`), `${id}: the size line`);
+      assert.ok(!c.options || block.includes(`<p class="cat-options"><span>Options:</span> ${B.esc(c.options)}</p>`), `${id}: the options line`);
     }
     // each configurable card says only what its configurator really offers
     assert.deepEqual(Object.keys(CARDS.CARD_COPY).filter((k) => FAMS.order.includes(k)).sort(), [...FAMS.order].sort(), 'a family has no wording');
@@ -158,13 +169,13 @@ describe('every card is text plus (when mapped) its product photo: photo, a name
 
   it('the configurable cards state the standard material the homepage states, and nothing the homepage does not claim', () => {
     const prep = cardsOnPage.find((c) => c.includes('data-family="prep_table"'));
-    assert.ok(prep.includes('Food-grade SS304, SS316 on request'));
+    assert.ok(prep.includes('<li>SS304 stainless steel</li>') && prep.includes('SS316 on request</p>'));
     assert.ok(visible(home).includes('SS304') && /SS316/.test(visible(home)), 'the homepage no longer names both grades');
     for (const c of cardsOnPage) assert.ok(!/NSF|ISO ?\d|certified|warranty|guarantee/i.test(stripTags(c)), 'an unverifiable claim sits on a card');
   });
 
-  it('the live search placeholder, status and counts count the cards of the page (30 in 8 groups)', () => {
-    assert.ok(block.includes('placeholder="Search 30 products"') && block.includes('>30 products in 8 categories</p>'));
+  it('the live search placeholder, status and counts count the cards of the page (33 in 8 groups)', () => {
+    assert.ok(block.includes('placeholder="Search 33 products"') && block.includes('>33 products in 8 categories</p>'));
   });
 });
 
@@ -220,7 +231,7 @@ describe('css/catalogue.css — compact text cards that never overflow', () => {
 
   it('the pieces of the old cards are gone from the stylesheets: tile, spec list, notes, labels, code, featured and side-by-side layouts (the photo is back, full-bleed on top)', () => {
     assert.match(css, /#site \.cat-photo\{[^}]*aspect-ratio:4\/3/);
-    for (const gone of ['.cat-tile', '.cat-ic', '.cat-specs', '.cat-notes', '.cat-label', '.cat-meta', '.cat-code', '.cat-body', '.cat-card-feature', '.cat-grid-multi', '.has-photo', '--cat-well'])
+    for (const gone of ['.cat-tile', '.cat-ic', '.cat-specs', '.cat-notes', '.cat-label', '.cat-meta', '.cat-body', '.cat-card-feature', '.cat-grid-multi', '.has-photo', '--cat-well'])
       assert.ok(!css.includes(gone) && !qrCss.includes(gone), `the stylesheets still mention ${gone}`);
   });
 
@@ -340,15 +351,20 @@ describe('search finds every card — the configurable ones included — by runn
   const ALL = env.cards.map(env.idOf);
 
   it('starts with every card shown, and a blank query restores them all', () => {
-    assert.equal(ALL.length, 30);
+    assert.equal(ALL.length, 33);
     assert.deepEqual(env.search(''), ALL);
   });
 
   it('finds a configurable card by its name, its one-line description, its feature bullets and the codes and names of the products it replaced', () => {
     assert.ok(env.search('stove').includes('stove'));
-    assert.ok(env.search('burner position').includes('stove'), 'the bullets are searched');
-    assert.ok(env.search('griller').includes('stove'), 'the bullets are searched');
-    assert.deepEqual(env.search('wheels'), ['rack', 'trolley'], 'the rack and the trolley card are the two that name wheels');
+    assert.ok(env.search('ball valves').includes('stove'), 'the specs are searched');
+    assert.ok(env.search('griller').includes('cooking_line'), 'the name and the options are searched');
+    assert.deepEqual(env.search('wheels'), ['rack'], 'the rack card is the one that names wheels (in its options)');
+    assert.deepEqual(env.search('ck-wk-1'), ['wok_range'], 'the code line is searched');
+    assert.deepEqual(env.search('ck-tp-900'), ['teppanyaki']);
+    assert.ok(env.search('pandesal').includes('pugon') && env.search('charcoal').includes('inasal'));
+    assert.ok(env.search('1200 × 900').includes('hood'), 'the standard size is searched');
+    assert.ok(env.search('rear stock burner').includes('wok_range'), 'the options are searched');
     assert.deepEqual(env.search('pw-006'), ['sink'], 'the absorbed SKU code finds the family that replaced it');
     assert.deepEqual(env.search('double sink'), ['sink']);
     assert.ok(env.search('ss304').includes('prep_table'), 'a bullet naming SS304 is searched');
@@ -393,12 +409,12 @@ describe('search finds every card — the configurable ones included — by runn
   });
 
   it('js/catalogue.js reads the name, the one line and the bullets (its haystack selector) and the page keeps the data-cat / data-id / data-family hooks it and js/quote-request.js use', () => {
-    assert.match(catJs, /querySelectorAll\('h3, \.cat-lead, \.cat-feat'\)/);
-    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 30);
-    assert.equal((block.match(/data-kw="/g) || []).length, 30);
+    assert.match(catJs, /querySelectorAll\('h3, \.cat-code, \.cat-lead, \.cat-size, \.cat-feat, \.cat-options'\)/);
+    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family|ask)="/g) || []).length, 33);
+    assert.equal((block.match(/data-kw="/g) || []).length, 33);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
     assert.ok(!/<li class="cat-card[^>]*><(?!div class="cat-head"|figure class="cat-photo")/.test(block), 'a card starts with something other than its photo or its head');
-    assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 12, 'the 12 cards with a mapped photo (7 configurable, 3 fixed, trolleys, exhaust)');
+    assert.equal((block.match(/<figure class="cat-photo">/g) || []).length, 6, 'the 6 cards with one of the owner\'s design images (preparation table, sink, range hood, cabinet; station, exhaust); every other card is text only (owner 2026-11-19)');
   });
 });
 

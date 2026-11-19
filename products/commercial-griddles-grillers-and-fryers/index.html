@@ -9,10 +9,10 @@
      the <noscript> link is the same URL). No app script, no inline script (apart from the JSON-LD data block below) and no style attribute. The scripts
      are the shared /js/site.js (phone menu, project photo lightbox) and /js/late-fonts.js. Not in the service worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open
      Graph, JSON-LD (the FAQ block mirrors the visible questions word for word) and visible breadcrumb in step:
-     tests/seo-products.test.mjs pins all of them. The social photo is a crop of a project photo (site/img/seo/). No amount appears on this
-     page, ever (owner ruling R1): the one sentence about money is the owner's own, "Prices depend on size and options.", and it sends the
-     visitor to the online estimate. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-yswRdaZs1h0s7XwlCeF2hDP17mJ4GCHP6qyPXkMxmcM=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+     tests/seo-products.test.mjs pins all of them. The social photo is a crop of a project photo (site/img/seo/). The only amount on this
+     page is the starting-amount line ("From", an amount, "+ VAT"; or the words that say it is quoted per project), the same as this product's card in /catalogue/ (owner ruling 2026-11-19;
+     the catalogue's from-amount file is the source, scripts/check-catalogue-cards.js pins the match); no other amount, ever (owner ruling R1). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-ksa7muZ81iU12SZw3prT/zGR1kJm6qjuH8vntevJLbw=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Commercial Griddle, Griller &amp; Fryer Philippines | Barro Industries</title>
 <meta name="description" content="Commercial gas griddles, lava-rock grillers and fryers from Barro Kitchens (Barro Industries): your type, burners or baskets and size. Get an estimated range online.">
 <link rel="canonical" href="https://barroindustries.com/products/commercial-griddles-grillers-and-fryers/">
@@ -186,7 +186,7 @@
           "@type": "ListItem",
           "position": 2,
           "name": "Products",
-          "item": "https://barroindustries.com/products/"
+          "item": "https://barroindustries.com/catalogue/"
         },
         {
           "@type": "ListItem",
@@ -318,9 +318,6 @@
       ]
     },
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/pages/hero-dmmmsu-01.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
-    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/countertop-gas-flat-griddle.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
-    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/countertop-gas-charbroiler.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
-    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/gas-upright-split-tank-fryer.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/ispsc/05.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/ispsc/07.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/ispsc/01.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"}
@@ -1056,6 +1053,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 </style>
 <!-- PAGE-CSS:END -->
 </head>
@@ -1068,12 +1080,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/" aria-current="true">Products</a>
+      <a href="/catalogue/" aria-current="true">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1085,7 +1094,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section class="pg-hero">
   <div class="site-wrap pg-hero-in">
     <div class="pg-hero-copy">
-      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/products/">Products</a></li><li><span aria-current="page">Griddles, grillers and fryers</span></li></ol></nav>
+      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/catalogue/">Products</a></li><li><span aria-current="page">Griddles, grillers and fryers</span></li></ol></nav>
       <p class="eyebrow">Products</p>
       <h1>Commercial griddles, grillers and fryers, built to your size</h1>
       <p class="site-lead">Commercial gas griddles, lava-rock grillers, fryers and griller-and-griddle combinations for restaurant, hotel, hospital, school and commissary kitchens in the Philippines. Choose the type, the burners or the fry baskets and the base, then set your own length and width.</p>
@@ -1132,12 +1141,6 @@ body{margin:0;background:#fff;color:#0E1116}
       </dl>
       <p class="pg-note">The construction line above is for a griddle. A lava-rock griller has V-type grill plates over lava rock, a fryer has stainless fry tanks with baskets, and a griller and griddle sit side by side with one burner under each, all gas-fired. Need something the options do not cover? Add it as a note on your request and we will confirm it in the quotation.</p>
     </div>
-    <p class="pg-sub pg-sub-gap" id="figs-label">Representative images</p>
-    <div class="pg-figs" aria-labelledby="figs-label">
-      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/countertop-gas-flat-griddle-thumb.webp" srcset="/site/img/products/countertop-gas-flat-griddle-thumb.webp 400w, /site/img/products/countertop-gas-flat-griddle.webp 800w" sizes="(min-width:1024px) 300px, (min-width:600px) 30vw, 90vw" width="400" height="300" alt="Stainless steel gas flat griddle with two burner knobs" loading="lazy" decoding="async"></div><figcaption>Gas griddle<span>Representative image</span></figcaption></figure>
-      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/countertop-gas-charbroiler-thumb.webp" srcset="/site/img/products/countertop-gas-charbroiler-thumb.webp 400w, /site/img/products/countertop-gas-charbroiler.webp 800w" sizes="(min-width:1024px) 300px, (min-width:600px) 30vw, 90vw" width="400" height="294" alt="Stainless steel gas charbroiler with a grill grate and four burner knobs" loading="lazy" decoding="async"></div><figcaption>Gas charbroiler<span>Representative image</span></figcaption></figure>
-      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/gas-upright-split-tank-fryer-thumb.webp" srcset="/site/img/products/gas-upright-split-tank-fryer-thumb.webp 250w, /site/img/products/gas-upright-split-tank-fryer.webp 500w" sizes="(min-width:1024px) 300px, (min-width:600px) 30vw, 90vw" width="250" height="400" alt="Stainless steel gas fryer with two tanks on a cabinet base" loading="lazy" decoding="async"></div><figcaption>Gas fryer with two tanks<span>Representative image</span></figcaption></figure>
-    </div>
   </div>
 </section>
 
@@ -1149,6 +1152,7 @@ body{margin:0;background:#fff;color:#0E1116}
     </header>
     <div class="pg-example">
       <h3>Prices depend on size and options.</h3>
+      <p class="cat-from">From <data value="40000">₱40,000</data> <span class="cat-vat">+ VAT</span></p>
       <p>Get an estimated range online in minutes — no account needed. The type, the burners or baskets, the base, the grade, the finish and your length and width all matter. Choose them in the online configurator, add the other items you need and the quote request shows an estimated range as your list grows. Our team then reviews it and sends the final quotation.</p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?configure=cooking_line#cat-cooking">Configure a griddle, griller or fryer</a><a class="site-btn site-btn-outline" href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a></p>
     </div>
@@ -1329,7 +1333,7 @@ body{margin:0;background:#fff;color:#0E1116}
         </div>
       </article>
     </div>
-    <p class="pg-note">Planning a whole kitchen? See our <a href="/services/commercial-kitchen-fit-out/">commercial kitchen fit-outs</a> or browse <a href="/products/">all our products</a>.</p>
+    <p class="pg-note">Planning a whole kitchen? See our <a href="/services/commercial-kitchen-fit-out/">commercial kitchen fit-outs</a> or browse <a href="/catalogue/">all our products</a>.</p>
   </div>
 </section>
 
@@ -1360,7 +1364,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

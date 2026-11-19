@@ -486,12 +486,12 @@ describe('Phase 3: the public quote brand has no generic-partner branch (js/scre
   it('BK, BI and BS keep their own letterhead', async () => {
     assert.deepEqual(await brandOf('BK'), { co: 'BK', name: 'BARRO KITCHENS' });
     assert.deepEqual(await brandOf('BI'), { co: 'BI', name: 'BARRO INDUSTRIES OPC' });
-    assert.deepEqual(await brandOf('BS'), { co: 'BS', name: 'BRILLIANCE STEEL CORPORATION' });
+    assert.deepEqual(await brandOf('BS'), { co: 'BS', name: 'BRILLIANT STEEL CORPORATION' });
     for (const c of ['BK', 'BI', 'BS']) assert.equal(docOf(c), c);
   });
   it("any other code — the retired 'PT', a missing company, an unknown one — falls back to Brilliant Steel (and never reads Firestore for a creator's company)", async () => {
     for (const c of ['PT', undefined, null, '', 'XX', 'bk']) {
-      assert.deepEqual(await brandOf(c), { co: 'BS', name: 'BRILLIANCE STEEL CORPORATION' }, String(c));
+      assert.deepEqual(await brandOf(c), { co: 'BS', name: 'BRILLIANT STEEL CORPORATION' }, String(c));
       assert.equal(docOf(c), 'BS', `buildPublicQuoteDoc(${String(c)})`);
     }
   });
@@ -562,7 +562,7 @@ describe('Phase 3: nothing widens — the retired partner term stands in as hasP
     assert.ok(!/exists\(\s*\/databases\/\$\(database\)\/documents\/users\/\$\(request\.auth\.uid\)/.test(RULES_STRIP(RULES)), 'an exists() of the caller\'s own users doc is back');
   });
   it('the 111 statements that carried the retired term in HEAD still require a profile — the list is pinned (tests/fixtures/rules-profile-statements.json)', () => {
-    assert.equal(FIX.firestoreProfile.length, 116);   // 111 at the partner removal; sweep 2026-10-29 split quote_costs read,write → read+delete / create / update; +3 kc_config / kc_materials (2026-11-19)
+    assert.equal(FIX.firestoreProfile.length, 117);   // 111 at the partner removal; +3 kc_config / kc_materials (2026-11-19); sweep 2026-10-29 split quote_costs read,write → read+delete / create / update; sales quick fixes 2026-11-19 (WP0) added soSalesUpdate(), the Sales arm of the sales_orders update, which requires a profile (it narrows nothing that was open: Sales could not update an order at all before)
     assert.deepEqual(NOW.firestoreProfile, FIX.firestoreProfile);
   });
   it('and no read has become a bare `isAuth()`: the five that always were are the only ones', () => {

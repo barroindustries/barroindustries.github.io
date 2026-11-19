@@ -97,6 +97,7 @@
   "/roc_leads/{id} :: allow read #1",
   "/sales_clients/{docId} :: allow read #1",
   "/sales_orders/{docId} :: allow read #1",
+  "/sales_orders/{docId} > fn soSalesUpdate :: return #1",
   "/settings/{docId} :: allow read #1",
   "/sops/{docId} :: allow read #1",
   "/stock_movements/{docId} :: allow create #1",

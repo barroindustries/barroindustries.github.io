@@ -1335,7 +1335,7 @@ async function renderProdJobOrders(el, currentUser, currentRole, showAll=false){
   // 'paid' and 'cancelled' are gone from the floor; everything else is a live
   // or recently-finished job whose sheet someone may still need to reprint.
   const projects = projSnap.docs.map(d=>({id:d.id,...d.data()}))
-    .filter(p=>!['paid','cancelled'].includes(p.stage));
+    .filter(p=>!['paid','cancelled'].includes(p.stage) && !(p.flowVersion === 2 && p.stage === 'won'));
   const todayStr = window.bizDate ? window.bizDate() : today();
   const weekAhead = (()=>{ const d=new Date(); d.setDate(d.getDate()+7); return (window.bizDate?window.bizDate(d):d.toISOString().slice(0,10)); })();
   const overdue = projects.filter(p=>p.targetDate && p.targetDate < todayStr && !['delivered','completed'].includes(p.stage));
@@ -1467,6 +1467,9 @@ async function createJobProject(d){
   const ref=await db.collection('job_projects').add({
     projectNo, company, name:((d.client||'Client')+' — '+(d.qno||'')).trim(),
     clientName:d.client||'', clientId: d.clientId || null, stage:'won',
+    // Sales quick fixes (2026-11-19): a flow-2 job is held back from Production until Sales generates the job order
+    // (the Incoming and Job Orders lists and the job's Advance / Job Order buttons all check this).
+    ...(d.flowVersion ? { flowVersion: d.flowVersion } : {}),
     quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: window.quoteCollectionFor(company),
     contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12, capital:0,
     dpPercent: d.dpPercent || null, balanceSchedule: null,
@@ -1639,7 +1642,9 @@ function designApprovalBadge(p){
 // The gate transferOrderToProduction consults. `noDrawingsNeeded` is the
 // documented escape hatch for an order that genuinely has nothing to draw.
 window.jobDesignApproved = function(p, so){
-  if (so && so.noDrawingsNeeded) return true;
+  // A drawing Sales attached when generating the job order (the client's, or ours) IS the sign-off — on the order or on the job.
+  if (so && (so.noDrawingsNeeded || (so.handoffDrawing && so.handoffDrawing.url))) return true;
+  if (p && p.handoffDrawing && p.handoffDrawing.url) return true;
   return designApprovalOf(p).status === 'approved';
 };
 async function setDesignApproval(p, status, note){
@@ -1730,7 +1735,9 @@ function openJobProjectDetail(p, opts){
   // auto-generated money string contains '₱', so that's the reliable signal,
   // plus a doc-type guard for receipts/invoices/billing. showMoney viewers see
   // everything unchanged.
-  const visDocs = (p.documents||[]).filter(dc => showMoney || !(/receipt|invoice|billing/i.test(dc.type||'') || /₱/.test(dc.ref||'')));
+  const visDocs = (p.documents||[]).filter(dc => showMoney || !(/receipt|invoice|billing|payment|acknowledg|statement/i.test(dc.type||'') || /₱/.test(dc.ref||'')));
+  // A drawing Sales attached when generating the job order (the client's, or ours) — Production opens the file from the job.
+  const handoffDwg = (p.handoffDrawing && p.handoffDrawing.url) ? p.handoffDrawing : null;
   const visTimeline = (p.timeline||[]).slice().reverse().filter(t => showMoney || !/₱/.test(t.event||''));
   // "Show the quotation this deal was won on" (owner request 2026-08-24) — the
   // quote reference in the header opens a READ-ONLY view of the filed quote
@@ -1765,17 +1772,19 @@ function openJobProjectDetail(p, opts){
     <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="font-size:12px">${emojiIcon('🔏',12)} Drawings — Sales approval</strong>
-        ${designApprovalBadge(p)}
+        ${handoffDwg ? '<span class="badge badge-green" style="font-size:9px">Drawing attached by Sales</span>' : designApprovalBadge(p)}
       </div>
-      ${(()=>{ const a=designApprovalOf(p); const bits=[];
+      ${handoffDwg ? (()=>{ const hu = safeHttpUrl(handoffDwg.url);
+        return `<div style="font-size:11px;color:var(--text-muted);margin-top:5px">${handoffDwg.source==='client' ? 'Client-supplied drawing' : 'Our drawing'} · ${escHtml(handoffDwg.name||'')} · ${escHtml(handoffDwg.byName||'')} · ${escHtml(String(handoffDwg.at||'').slice(0,10))}</div>
+          ${hu ? `<div style="margin-top:8px"><a class="btn-secondary btn-sm" href="${escHtml(hu)}" target="_blank" rel="noopener">${emojiIcon('📄',14)} Open</a></div>` : ''}`; })() : (()=>{ const a=designApprovalOf(p); const bits=[];
         if(a.requestedByName) bits.push(`Sent by ${escHtml(a.requestedByName)}${a.requestedAt?' on '+escHtml(String(a.requestedAt).slice(0,10)):''}`);
         if(a.decidedByName) bits.push(`${a.status==='approved'?'Approved':'Answered'} by ${escHtml(a.decidedByName)}${a.decidedAt?' on '+escHtml(String(a.decidedAt).slice(0,10)):''}`);
         if(a.notes) bits.push(escHtml(a.notes));
         return bits.length?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px">${bits.join(' · ')}</div>`:
           `<div style="font-size:11px;color:var(--text-muted);margin-top:5px">Production cannot be handed this job until Sales approves the drawings (or the order is marked as needing none).</div>`; })()}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-        ${(!isBsOnlyU && canEditDept('Design') && ['none','changes'].includes(designApprovalOf(p).status))?`<button class="btn-primary btn-sm" id="jpd-send-approval">${emojiIcon('🔏',16)} Send drawings to Sales</button>`:''}
-        ${(!isBsOnlyU && canEditDept('Sales') && designApprovalOf(p).status==='pending')?`
+        ${(!handoffDwg && !isBsOnlyU && canEditDept('Design') && ['none','changes'].includes(designApprovalOf(p).status))?`<button class="btn-primary btn-sm" id="jpd-send-approval">${emojiIcon('🔏',16)} Send drawings to Sales</button>`:''}
+        ${(!handoffDwg && !isBsOnlyU && canEditDept('Sales') && designApprovalOf(p).status==='pending')?`
           <button class="btn-success btn-sm" id="jpd-approve">${emojiIcon('✅',16)} Approve drawings</button>
           <button class="btn-secondary btn-sm" id="jpd-changes">${emojiIcon('↩️',16)} Request changes</button>`:''}
       </div>
@@ -1852,8 +1861,8 @@ function openJobProjectDetail(p, opts){
     ${_isFinAdmin()&&!isBsOnlyU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
     ${_isFinAdmin()&&!isBsOnlyU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
     ${/* 'in_design' is deliberately excluded — a job in Design cannot get a production order; 'won' is kept only for legacy pre-design-flow projects. */''}
-    ${!isBsOnlyU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
-    ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
+    ${!isBsOnlyU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage) && !(p.flowVersion === 2 && p.stage === 'won')?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
+    ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next&&!(p.flowVersion === 2 && p.stage === 'won')?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`, opts || {});
   // SCOPED TO THIS PANEL — these six were document.getElementById. The Billing
   // Invoice sub-flow returns with `Overlay.clearAll(); openJobProjectDetail(p)`
@@ -2020,6 +2029,33 @@ function openProjectMarginModal(p){
   });
 }
 
+// A fully prepaid job closes by itself once everything on it has been delivered (owner ruling SF19; F11 keeps it OPEN until then — confirming a
+// payment never closes a job): stage → 'paid' (Paid / Closed), a timeline line without pesos, and the President is told.
+// Conservative on purpose — a fresh read, a contract that is fully collected, no work order still open, and a job that is at 'delivered' right
+// now; anything else leaves the job exactly as it was. Never throws: closing is a courtesy on top of the delivery that just happened, so a
+// failure here must not undo, hide or fail the delivery. Resolves true only when it closed the job.
+async function closePrepaidJobIfDelivered(projectId, who){
+  try {
+    if (!projectId) return false;
+    const ref = db.collection('job_projects').doc(projectId);
+    const ps = await ref.get();
+    if (!ps.exists) return false;
+    const pj = ps.data();
+    const contractC = Math.round((Number(pj.contractAmount) || 0) * 100);
+    const collectedC = Math.round((Number(pj.amountCollected) || 0) * 100);
+    if (pj.stage !== 'delivered' || !(contractC > 0) || collectedC < contractC) return false;
+    // a job with several work orders is not finished until the last one is delivered
+    const os = await db.collection('production_orders').where('projectId', '==', projectId).get();
+    if (os.docs.some(d => normProdStageId(d.data().stage) !== 'delivered')) return false;
+    await ref.update({ stage:'paid', updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+      timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Closed — delivered and fully paid', by:who || '' }) });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
+    window.logAudit && window.logAudit('update', 'project', projectId, { stage:'paid', autoClosed:true });
+    try { await Notifs.sendToOwner({ title:'✅ Job closed', body:`${pj.clientName||'A job'} (${pj.projectNo||''}) was delivered and is fully paid, so it closed by itself.`, icon:'✅', type:'project_paid', link:'projects-lifecycle' }); } catch(_) {}
+    return true;
+  } catch(_) { return false; }
+}
+
 async function advanceProjectStage(p, nextId){
   // Design-flow boundaries route through the canonical handoff helpers so the
   // generic Advance button can never skip the design queue or the handoff gate.
@@ -2074,10 +2110,12 @@ async function advanceProjectStage(p, nextId){
     // hand off to the owning department of the new stage
     const dept=ns.dept;
     try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
-    if(nextId==='delivered') { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
+    // A fully prepaid job closes by itself (SF19): there is no balance to bill, so Finance is not asked to collect one.
+    const autoClosed = nextId==='delivered' ? await closePrepaidJobIfDelivered(p.id, who) : false;
+    if(nextId==='delivered' && !autoClosed && Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)) > 0) { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
     if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid', link:'projects-lifecycle' }); }catch(_){} }
     window.logAudit && window.logAudit('update','project',p.id,{ stage:nextId });
-    Notifs.success('Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
+    Notifs.success(autoClosed ? 'Delivered — and closed, because it is fully paid' : 'Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 
@@ -2505,7 +2543,8 @@ async function renderProdOrders(el, currentUser, currentRole, showAll=false) {
   // "not receiving orders". Surface them so they can start a work order in one tap.
   // 'in_design' is deliberately excluded — a job in Design cannot get a production order; 'won' is kept only for legacy pre-design-flow projects.
   const incoming = projSnap.docs.map(d=>({id:d.id,...d.data()}))
-    .filter(p=>['won','in_production'].includes(p.stage) && !(Array.isArray(p.productionOrderIds) && p.productionOrderIds.length));
+    .filter(p=>['won','in_production'].includes(p.stage) && !(Array.isArray(p.productionOrderIds) && p.productionOrderIds.length)
+      && !(p.flowVersion === 2 && p.stage === 'won'));   // a flow-2 job reaches Production only through Sales' Generate
   const active = orders.filter(o=>normProdStageId(o.stage)!=='delivered');
   const todayStr = today();
   const weekAhead = (()=>{ const d=new Date(); d.setDate(d.getDate()+7); return (window.bizDate?window.bizDate(d):d.toISOString().slice(0,10)); })();
@@ -2711,6 +2750,8 @@ async function syncJobFromProdStage(projectId, prodStageId) {
     const _tok = jdoc.exists ? jdoc.data().trackingToken : null;
     if(_tok){ const _trk = trackerKeyFor(prodStageId) || (advance ? 'production' : null);
       if(_trk) window.syncOrderTracking(_tok, { status:_trk }); }
+    // The last work order delivered completes the job; a fully prepaid one closes by itself (SF19). Checked whether or not THIS call moved the stage.
+    if (projStage === 'delivered') await closePrepaidJobIfDelivered(projectId, userProfile?.displayName||currentUser.email);
   } catch(_) {}
 }
 

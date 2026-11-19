@@ -747,7 +747,7 @@
       "excludes": "LPG tanks, regulator and hose beyond the appliance connection (see Gas Line)",
       "finishDefault": "hairline",
       "leadTime": "25 working days",
-      "photo": "CE-004",
+      "photo": null,
       "primary": "CE-001",
       "unit": "pc",
       "groups": [
@@ -1289,7 +1289,7 @@
       "excludes": "gas line and LPG supply",
       "finishDefault": "hairline",
       "leadTime": "25 working days",
-      "photo": "CE-021",
+      "photo": null,
       "primary": "CE-010",
       "unit": "pc",
       "groups": [
@@ -1919,7 +1919,7 @@
       "includes": "doors and shelves as configured",
       "finishDefault": "hairline",
       "leadTime": "25 working days",
-      "photo": null,
+      "photo": "PW-015",
       "primary": "PW-015",
       "unit": "pc",
       "groups": [
@@ -2085,7 +2085,7 @@
       "includes": "wall brackets and anchors",
       "finishDefault": "hairline",
       "leadTime": "25 working days",
-      "photo": "PW-023",
+      "photo": null,
       "primary": "PW-023",
       "sizeBasis": "linear",
       "unit": "pc",
@@ -2209,7 +2209,7 @@
       "includes": "shelves as configured · {wheels}",
       "finishDefault": "hairline",
       "leadTime": "25 working days",
-      "photo": "PW-030",
+      "photo": null,
       "primary": "PW-010",
       "unit": "pc",
       "groups": [

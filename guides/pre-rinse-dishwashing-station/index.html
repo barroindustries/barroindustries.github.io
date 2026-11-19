@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-XLW3MXgn+Utun3WUId/fH3s2rh3SIeSaQHjzUTibxwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Dishwashing Station: Pre-Rinse, Wash and Dry | Barro Industries</title>
 <meta name="description" content="Plan a dishwashing station with a pre-rinse sink, a triple sink or dishwasher, drainboards and racks, in one direction. By Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/pre-rinse-dishwashing-station/">
@@ -177,7 +177,7 @@
           "name": "Can you build the whole dishwashing station?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "We plan it as one layout and make the sink tables, dish tables and racks to your dimensions. We then deliver and install them. The dishwasher itself is not in our catalogue, so we plan the tables around the machine you choose."
+            "text": "We plan it as one layout and make the sink tables, dish tables, hand sinks, racks and trolleys to your dimensions, with grease traps sized for your workflow and plumbing. We then deliver and install them. The dishwasher itself is not in our catalogue, so we plan the tables around the machine you choose."
           }
         }
       ]
@@ -914,6 +914,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
    (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
    contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
@@ -1097,12 +1112,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/">Products</a>
+      <a href="/catalogue/">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/" aria-current="true">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1209,7 +1221,7 @@ body{margin:0;background:#fff;color:#0E1116}
         <li><strong>Pass-through.</strong> The soiled side faces the dining room or the line, and the clean side faces the kitchen, so dirty and clean never meet. It needs an opening in a wall, so ask the city or municipal building office first.</li>
         </ul>
         <div class="art-note">
-        <p>Whatever the shape, put clean storage at the far end from where dirty dishes arrive, and keep the dish-return route clear of the cooks’ route to the line.</p>
+        <p>Whatever the shape, put clean storage at the far end from where dirty dishes arrive, and keep the dish-return route clear of the cooks’ route to the line. Fit a hand sink at the station, for hands only: see our <a href="/guides/hand-sink-guide-food-business/">hand sink guide</a>.</p>
         </div>
       </section>
 
@@ -1218,7 +1230,7 @@ body{margin:0;background:#fff;color:#0E1116}
         <p>Washed dishes dry well in the open air, on racks and slotted shelves, with no cloth needed. Plan these at the clean end:</p>
         <ul>
         <li><strong>A clean table or drainboard</strong> where washed dishes land. Our clean dish table has a raised back and side splash, and washed dishes land on it.</li>
-        <li><strong>Racks.</strong> Our <a href="/products/stainless-steel-racks/">dish and storage racks</a> have three to six tiers, with or without wheels. A rack on wheels rolls to the line. See our <a href="/guides/dish-rack-guide/">dish rack guide</a>.</li>
+        <li><strong>Racks and trolleys.</strong> Our <a href="/products/stainless-steel-racks/">dish and storage racks</a> have three to six tiers, with or without wheels, and a rack on wheels rolls to the line. We also make <a href="/guides/kitchen-trolley-guide/">trolleys</a>, to carry dirty dishes in from the dining room, built in SS304 to your kitchen’s sizes. See our <a href="/guides/dish-rack-guide/">dish rack guide</a>.</li>
         <li><strong>An undershelf or an overshelf</strong> for what you reach for, as our <a href="/guides/pot-rack-and-overshelf-guide/">overshelf guide</a> explains.</li>
         </ul>
         <figure class="art-fig">
@@ -1231,7 +1243,7 @@ body{margin:0;background:#fff;color:#0E1116}
         <h2 id="services-h">Water, drain, steam and floor</h2>
         <ul>
         <li><strong>Hot water</strong> to the wash sinks and the machine. Ask the machine’s supplier what it needs.</li>
-        <li><strong>Drain and grease trap.</strong> Wash water carries fat and food. Settle the waste lines and the trap with your plumber, and ask the city or municipal building office what it expects. See our <a href="/guides/grease-trap-guide-restaurants/">grease trap guide</a>.</li>
+        <li><strong>Drain and grease trap.</strong> Wash water carries fat and food. Settle the waste lines and the trap with your plumber, and ask the city or municipal building office what it expects. We make grease traps, sized for your workflow and plumbing: see our <a href="/guides/grease-trap-guide-restaurants/">grease trap guide</a>.</li>
         <li><strong>Floor.</strong> This is the wettest part of the kitchen. The floor should slope to a drain and grip when wet. Our floor-standing tables stand on adjustable bullet feet, which help them sit level. See our <a href="/guides/kitchen-flooring-and-drainage/">floor and drainage guide</a>.</li>
         <li><strong>Steam.</strong> Hot water and a machine release steam and heat. Ask the machine’s supplier whether it needs an extraction connection, and plan it with the rest of the kitchen’s ventilation: see our <a href="/services/exhaust-and-fresh-air-systems/">exhaust and fresh-air systems</a>.</li>
         </ul>
@@ -1239,7 +1251,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="help" aria-labelledby="help-h">
         <h2 id="help-h">How Barro Industries can help</h2>
-        <p>We design, fabricate, deliver and install sink tables, dish tables, work tables and racks, and plan them as one layout. Each is made to order, built to your exact dimensions, in food-grade SS304 as standard or laboratory-grade SS316 on request, with seams welded and ground smooth. See our <a href="/services/commercial-kitchen-fit-out/">kitchen fit-outs</a>.</p>
+        <p>We design, fabricate, deliver and install sink tables, dish tables, work tables, racks and trolleys, and plan them as one layout. Each is made to order, built to your exact dimensions, in food-grade SS304 as standard or laboratory-grade SS316 on request, with seams welded and ground smooth. Our washing line also includes hand sinks, mop sinks and grease traps, sized for your workflow and plumbing. See our <a href="/services/commercial-kitchen-fit-out/">kitchen fit-outs</a>.</p>
         <p>The quickest way to start is the <a href="/sales/clientinformationrequest/">project brief</a>. Send your menu, the dishwasher you plan to use, the room measurements, the water and drain points and a photo of the room. Or configure a dish table in the <a href="/catalogue/">catalogue</a> and request a quote online. We give a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>
       </section>
 
@@ -1264,7 +1276,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
       <div class="faq-item">
         <h3>Can you build the whole dishwashing station?</h3>
-        <p>We plan it as one layout and make the sink tables, dish tables and racks to your dimensions. We then deliver and install them. The dishwasher itself is not in our catalogue, so we plan the tables around the machine you choose.</p>
+        <p>We plan it as one layout and make the sink tables, dish tables, hand sinks, racks and trolleys to your dimensions, with grease traps sized for your workflow and plumbing. We then deliver and install them. The dishwasher itself is not in our catalogue, so we plan the tables around the machine you choose.</p>
       </div>
     </div>
   </section>
@@ -1276,7 +1288,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="related" class="site-sec site-sec-paper" aria-labelledby="related-h">
   <div class="site-wrap">
     <header class="sec-head">
-      <p class="eyebrow kg-kicker"><a href="/guides/#equipment">Equipment guides</a></p>
+      <p class="eyebrow">Keep reading</p>
       <h2 id="related-h">Related reading</h2>
     </header>
     <div class="pg-cards pg-cards-3 pg-cards-text">
@@ -1334,7 +1346,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

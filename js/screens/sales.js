@@ -126,7 +126,8 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
       'Clients is the CRM book here; the AEC architect/engineer/contractor prospecting directory moved to the CRM department.',
       'Briefs holds every Client Information Request sent from barroindustries.com/sales/clientinformationrequest/ — review the answers and photos, add notes, then Convert to client.',
       'Quote requests holds every "Get a quote" request sent from barroindustries.com/catalogue/ — review the items and the estimate the client saw, then Open in Quote Builder to price it properly.',
-      'Quotes has ＋New Quotation (full builder) and Quick Estimate (fast price check); everything filed lands in Records, where revisions chain together.',
+      'Quotes has ＋New Quotation and Quick Estimate; everything filed lands in Records. On each quote: Mark sent when it goes out, Lost (with a reason) when the client says no, Record payment when the client pays.',
+      'After Record payment the President confirms it in the app (Finance may confirm when he cannot be reached). Then open Sales Orders and tap Generate SO & JO to hand the job to Production.',
       'Brilliant Steel is a read-only window into the department\'s quotes and files for coordination.',
       'Files holds Work Plans and Proposals; Tasks is the department board.'
     ])}
@@ -644,6 +645,8 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
 // Body text supports lightweight **bold** markup; everything is escaped first.
 const SALES_SOP_ORANGE = '#e65100';
 const DEFAULT_SALES_SOP = {
+  // Version 2 = the flow of 2026-11-19 (Record payment -> the President confirms -> Sales generates). A SAVED SOP without this is the older flow.
+  sopVersion: 2,
   intro: "The standard end-to-end process every Sales staff and agent follows. Each step shows who owns it and which tab to use. Follow the steps in order — don't skip review or confirmation.",
   steps: [
     { short:'Inquiry', title:'Inquiry Received', owner:'Sales Agent / Sales Staff', tab:'Clients',
@@ -675,56 +678,55 @@ const DEFAULT_SALES_SOP = {
         'Apply correct unit prices, quantities, and any approved discounts.',
         'State validity period and payment terms (e.g. 50% down payment, balance before delivery).'
       ], out:'Draft quotation saved.' },
-    { short:'Approve', title:'Internal Review & Approval', owner:'Sales Manager / Finance', tab:'Quotes → Records',
-      desc:'No quotation leaves the company without a margin check.',
+    { short:'Approve', title:'Internal Review & Approval', owner:'President', tab:'Quotes → Records',
+      desc:'Every quotation is approved by the President before it goes out.',
       actions:[
-        'Manager / Finance reviews pricing, margin, discounts, and terms in **Sales → Quotes → Records**.',
-        'Correct any error or under-priced line before it reaches the client — send back with **New Revision** if needed.',
-        'Approve the quotation to release it.'
-      ], out:'Approved quotation, cleared to send.' },
-    { short:'Send', title:'Send Quotation to Client', owner:'Sales Agent / Sales Staff', tab:'Quotes → Records',
+        'Send the quotation for approval from the quote builder.',
+        'The President reviews pricing, margin, discounts and terms, and approves or returns it.',
+        'An approved quotation comes back to Sales to file. Use **New Revision** for any change.'
+      ], out:'Approved quotation, filed and ready to send.' },
+    { short:'Send', title:'Send Quotation to Client', owner:'Sales', tab:'Quotes → Records',
       desc:'Deliver the approved quote and record that it went out.',
       actions:[
-        'Export the quotation to PDF and send via the agreed channel.',
-        'Mark the quotation as **Sent** in **Sales → Quotes → Records** with the date.',
+        'Use **Share** for the client link, or export the PDF.',
+        'Tap **Mark sent** on the quote the same day.',
         'Confirm the client received it.'
-      ], out:'Quotation sent and logged.' },
-    { short:'Follow-up', title:'Follow-up & Negotiation', owner:'Sales Agent / Sales Staff', tab:'Quotes → Records',
-      desc:'Most deals are won in the follow-up. Stay on it.',
+      ], out:'Quotation sent and marked Sent.' },
+    { short:'Follow-up', title:'Follow-up & Negotiation', owner:'Sales', tab:'Quotes → Records',
+      desc:'Most deals are won in the follow-up.',
       actions:[
-        'Follow up within 2–3 working days of sending.',
-        'Handle questions, revisions, and price / term negotiation — use **New Revision** to keep every version on record.',
-        'Re-route any revised pricing back through review (Step 5) before re-sending.',
-        'Keep the quotation status current (Sent → Negotiating → Won / Lost).'
-      ], out:'Clear client decision.' },
-    { short:'Confirm', title:'Client Confirmation & Down Payment', owner:'Sales + Finance', tab:'Quotes → Records',
-      desc:'A verbal "yes" is not an order. Secure the commitment.',
+        'Follow up within 2 working days of sending.',
+        'Use **New Revision** for every change so each version stays on record; a revised price goes back for approval.',
+        'If the client says no, tap **Lost** and choose the reason. Every lost quote needs a reason.'
+      ], out:'A clear client decision: paying, or Lost with a reason.' },
+    { short:'Design', title:'Drawings', owner:'Sales + Design / Production', tab:'Projects',
+      desc:'Agree what will be built before the client pays.',
       actions:[
-        'Obtain written confirmation: signed quotation, contract, or Purchase Order.',
-        'Collect the agreed down payment.',
-        '**Finance** verifies the payment before the order is created.'
-      ], out:'Confirmed, paid order — ready to convert.' },
-    { short:'Sales Order', title:'Create the Sales Order', owner:'Sales Agent / Sales Staff', tab:'Sales Orders',
-      desc:'Convert the won quotation into a formal Sales Order in the system.',
+        'Coordinate the layout and shop drawings with Rene.',
+        'If the client already has a drawing, keep the file; you attach it when you generate the job order.'
+      ], out:'Agreed drawing, or the client\'s own.' },
+    { short:'Payment', title:'Record the Payment', owner:'Sales records · President confirms (Finance as stand-in)', tab:'Quotes → Records · Sales Orders',
+      desc:'No job starts without a confirmed payment.',
       actions:[
-        'Open **Sales Orders** and create the order from the agreed quotation.',
-        'Record final items, quantities, total amount, agreed delivery date, and payment terms.',
-        'Attach the signed quote / PO and proof of down payment.'
-      ], out:'Sales Order recorded in the system.' },
-    { short:'Production', title:'Handoff to Production / Fulfillment', owner:'Sales → Production', tab:'Sales Orders · Production',
-      desc:'Close the loop — hand the order to the team that builds and delivers it.',
+        'When the client pays, tap **Record payment** on the quote: amount, date, method, VAT, OR number and the receipt.',
+        'The contract amount is the quote total and cannot be typed. To change it, revise the quote.',
+        'The President gets a notification and confirms in one tap. If the President cannot be reached, Finance may confirm in his place; the app records who confirmed and tells the President. If something is wrong it is sent back with a reason; fix it and resubmit.'
+      ], out:'Payment confirmed and posted to the ledger, once.' },
+    { short:'Generate', title:'Sales Order & Job Order', owner:'Sales', tab:'Sales Orders',
+      desc:'Hand the job to Production yourself. No Finance step.',
       actions:[
-        'Transfer the Sales Order to **Production** from the Sales Orders tab.',
-        'Notify Design / Production and confirm the schedule.',
-        'Keep the client updated on production and delivery status.'
-      ], out:'Order in production. Sales cycle complete.' },
+        'In **Sales Orders**, tap **Generate SO & JO** on the confirmed order.',
+        'Enter the target date, priority and notes for Production.',
+        'Attach the drawing (the client\'s or ours). If nothing is drawn yet, choose "send to Design first"; if nobody is available to draw it, attach the drawing yourself later from the Sales Orders row.',
+        'Keep the client updated with the tracking **Link**.'
+      ], out:'Sales order and job order with Production. Sales cycle complete.' },
   ],
   rules: [
     'Log **every** inquiry — an unlogged lead is a lost lead.',
     'No quotation goes out without internal review & approval (Step 5).',
-    'No Sales Order is created without written confirmation and verified down payment (Step 8).',
+    'No job goes to Production without a payment the President has confirmed (Step 9).',
     'Keep quotation & order status current so the pipeline reflects reality.',
-    'Respond within the day; follow up within 2–3 working days.'
+    'Respond within the day; follow up within 2 working days.'
   ]
 };
 
@@ -780,8 +782,15 @@ function renderSalesSOPView(container, data, loadErr) {
       </div>`
     : '';
 
+  // A SAVED SOP from before the 2026-11-19 sales flow carries no sopVersion >= 2 (the shipped default always does, so it never shows this).
+  // The President can load the new default into the editor in one tap; everyone else is told it is being updated.
+  const oldSopBanner = (data.sopVersion >= 2) ? '' : (canEdit
+    ? `<div class="alert-banner" style="cursor:default;margin-bottom:12px">The sales flow changed on 19 Nov 2026 (payment confirmed in the app by the President, or by Finance in his place; Sales generates the sales order and job order). This saved SOP is the older version. <button class="btn-secondary btn-sm" id="sop-load-v2">Load the new default</button></div>`
+    : `<div class="alert-banner" style="cursor:default;margin-bottom:12px">This SOP is being updated to the new sales flow.</div>`);
+
   container.innerHTML = `
     ${loadWarn}
+    ${oldSopBanner}
     <div style="background:linear-gradient(135deg,rgba(230,81,0,.14),rgba(230,81,0,.04));border:1px solid rgba(230,81,0,.35);border-radius:14px;padding:16px 18px;margin-bottom:16px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px">
@@ -845,12 +854,15 @@ function renderSalesSOPView(container, data, loadErr) {
   // Retry button instead of this one.
   container.querySelector('.sop-reload-btn')?.addEventListener('click', () => renderSalesSOP(container));
   if (canEdit) document.getElementById('sop-edit-btn')?.addEventListener('click', () => renderSalesSOPEditor(container, data));
+  // "Load the new default": the existing editor, prefilled with DEFAULT_SALES_SOP; the existing Save writes it (sopVersion included).
+  if (canEdit) container.querySelector('#sop-load-v2')?.addEventListener('click', () => renderSalesSOPEditor(container, DEFAULT_SALES_SOP));
 }
 
 // ── SOP editor (President only) ───────────────────
 function renderSalesSOPEditor(container, data) {
   // Deep-clone into a working draft so Cancel discards unsaved edits.
   window._salesSopDraft = {
+    sopVersion: data.sopVersion || 0,
     intro: data.intro || '',
     steps: (data.steps || []).map(s => ({
       short:s.short||'', title:s.title||'', owner:s.owner||'', tab:s.tab||'',
@@ -960,10 +972,11 @@ async function salesSopSave(container) {
   try {
     await db.collection('settings').doc('sales_sop').set({
       intro: d.intro||'', steps: d.steps, rules: d.rules||[],
+      ...(d.sopVersion >= 2 ? { sopVersion: d.sopVersion } : {}),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedBy: (typeof currentUser!=='undefined' && currentUser && currentUser.email) || ''
     }, { merge:true });
-    const fresh = { intro:d.intro||'', steps:d.steps, rules:d.rules||[],
+    const fresh = { intro:d.intro||'', steps:d.steps, rules:d.rules||[], sopVersion: d.sopVersion || 0,
       updatedAt: new Date(), updatedBy: (typeof currentUser!=='undefined' && currentUser && currentUser.email) || '' };
     window._salesSopData = fresh;
     window.Notifs?.showToast?.('SOP saved');
@@ -1107,6 +1120,103 @@ function quoteChainTableRowsHtml(chain) {
   }).join('');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  QUOTE: MARK SENT · LOST · REOPEN (SALES-QUICK-FIXES-SPEC-2026-11-19 §3.1, §5.1)
+//  All three are ordinary updates on the quote (creator or admin, per firestore.rules) and are collection-aware:
+//  `coll` is 'bk_quotes' or 'bs_quotes' (only the BK list wires them in this batch). The pure rules — which reasons
+//  exist, what a valid note is, which statuses show the buttons — live in js/sales-flow-core.js.
+// ═══════════════════════════════════════════════════════════════════════════
+// "Sent" is a STAMP, not a status: `status` is left alone, so Share, the stale badge, the follow-up reminders and the
+// builder bridge keep treating the quote as filed. One tap, no dialog.
+window.markQuoteSent = async function(coll, id, onDone) {
+  onDone = onDone || (()=>{});
+  const u = window.currentUser || {};
+  const who = (window.userProfile && window.userProfile.displayName) || u.email || '';
+  try {
+    await db.collection(coll).doc(id).update({
+      sentAt: firebase.firestore.FieldValue.serverTimestamp(), sentDate: window.bizDate(), sentBy: u.uid, sentByName: who
+    });
+    if (coll === 'bs_quotes' && window.invalidateBsQuotesCache) window.invalidateBsQuotesCache(u.uid);
+    window.logAudit && window.logAudit('update', 'quote', id, { sent: true });
+    Notifs.success('Marked as sent');
+    onDone();
+  } catch (e) {
+    Notifs.showToast('Could not mark as sent: ' + (e.message || e.code), 'error');
+  }
+};
+
+// Lost needs a reason (and a note when the reason is "Other"). The previous status is kept so Reopen can put the quote back.
+window.openMarkQuoteLost = function(coll, q, onDone) {
+  onDone = onDone || (()=>{});
+  const SF = window.SalesFlow;
+  const _panel = openPage('Mark quote as lost', `
+    <div style="font-size:12px;margin-bottom:10px"><strong>${escHtml(q.quoteNumber || String(q.id).slice(-6).toUpperCase())}</strong> — ${escHtml(q.clientName || 'Unnamed')}</div>
+    <div class="form-group">
+      ${SF.LOST_REASONS.map(r => `<label class="check-row" style="display:flex"><input type="radio" name="lost-reason" value="${escHtml(r.code)}"/> ${escHtml(r.label)}</label>`).join('')}
+    </div>
+    <div class="form-group"><textarea id="lost-note" rows="2" maxlength="300" placeholder="Note (required for Other)"></textarea></div>
+    <div id="lost-err" class="error-msg hidden"></div>
+  `, `<button class="btn-danger" id="lost-save">Mark as lost</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  // ⚠ scoped to THIS panel, not document (a closing panel lingers ~300ms and would win a document-level lookup)
+  const $ = (id) => _panel.querySelector('#' + id);
+  $('lost-save').addEventListener('click', () => window.busy($('lost-save'), async () => {
+    const code = (_panel.querySelector('input[name="lost-reason"]:checked') || {}).value || '';
+    const note = ($('lost-note').value || '').trim();
+    const bad = SF.validateLost(code, note);
+    if (bad) { const err = $('lost-err'); err.textContent = bad; err.classList.remove('hidden'); return; }
+    const u = window.currentUser || {};
+    const who = (window.userProfile && window.userProfile.displayName) || u.email || '';
+    const label = SF.lostReasonLabel(code);
+    try {
+      await db.collection(coll).doc(q.id).update({
+        ...window.quoteStateFields('lost'),
+        lostReason: code, lostReasonLabel: label, lostNote: note,
+        lostAt: firebase.firestore.FieldValue.serverTimestamp(), lostBy: u.uid, lostByName: who,
+        lostPrevStatus: q.status, lostPrevApprovalStatus: q.approvalStatus || null
+      });
+    } catch (e) {
+      const err = $('lost-err'); err.textContent = 'Failed: ' + (e.message || e.code); err.classList.remove('hidden'); return;
+    }
+    if (coll === 'bs_quotes' && window.invalidateBsQuotesCache) window.invalidateBsQuotesCache(u.uid);
+    window.logAudit && window.logAudit('update', 'quote', q.id, { lost: code });
+    // N6: tell the President (not when he marked it himself). A failed notification never fails the write.
+    if (!(typeof isRealPresident === 'function' && isRealPresident())) {
+      try {
+        await Notifs.sendToOwner({ title: '✖️ Quote lost',
+          body: `${who}: ${q.quoteNumber || String(q.id).slice(-6).toUpperCase()} — ${q.clientName || 'Unnamed'}. Reason: ${label}${note ? ' — ' + note : ''}`,
+          icon: '✖️', type: 'quote_lost', link: coll === 'bs_quotes' ? 'bs-quotations' : 'bk-quotations' });
+      } catch (_) {}
+    }
+    closeModal();
+    Notifs.success('Quote marked as lost');
+    onDone();
+  }));
+};
+
+// Back to where it was (the status and approval status saved when it was marked lost). Leaves a trace in the audit log.
+window.reopenLostQuote = async function(coll, q, onDone) {
+  onDone = onDone || (()=>{});
+  const prev = q.lostPrevStatus || 'filed';
+  const ok = await window.confirmDialog({ message: 'Reopen this quote? It goes back to "' + window.statusLabel2('quote', prev) + '".' });
+  if (!ok) return;
+  const u = window.currentUser || {};
+  const FV = firebase.firestore.FieldValue;
+  try {
+    await db.collection(coll).doc(q.id).update({
+      status: prev, approvalStatus: q.lostPrevApprovalStatus || 'filed',
+      lostReason: FV.delete(), lostReasonLabel: FV.delete(), lostNote: FV.delete(), lostAt: FV.delete(),
+      lostBy: FV.delete(), lostByName: FV.delete(), lostPrevStatus: FV.delete(), lostPrevApprovalStatus: FV.delete()
+    });
+  } catch (e) {
+    Notifs.showToast('Could not reopen the quote: ' + (e.message || e.code), 'error');
+    return;
+  }
+  if (coll === 'bs_quotes' && window.invalidateBsQuotesCache) window.invalidateBsQuotesCache(u.uid);
+  window.logAudit && window.logAudit('update', 'quote', q.id, { reopened: true, from: q.lostReason || '' });
+  Notifs.success('Quote reopened');
+  onDone();
+};
+
 async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const isPrivileged = ['president','manager','finance'].includes(currentRole);
   const isAdmin = ['president','manager','secretary'].includes(currentRole);
@@ -1147,10 +1257,14 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   // H8 fix — some BK/BS quotes store the value under grandTotal (or amount), not
   // total; a bare q.total silently reads as ₱0 for those. Same fallback chain as
   // app.js's quote pipeline (~line 2815).
-  const total      = activeQuotes.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
+  // Quote Value leaves out quotes that are lost (or rejected): a dead quote is not pipeline.
+  const total      = activeQuotes.filter(q => !window.isQuoteLost(q)).reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
   const accepted   = activeQuotes.filter(q=>q.status==='accepted');
   const acceptedT  = accepted.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
-  const sent       = activeQuotes.filter(q=>q.status==='sent').length;
+  // "Sent" is a stamp (sentAt, written by Mark sent), not a status — `status` stays 'filed' so Share, the stale badge and the reminders keep working.
+  // Legacy quotes with status 'sent' still count.
+  const sent       = activeQuotes.filter(q => q.sentAt || q.status==='sent').length;
+  const lost       = activeQuotes.filter(q => q.status==='lost').length;
   // QB-DRAFTS-SPEC-2026-09-11 — drafts no longer live inside `quotes`/
   // `activeQuotes`; count the dedicated bucket instead (autosave slot incl.).
   const draft      = draftDocs.length;
@@ -1178,19 +1292,21 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       ` <span class="badge badge-blue" style="font-size:9px" title="General fabrication quote — issued under the parent company, not Barro Kitchens">${escHtml(window.quoteCompanyLabel(qco))}</span>`;
     const staleDays = staleDaysOf(q);
     return `
-      <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap${superseded?';opacity:.6':''}">
+      <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap${superseded?';opacity:.6':(q.status==='lost'?';opacity:.7':'')}">
         <div style="flex:1;min-width:160px">
           <div class="item-title" style="font-size:13px">${escHtml(qco)}-${escHtml(q.quoteNumber||q.id.slice(-6).toUpperCase())} — ${escHtml(q.clientName||'Unnamed')}${coTag}${superseded?' <span class="badge badge-gray" style="font-size:9px">superseded</span>':''}</div>
           <div class="item-meta" style="margin-top:4px">
             <span>${escHtml(q.scope||'Custom')}</span>
             <span>${escHtml(q.agentName||'—')}</span>
             ${q.date?`<span>${q.date}</span>`:''}
-            ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
+            ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px" title="Filed but no payment recorded yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
           </div>
         </div>
         <div style="text-align:right">
           <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0)}</div>
           <span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>
+          ${(q.sentAt || q.status==='sent')?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">Sent${q.sentDate ? ' · ' + escHtml(q.sentDate) : ''}</span>`:''}
+          ${q.status==='lost'?`<div style="font-size:10px;color:var(--text-muted)">${escHtml(q.lostReasonLabel||'')}${q.lostNote ? ' — ' + escHtml(q.lostNote) : ''}</div>`:''}
           ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🗑',10)} del req</span>`:''}
           ${window.quoteShareChipHtml(q)}
         </div>
@@ -1199,7 +1315,10 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
           ${!q.editableState?`<span style="font-size:10px;color:var(--text-muted)" title="This quote was filed before edit history was captured (or the snapshot write failed) — there's nothing here to reopen or revise.">No editable snapshot</span>`:''}
           ${window.QUOTE_SHAREABLE_STATUSES.includes(q.status)?`<button class="btn-secondary btn-sm bk-share-btn" data-id="${q.id}" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}
-          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="${escHtml(qco)}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
+          ${window.SalesFlow.canMarkSent(q, superseded)?`<button class="btn-secondary btn-sm bk-sent-btn" data-id="${q.id}" title="Record that this quotation went out to the client">${emojiIcon('📨',16)} Mark sent</button>`:''}
+          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="${escHtml(qco)}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('💵',16)} Record payment`}</button>`:''}
+          ${window.SalesFlow.canMarkLost(q, superseded)?`<button class="btn-secondary btn-sm bk-lost-btn" data-id="${q.id}" style="color:var(--danger)" title="The client said no — choose the reason">Lost</button>`:''}
+          ${window.SalesFlow.canReopenLost(q)?`<button class="btn-secondary btn-sm bk-unlost-btn" data-id="${q.id}" title="Put this quote back where it was">Reopen quote</button>`:''}
           ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">${emojiIcon('🗑',16)} Delete</button>`:''}
         </div>
       </div>`;
@@ -1212,6 +1331,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       <div class="stat-card"><div class="stat-num">${accepted.length}</div><div class="stat-label">Accepted</div></div>
       <div class="stat-card"><div class="stat-num">₱${fmt(acceptedT)}</div><div class="stat-label">Accepted Value</div></div>
       <div class="stat-card"><div class="stat-num">${sent}</div><div class="stat-label">Sent</div></div>
+      <div class="stat-card"><div class="stat-num">${lost}</div><div class="stat-label">Lost</div></div>
       <div class="stat-card"><div class="stat-num">${draft}</div><div class="stat-label">Drafts</div></div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px">
@@ -1240,6 +1360,16 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       window.newRevisionFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
     container.querySelectorAll('.bk-share-btn').forEach(b=>b.addEventListener('click', e=>
       window.shareQuoteWithClient('bk_quotes', e.currentTarget.dataset.id, ()=>renderBKQuotationsSummary(container, currentUser, currentRole))));
+    // Sent / Lost / Reopen (SALES-QUICK-FIXES-SPEC §5.1): a Sent stamp, a Lost with a reason, and a way back.
+    const bkRerender = () => renderBKQuotationsSummary(container, currentUser, currentRole);
+    container.querySelectorAll('.bk-sent-btn').forEach(b=>b.addEventListener('click', e=>
+      window.busy(e.currentTarget, () => window.markQuoteSent('bk_quotes', e.currentTarget.dataset.id, bkRerender))));
+    container.querySelectorAll('.bk-lost-btn').forEach(b=>b.addEventListener('click', e=>{
+      const q = allDocs.find(x => x.id === e.currentTarget.dataset.id); if (q) window.openMarkQuoteLost('bk_quotes', q, bkRerender);
+    }));
+    container.querySelectorAll('.bk-unlost-btn').forEach(b=>b.addEventListener('click', e=>{
+      const q = allDocs.find(x => x.id === e.currentTarget.dataset.id); if (q) window.reopenLostQuote('bk_quotes', q, bkRerender);
+    }));
     container.querySelectorAll('.bk-del-btn').forEach(b=>b.addEventListener('click', e=>{
       const d=e.currentTarget.dataset;
       window.requestQuoteDelete('bk_quotes', d.id, d.label, d.by, ()=>renderBKQuotationsSummary(container, currentUser, currentRole));
