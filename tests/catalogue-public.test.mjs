@@ -1175,7 +1175,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(cat.includes('<a href="/" id="site-brand">'));
     assert.ok(cat.includes('<p class="foot-links"><a href="/">Home</a>'), 'Home is the first footer link');
     const catNav = cat.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
-    assert.deepEqual([...catNav.matchAll(/<a href="([^"]+)"(?: aria-current="page")?>([^<]+)<\/a>/g)].map(m => [m[1], m[2]]), [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']], 'the catalogue nav is the same eight links as every other public page');
+    assert.deepEqual([...catNav.matchAll(/<a href="([^"]+)"(?: aria-current="page")?>([^<]+)<\/a>/g)].map(m => [m[1], m[2]]), [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/#contact', 'Contact']], 'the catalogue nav is the same six links as every other public page');
     assert.ok(catNav.includes('<a href="/catalogue/" aria-current="page">Catalogue</a>'));
     // owner 2026-10-21: the top-right slot is "Get a quote" (the intake), Login moved to the footer as "Team portal" (details: tests/site-public-surface.test.mjs)
     assert.ok(cat.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>'));
@@ -1291,9 +1291,9 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(!/href="#catalogue"|href="[^"]*#cat-/.test(homeSite), 'a deep link into the catalogue is on the homepage');
   });
 
-  it('has the nav Services · Products · Our work · Areas we serve · Catalogue · Guides · FAQ · Contact (all but the catalogue and Contact are the public content pages), with "Get a quote" top right', () => {
+  it('has the nav Services · Products · Our work · Catalogue · Guides · Contact (Areas we serve and FAQ moved to the footer, owner 2026-11-19: the header was too crowded) (all but the catalogue and Contact are the public content pages), with "Get a quote" top right', () => {
     const labels = [...nav.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map(m => [m[1], m[2]]);
-    assert.deepEqual(labels, [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/faq/', 'FAQ'], ['#contact', 'Contact']]);
+    assert.deepEqual(labels, [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['#contact', 'Contact']]);
     const cta = '<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>';
     assert.ok(homeSite.includes(cta));
     assert.ok(homeSite.indexOf(cta) > homeSite.indexOf('id="site-nav"') && homeSite.indexOf(cta) < homeSite.indexOf('id="site-menu-btn"'));

@@ -612,7 +612,7 @@ describe('guides: markup — one H1, a logical heading order, unique ids, sized 
     each((p) => {
       assert.ok(p.header.includes('<a href="/" id="site-brand">') && p.header.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'));
       const nav = [...p.header.match(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/)[1].matchAll(/<a href="([^"]+)">([^<]*)<\/a>/g)].map((m) => [m[1], m[2]]);
-      assert.deepEqual(nav.filter((n) => !NEWER.has(n[0])), [['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']]);
+      assert.deepEqual(nav.filter((n) => !NEWER.has(n[0])), [['/services/', 'Services'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/#contact', 'Contact']]);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(!/login/i.test(p.header));

@@ -209,7 +209,7 @@ describe('uniform with the website: the same header and the same footer as /serv
     assert.match(h, /<span class="site-brand-name">Barro Industries<\/span>/);
     assert.equal((h.match(/<span data-brand>Barro Kitchens<\/span>/g) || []).length, 1);
     assert.deepEqual([...h.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]),
-      [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']]);
+      [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/#contact', 'Contact']]);
     assert.ok(h.indexOf('id="site-nav"') < h.indexOf('site-head-cta') && h.indexOf('site-head-cta') < h.indexOf('id="site-menu-btn"'));
     assert.match(h, /<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="\/catalogue\/\?quote=1">Get a quote<\/a>/);
     assert.ok(!/#login|Login|Staff|Team portal/.test(h));

@@ -884,11 +884,11 @@ describe('header and footer: the same on every page, "Get a quote" top right and
     assert.equal(f.size, 1, 'the footers differ');
   });
 
-  it('has the brand link home, the eight nav links (Guides added 2026-11-19, owner), "Get a quote" to the intake as the button at the top right, then the menu button — and no Login anywhere in the header', () => {
+  it('has the brand link home, the six nav links (Guides added 2026-11-19; Areas we serve and FAQ moved to the footer the same day, owner), "Get a quote" to the intake as the button at the top right, then the menu button — and no Login anywhere in the header', () => {
     each((p) => {
       assert.ok(p.header.includes('<a href="/" id="site-brand">'));
       assert.deepEqual([...p.header.matchAll(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/g)][0][1].match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), [
-        '<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">The Kitchen Guide</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
+        '<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">The Kitchen Guide</a>', '<a href="/#contact">Contact</a>']);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(p.header.includes('<button type="button" id="site-menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">'));
@@ -902,8 +902,8 @@ describe('header and footer: the same on every page, "Get a quote" top right and
     assert.deepEqual(cur(byPath('/services/kitchen-fire-suppression/')), [['/services/', 'true']]);
     assert.deepEqual(cur(byPath('/work/')), [['/work/', 'page']]);
     assert.deepEqual(cur(byPath('/work/ispsc-2026/')), [['/work/', 'true']]);
-    assert.deepEqual(cur(byPath('/areas-we-serve/')), [['/areas-we-serve/', 'page']]);
-    assert.deepEqual(cur(byPath('/faq/')), [['/faq/', 'page']]);
+    assert.deepEqual(cur(byPath('/areas-we-serve/')), []);
+    assert.deepEqual(cur(byPath('/faq/')), []);
   });
 
   it('has the footer links to Home, the hubs, the FAQ, the catalogue, Facebook, "Message us" (Messenger), "Get a quote" and the discreet "Team portal"', () => {
@@ -977,9 +977,9 @@ describe('the homepage and the catalogue are wired to the 12 pages (the pages li
   const nav = (html) => html.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
   const footLinks = (html) => html.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
   const hrefsIn = (html) => [...html.matchAll(/<a\b[^>]*\shref="([^"]+)"/g)].map((m) => m[1]);
-  const NAV = [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/faq/', 'FAQ']];
+  const NAV = [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide']];
 
-  it('has the same eight header links on the homepage, the catalogue and the 12 pages: Services, Products, Our work, Areas we serve, Catalogue, Guides, FAQ, Contact (an in-page anchor on the homepage, /#contact elsewhere), and "Get a quote" before the menu button', () => {
+  it('has the same six header links on the homepage, the catalogue and the 12 pages: Services, Products, Our work, Catalogue, Guides, Contact (Areas we serve and FAQ are footer links since 2026-11-19) (an in-page anchor on the homepage, /#contact elsewhere), and "Get a quote" before the menu button', () => {
     const labels = (html) => [...nav(html).matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
     assert.deepEqual(labels(homeHtml), [...NAV, ['#contact', 'Contact']].map((x) => x));
     assert.deepEqual(labels(catalogue), [...NAV, ['/#contact', 'Contact']]);
