@@ -10756,11 +10756,9 @@ function initTutorial(){
       const notDismissedAtThisVersion=(dismissedVer!==curVer);
       if(seenVer < curVer && notDismissedAtThisVersion){
         if(seenVer===0){
-          // First-run — never opened Help / taken the tour.
-          textEl.innerHTML='👋 <strong>New to the quote builder?</strong> Take a 2-minute guided demo of how a quote gets built, priced and filed.';
-          noBtn.textContent='Maybe later';
-          yesBtn.textContent='▶ Start the demo';
-          yesBtn.onclick=startTour;
+          // First-run: owner 2026-11-20 "remove" — no banner. The guided demo stays under Help (the gold dot still points there).
+          banner.style.display='none';
+          return;
         } else {
           // Updated — has seen an older version.
           textEl.innerHTML='✨ <strong>The quote builder was updated.</strong> See what changed since you last looked.';

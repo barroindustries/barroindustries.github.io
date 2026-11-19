@@ -683,7 +683,7 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
 
   it('a first-time user with the switch off gets the first-run banner and the dot as before; opening Help marks 50 as seen, never 51', () => {
     const b = mk(false); b.run('initTutorial()');
-    assert.equal(dot(b), true, 'unseen: the gold dot'); assert.match(bannerText(b), /New to the quote builder/);
+    assert.equal(dot(b), true, 'unseen: the gold dot'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'owner 2026-11-20: no first-run banner (the demo stays under Help)');
     b.run('openHelpModal()');
     assert.equal(seen(b), '50', 'seen 50, not 51'); assert.equal(dot(b), false, 'the dot clears'); assert.equal(b.el('qbTutBanner').style.display, 'none');
     assert.equal(vers(b).includes(51), false, 'the Help list has no v51 while the switch is off');

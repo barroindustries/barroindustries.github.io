@@ -245,6 +245,20 @@ describe('KCLive.load: the five reads', () => {
     assert.equal(env.KCLive.role, 'president'); assert.equal(env.KC.S.role, 'president'); assert.equal(env.KCLive.state, 'live');
     assert.equal(unsub, 1, 'the listener is removed after the first answer');
   });
+  it('inside the ops app a direct get() of users/<uid> can hang (v15.0.2 iframe): after 2.5 s the profile is read by a document-id query, so the President is still the President', async () => {
+    const env = makeEnv({ db: makeFakeDb(seedDocs()) });
+    const real = env.win.db, base = real.collection.bind(real); let asked = 0;
+    env.win.firebase = { firestore: { FieldPath: { documentId: () => '__name__' } } };
+    env.win.db = Object.assign(Object.create(real), { collection(c) {
+      if (c !== 'users') return base(c);
+      return { doc: () => ({ get: () => new Promise(() => {}) }),
+        where: (f, op, id) => { asked++; return { limit: () => ({ get: async () => ({ docs: [{ id, data: () => ({ role: 'president', name: 'Neil Barro' }) }] }) }) }; } };
+    } });
+    const p = env.KCLive.load(); for (let i = 0; i < 6; i++) await Promise.resolve();
+    const t = env.timers.find(x => x && x.fn && x.ms === 2500); assert.ok(t, 'a 2.5 s wait on the direct read'); t.fn();
+    await p;
+    assert.equal(asked, 1, 'the document-id query was used'); assert.equal(env.KCLive.role, 'president'); assert.equal(env.KCLive.state, 'live');
+  });
   it('nobody signed in: auth answers null and the role stays Sales; an auth that never answers goes on after the wait with Sales too', async () => {
     const a = makeEnv({ db: makeFakeDb(seedDocs()), user: null });
     a.win.auth = { currentUser: null, onAuthStateChanged(f) { Promise.resolve().then(() => f(null)); return () => {}; } };

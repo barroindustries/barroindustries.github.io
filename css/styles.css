@@ -7233,6 +7233,12 @@ html.light .topbar-logo-card { background: rgba(108,142,245,0.10); }
 html.light .menu-toggle { color: var(--text-primary); }
 html.light .notif-btn { color: var(--text-primary); }
 
+/* owner 2026-11-20: the horizontal Barro Industries logo replaces the cube + wordmark in the top bar. The file is navy on transparent, so on the dark top bar it is drawn white. */
+.topbar-hlogo { display: block; height: 40px; width: auto; max-width: 100%; object-fit: contain; object-position: left center; }
+html:not(.light) .topbar-hlogo { filter: brightness(0) invert(1); }
+@media (max-width: 768px) { .topbar-hlogo { height: 32px; } }
+@media (min-width: 769px) { .tn-hlogo { display: none; } }   /* desktop: the logo sits top left only; the centre strip stays empty */
+
 /* Hide sub-label on very small screens, keep brand name */
 @media (max-width: 360px) {
   .topbar-brand-sub { display: none; }

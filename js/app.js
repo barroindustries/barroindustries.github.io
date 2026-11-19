@@ -1953,10 +1953,9 @@ function buildTopNavStrip() {
   if (!tabs) return;
   const esc = window.escHtml || (s => (s == null ? '' : String(s)));
   const sub = (window.BRAND && window.BRAND.systemName) ? esc(window.BRAND.systemName) : '';
-  tabs.innerHTML = `<div class="tn-brand-stack">
-    <span class="tn-brand">Barro Industries</span>
-    ${sub ? `<span class="tn-brand-sub">${sub}</span>` : ''}
-  </div>`;
+  // owner 2026-11-20: the horizontal Barro Industries logo here too (same image and dark-mode rule as the desktop top bar, .topbar-hlogo)
+  void sub;
+  tabs.innerHTML = `<div class="tn-brand-stack"><img src="icons/barro-industries-horizontal.png" alt="Barro Industries" class="topbar-hlogo tn-hlogo" width="120" height="40"></div>`;
 }
 
 // v12 WS42 nav-consolidation — the mobile top strip absorbs the standalone

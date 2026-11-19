@@ -133,6 +133,34 @@
         function (err) { return { ok: false, err: err }; });
     } catch (err) { return Promise.resolve({ ok: false, err: err }); }
   }
+  /* the user's own profile.  Inside the ops app the builder runs in an iframe, and there a direct get() of users/<uid> can hang (the app's presence heartbeat writes that
+     document all the time; on v15.0.2 the President loaded as Sales because the read never answered).  A query by document id answers at once, so after PROFILE_WAIT_MS
+     the read asks that way instead, and last the local cache.  Whichever answers first wins; an error falls through to the next way. */
+  var PROFILE_WAIT_MS = 2500;
+  function getProfile(uid) {
+    var WAIT = {};
+    function viaQuery() {
+      try {
+        var fp = (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldPath) ? firebase.firestore.FieldPath.documentId() : null;
+        if (!fp) return Promise.resolve({ ok: false, err: { code: 'no-fieldpath' } });
+        return db.collection('users').where(fp, '==', uid).limit(1).get().then(function (s) {
+          var d = s && s.docs && s.docs[0]; return { ok: true, exists: !!d, data: d ? (d.data() || {}) : null };
+        }, function (err) { return { ok: false, err: err }; });
+      } catch (err) { return Promise.resolve({ ok: false, err: err }); }
+    }
+    function viaCache() {
+      try {
+        return db.collection('users').doc(uid).get({ source: 'cache' }).then(function (s) { return { ok: true, exists: !!s.exists, data: s.exists ? (s.data() || {}) : null }; },
+          function (err) { return { ok: false, err: err }; });
+      } catch (err) { return Promise.resolve({ ok: false, err: err }); }
+    }
+    var direct = getDoc('users', uid);
+    var wait = new Promise(function (res) { setTimeout(function () { res(WAIT); }, PROFILE_WAIT_MS); });
+    return Promise.race([direct, wait]).then(function (r) {
+      if (r !== WAIT && r.ok) return r;
+      return viaQuery().then(function (q) { return q.ok ? q : viaCache().then(function (c) { return c.ok ? c : (r !== WAIT ? r : q); }); });
+    });
+  }
   function getAll(coll) {
     try {
       return db.collection(coll).get().then(function (s) {
@@ -282,7 +310,7 @@
   }
   function readAll(u) {
     var reads = Promise.all([
-      u && u.uid ? getDoc('users', u.uid) : Promise.resolve({ ok: false, err: { code: 'unauthenticated' } }),
+      u && u.uid ? getProfile(u.uid) : Promise.resolve({ ok: false, err: { code: 'unauthenticated' } }),
       getDoc('settings', 'quote_builder'), getDoc('kc_config', 'settings'), getDoc('kc_config', 'list_prices'), getAll('kc_materials')
     ]);
     var TIMEOUT = {}, timer = null;
