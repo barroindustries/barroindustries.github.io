@@ -216,6 +216,11 @@ html body .items-table table.d7-wf-t tr:hover td{background:transparent!importan
    #lhPrintHeader is the print header and the Client preview clones it. */
 .d7-lh{--d7-logo-h:64px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin:0 0 8px;padding:0 0 8px;border-bottom:2px solid #1F3A5F;page-break-inside:avoid;break-inside:avoid;}
 .d7-lh-id{flex:1 1 auto;min-width:0;}
+/* Barro Kitchens quote: the brand mark and name lead; "By Barro Industries OPC" is the legal company line (owner 2026-11-20) */
+.d7-lh-brand{display:flex;align-items:center;gap:10px;}
+.d7-lh-bkmark{display:block;width:var(--d7-logo-h);height:var(--d7-logo-h);border-radius:4px;flex:0 0 auto;}
+.d7-lh-brandname{font-size:20px;font-weight:900;letter-spacing:1.5px;line-height:1.1;color:#1F3A5F;}
+.d7-lh-legal{margin-top:2px;font-size:11px;font-weight:700;color:#444;}
 /* the PNG carries transparent margins (about 8.6 % left, 19.5 % top, 20 % bottom of its box): the negative margins, in units of the logo height, put the visible mark on the left edge and its top level with QUOTATION */
 .d7-lh-logo{display:block;height:var(--d7-logo-h);width:auto;max-width:none;margin:calc(var(--d7-logo-h) * -0.19) 0 calc(var(--d7-logo-h) * -0.19) calc(var(--d7-logo-h) * -0.258);}
 .d7-lh-co{margin-top:5px;font-size:10.5px;line-height:1.5;color:#444;}
@@ -230,6 +235,9 @@ html body .items-table table.d7-wf-t tr:hover td{background:transparent!importan
   .d7-lh{--d7-logo-h:20mm;gap:10mm;margin-bottom:3mm;padding-bottom:3mm;}
   .d7-lh-co{margin-top:1.5mm;font-size:8pt;line-height:1.45;}
   .d7-lh-tile{height:11mm;margin-bottom:1.5mm;}
+  .d7-lh--bk{--d7-logo-h:16mm;}
+  .d7-lh-brandname{font-size:15pt;}
+  .d7-lh-legal{font-size:8.5pt;}
   .d7-lh-title{font-size:16pt;}
   .d7-lh-no{font-size:11pt;}
   .d7-lh-date{font-size:9.5pt;}
@@ -294,7 +302,8 @@ html body.d7-on .qb-doc-sheet .d7-blk .kc-d-row > b{color:#1F3A5F;}
   /* the header: logo and the QUOTATION block (with the Barro Kitchens tile above it) on one row, the company lines under them; the signature boxes stack.  The A4 pages of the PDF (section 9) never take any of this. */
   .d7-lh{--d7-logo-h:48px;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"logo doc" "co co";gap:8px 12px;}
   .d7-lh-id{display:contents;}
-  .d7-lh-logo{grid-area:logo;}
+  .d7-lh-logo,.d7-lh-brand{grid-area:logo;}
+  .d7-lh-brandname{font-size:16px;}
   .d7-lh-co{grid-area:co;margin-top:0;}
   .d7-lh-doc{grid-area:doc;}
   html body.d7-on .sig-row.d7-sig3{grid-template-columns:minmax(0,1fr);gap:14px;}
@@ -364,6 +373,9 @@ html body.d7-on .d7-a4-body .d7-lh{--d7-logo-h:20mm;display:flex;grid-template-c
 html body.d7-on .d7-a4-body .d7-lh-id{display:block;}
 html body.d7-on .d7-a4-body .d7-lh-co{margin-top:1.5mm;font-size:8pt;line-height:1.45;}
 html body.d7-on .d7-a4-body .d7-lh-tile{height:11mm;margin-bottom:1.5mm;}
+html body.d7-on .d7-a4-body .d7-lh--bk{--d7-logo-h:16mm;}
+html body.d7-on .d7-a4-body .d7-lh-brandname{font-size:15pt;}
+html body.d7-on .d7-a4-body .d7-lh-legal{font-size:8.5pt;}
 html body.d7-on .d7-a4-body .d7-lh-title{font-size:16pt;}
 html body.d7-on .d7-a4-body .d7-lh-no{font-size:11pt;}
 html body.d7-on .d7-a4-body .d7-lh-date{font-size:9.5pt;}

@@ -423,6 +423,8 @@
     logo: 'icons/barro-industries-horizontal.png',     // relative, on white: the horizontal Barro Industries mark (the file of the Sales flow branch)
     tile: 'icons/barro-kitchens.png',                  // the small Barro Kitchens company tile (the page's CO.BK.logo says the same); Barro Kitchens quotes only
     name: 'Barro Industries OPC',
+    brand: 'BARRO KITCHENS',                           // the public brand (owner 2026-11-20)
+    by: 'By Barro Industries OPC',                     // the legal company line under it
     lines: Object.freeze(['21 Capricorn St., Tandang Sora, Quezon City', '0927 683 6300 · hello@barroindustries.com · barroindustries@gmail.com']),
     title: 'QUOTATION',
     prepared: 'Prepared by',
@@ -460,13 +462,21 @@
     try { src = safeSrc(typeof CO !== 'undefined' && CO && CO.BK ? CO.BK.logo : ''); } catch (e) { src = ''; }
     return src || FS.tile;
   }
+  /* Brand ruling (owner, 2026-11-20): Barro Kitchens is the PUBLIC brand; Barro Industries OPC is the legal company.  A Barro Kitchens quote therefore leads with the
+     Barro Kitchens mark and name, with "By Barro Industries OPC" and the company lines under it as the legal company line (no Barro Industries logo, no second tile).
+     A Barro Industries quote keeps the horizontal Barro Industries mark. */
   function headerHtml(o) {
     o = isObj(o) ? o : {};
-    const no = trim(o.no), tags = list(o.tags), tile = tileSrc(o.co);
-    return '<div class="d7-lh">'
-      + '<div class="d7-lh-id"><img class="d7-lh-logo" src="' + esc(FS.logo) + '" alt="Barro Industries OPC" width="160" height="53" onerror="this.style.display=\'none\'">'
-      + '<div class="d7-lh-co"><div class="d7-lh-name">' + esc(FS.name) + '</div>' + FS.lines.map(l => '<div class="d7-lh-line">' + esc(l) + '</div>').join('') + '</div></div>'
-      + '<div class="d7-lh-doc">' + (tile ? '<img class="d7-lh-tile" src="' + esc(tile) + '" alt="Barro Kitchens" height="40" onerror="this.style.display=\'none\'">' : '')
+    const no = trim(o.no), tags = list(o.tags), bk = tileSrc(o.co);
+    const mark = bk
+      ? '<div class="d7-lh-brand"><img class="d7-lh-bkmark" src="' + esc(bk) + '" alt="Barro Kitchens" width="64" height="64" onerror="this.style.display=\'none\'">'
+        + '<div class="d7-lh-brandtext"><div class="d7-lh-brandname">' + esc(FS.brand) + '</div><div class="d7-lh-legal">' + esc(FS.by) + '</div></div></div>'
+      : '<img class="d7-lh-logo" src="' + esc(FS.logo) + '" alt="Barro Industries OPC" width="160" height="53" onerror="this.style.display=\'none\'">';
+    const nameLine = bk ? '' : '<div class="d7-lh-name">' + esc(FS.name) + '</div>';
+    return '<div class="d7-lh' + (bk ? ' d7-lh--bk' : '') + '">'
+      + '<div class="d7-lh-id">' + mark
+      + '<div class="d7-lh-co">' + nameLine + FS.lines.map(l => '<div class="d7-lh-line">' + esc(l) + '</div>').join('') + '</div></div>'
+      + '<div class="d7-lh-doc">'
       + '<div class="d7-lh-title">' + esc(FS.title) + '</div><div class="d7-lh-no">' + esc(no) + '</div><div class="d7-lh-date">' + esc(dateLabel(o.date)) + '</div>'
       + tags.map(t => '<div class="lh-docmeta">' + esc(t) + '</div>').join('') + '</div>'
       + '</div>';

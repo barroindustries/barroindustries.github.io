@@ -1231,20 +1231,25 @@ describe('Forms Standard: the header, the Prepared by box, the file name', () =>
     assert.doesNotMatch(h, /Rev\.|d7-lh-rev/, 'the number is printed as it is: there is no separate Rev. label');
     assert.doesNotMatch(doc.headerHtml({ no: '<b>x</b>R1', tags: ['<i>t</i>'] }), /<b>x|<i>t/);
   });
-  it('the Barro Kitchens tile (about 40 px high) sits above QUOTATION on a Barro Kitchens quote only; Barro Industries has none', () => {
+  it('brand ruling (owner 2026-11-20): a Barro Kitchens quote leads with the Barro Kitchens mark and name, "By Barro Industries OPC" is the legal company line under it; no Barro Industries logo and no second tile; Barro Industries keeps its own mark', () => {
     const doc = makeEnv().D7.doc;
     const bk = doc.headerHtml({ no: 'BKX-1R1', co: 'BK' });
-    assert.match(bk, /<img class="d7-lh-tile" src="icons\/barro-kitchens\.png" alt="Barro Kitchens" height="40" onerror="this\.style\.display=&#39;none&#39;">|<img class="d7-lh-tile" src="icons\/barro-kitchens\.png" alt="Barro Kitchens" height="40" onerror="this\.style\.display='none'">/); assert.ok(bk.indexOf('d7-lh-tile') > bk.indexOf('d7-lh-doc') && bk.indexOf('d7-lh-tile') < bk.indexOf('d7-lh-title'), 'above the title, inside the right block');
-    assert.doesNotMatch(doc.headerHtml({ no: 'BIX-1R1', co: 'BI' }), /d7-lh-tile/, 'Barro Industries: no tile');
-    const env = makeEnv(); env.run('var currentCo = "BI"'); assert.doesNotMatch(env.D7.doc.headerHtml({ no: 'X' }), /d7-lh-tile/, 'no co handed over: the company of the page');
-    env.run('currentCo = "BK"; var CO = { BK: { logo: "icons/own-tile.png" } }'); assert.match(env.D7.doc.headerHtml({ no: 'X' }), /d7-lh-tile" src="icons\/own-tile\.png"/, 'the page\'s own CO.BK.logo');
+    assert.match(bk, /^<div class="d7-lh d7-lh--bk"><div class="d7-lh-id"><div class="d7-lh-brand"><img class="d7-lh-bkmark" src="icons\/barro-kitchens\.png" alt="Barro Kitchens"/);
+    assert.match(bk, /<div class="d7-lh-brandname">BARRO KITCHENS<\/div><div class="d7-lh-legal">By Barro Industries OPC<\/div>/);
+    assert.ok(bk.indexOf('d7-lh-brand') < bk.indexOf('d7-lh-co') && bk.indexOf('d7-lh-co') < bk.indexOf('d7-lh-doc'), 'brand, then the company lines, then the document block');
+    assert.match(bk, /21 Capricorn St\., Tandang Sora, Quezon City/); assert.match(bk, /hello@barroindustries\.com · barroindustries@gmail\.com/);
+    assert.doesNotMatch(bk, /barro-industries-horizontal|d7-lh-tile|d7-lh-logo|d7-lh-name/, 'no Barro Industries logo, no tile, no separate company name line');
+    const bi = doc.headerHtml({ no: 'BIX-1R1', co: 'BI' });
+    assert.match(bi, /d7-lh-logo" src="icons\/barro-industries-horizontal\.png"/); assert.doesNotMatch(bi, /d7-lh--bk|d7-lh-brand|BARRO KITCHENS/, 'Barro Industries: its own mark only');
+    const env = makeEnv(); env.run('var currentCo = "BI"'); assert.doesNotMatch(env.D7.doc.headerHtml({ no: 'X' }), /d7-lh-brand/, 'no co handed over: the company of the page');
+    env.run('currentCo = "BK"; var CO = { BK: { logo: "icons/own-tile.png" } }'); assert.match(env.D7.doc.headerHtml({ no: 'X' }), /d7-lh-bkmark" src="icons\/own-tile\.png"/, 'the page\'s own CO.BK.logo');
     env.run('CO.BK.logo = "https://evil.example/t.png"'); assert.match(env.D7.doc.headerHtml({ no: 'X' }), /src="icons\/barro-kitchens\.png"/, 'a logo from another site is refused');
   });
   it('header(state): a KC quote gets the Forms Standard header from what the page hands the letterhead engine; anything else gets "" (the old letterhead stays)', () => {
     const env = readyEnv('sales'); field(env, 'quoteNo', 'BKTEST261119-001R1'); field(env, 'quoteDate', '2026-11-19');
     const h = env.D7.h('doc.header', { docNumber: 'BKTEST261119-009R3', extraMeta: ['AGENT COPY — CONFIDENTIAL'], dateLabel: 'ignored', co: 'BK' });
-    assert.match(h, /d7-lh-no">BKTEST261119-009R3</); assert.doesNotMatch(h, /Rev\./); assert.match(h, /November 19, 2026/); assert.match(h, /AGENT COPY — CONFIDENTIAL/); assert.match(h, /d7-lh-tile/);
-    assert.doesNotMatch(env.D7.h('doc.header', { docNumber: 'BIX-1R1', co: 'BI' }), /d7-lh-tile/);
+    assert.match(h, /d7-lh-no">BKTEST261119-009R3</); assert.doesNotMatch(h, /Rev\./); assert.match(h, /November 19, 2026/); assert.match(h, /AGENT COPY — CONFIDENTIAL/); assert.match(h, /d7-lh-brandname">BARRO KITCHENS/);
+    assert.doesNotMatch(env.D7.h('doc.header', { docNumber: 'BIX-1R1', co: 'BI' }), /d7-lh-brand/);
     assert.match(env.D7.h('doc.header', {}), /BKTEST261119-001R1/, 'no number handed over: the box of the page');
     env.run('quoteEngine = "legacy"'); assert.equal(env.D7.h('doc.header', { docNumber: 'X' }), '');
     env.run('quoteEngine = "kc1"; currentCo = "BS"'); assert.equal(env.D7.h('doc.header', { docNumber: 'X' }), '', 'Brilliance Steel keeps its own letterhead');
