@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-XLW3MXgn+Utun3WUId/fH3s2rh3SIeSaQHjzUTibxwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Pandesal Oven Guide: Pugon vs Gas Deck Oven | Barro Industries</title>
 <meta name="description" content="A pandesal oven guide for small Filipino bakeries: pugon or gas deck oven, trays and bakes, heat, hood and gas. By Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/pandesal-oven-pugon-guide/">
@@ -145,7 +145,7 @@
           "name": "What kind of oven do I need to bake pandesal?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Any oven that heats evenly and holds its temperature from bake to bake: a pugon, either wood-fired brick or gas-fired steel, or a gas deck oven. Size it by the trays you must bake before opening."
+            "text": "Any oven that heats evenly and holds its temperature from bake to bake: a pugon, either wood-fired brick or steel, or a gas deck oven. Size it by the trays you must bake before opening."
           }
         },
         {
@@ -153,7 +153,7 @@
           "name": "What is a pugon, and how is it different from a deck oven?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "A pugon is the traditional Filipino bakery oven, classically a brick or clay chamber heated by wood and now often a gas-fired steel box. A deck oven is a stack of baking decks, and each of ours has its own burner, gas valve and thermometer."
+            "text": "A pugon is the traditional Filipino bakery oven, classically a brick or clay chamber heated by wood and now often a steel box with a burner. Our steel pugon has one or two decks, and our gas deck oven has one to three."
           }
         },
         {
@@ -177,7 +177,7 @@
           "name": "Do you make a pandesal oven or a pugon?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Our catalogue lists a gas deck oven for bakeries, made to order with one to three decks and three or six trays per deck. We do not list a pugon. If you want something the options do not cover, add it as a note on your request."
+            "text": "Yes, we make both. Our pugon is a steel deck oven for pandesal and everyday bread, with one deck of four trays or two decks of eight. We also make a gas deck oven with one to three decks."
           }
         }
       ]
@@ -914,6 +914,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
    (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
    contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
@@ -1097,12 +1112,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/">Products</a>
+      <a href="/catalogue/">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/" aria-current="true">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1148,7 +1160,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <div class="art-keys">
         <p class="art-keys-title">In short</p>
         <ul>
-          <li>A pugon is the traditional wood-fired brick oven, now often a gas-fired steel box. A gas deck oven stacks decks, each with its own burner, gas valve and thermometer.</li>
+          <li>A pugon is the traditional wood-fired brick oven, now often a steel box. We make a steel pugon with one or two decks and a gas deck oven with one to three.</li>
           <li>Size the oven backwards from the morning: pieces per tray, trays per bake and bakes before opening, with one tray size throughout.</li>
           <li>Plan the hood, fresh air, LPG line and door widths before you order, and keep the hot side of the oven away from the dough.</li>
         </ul>
@@ -1157,7 +1169,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="job" aria-labelledby="job-h">
         <h2 id="job-h">What a pandesal oven has to do</h2>
-        <p>Pandesal is a morning product. The dough is divided, shaped, rolled in crumbs and proofed before dawn, then baked tray after tray so the first batch is ready at opening. That asks three things of an oven:</p>
+        <p>Pandesal is a morning product. The dough is divided, shaped, rolled in crumbs and proofed before dawn, then baked tray after tray for opening. That asks three things of an oven:</p>
         <ul>
         <li><strong>Even heat.</strong> Every tray should brown the same, front to back.</li>
         <li><strong>Steady recovery.</strong> The third bake should come out like the first, so the oven must hold its temperature while you unload and reload.</li>
@@ -1169,25 +1181,31 @@ body{margin:0;background:#fff;color:#0E1116}
       <section id="pugon" aria-labelledby="pugon-h">
         <h2 id="pugon-h">The pugon, old and new</h2>
         <p>A pugon is the traditional Filipino bakery oven: a brick or clay chamber heated by burning wood, with a flue to carry the smoke away.</p>
-        <p>Many bakeries now use a steel pugon: an insulated steel box heated by a gas burner. This pugon oven keeps the simple shape of the old one, but it lights quickly, needs no firewood and is easier to control.</p>
+        <p>Many bakeries now use a steel pugon, an insulated steel box heated by a burner instead of wood. We make one, a steel deck oven built for pandesal and everyday bread:</p>
+        <ul>
+        <li>An SS304 interior and an insulated body.</li>
+        <li>An H-type burner.</li>
+        <li>A counterweighted door that stays where you put it.</li>
+        <li>One deck (four trays) or two decks (eight trays).</li>
+        </ul>
         <p>Judge any pugon on how evenly it holds heat, how well it is insulated and how easily the baker can read the temperature. A wood fire also brings smoke and ash, so ask the Bureau of Fire Protection (BFP) and the city or municipal health office what applies to solid fuel on your site.</p>
       </section>
 
       <section id="deck" aria-labelledby="deck-h">
         <h2 id="deck-h">The gas deck oven</h2>
-        <p>A deck oven is a stack of baking decks, so one deck can be loaded while another bakes. Our catalogue lists the <a href="/products/gas-deck-ovens/">gas deck oven</a>, not a pugon. It is made to order, with insulated double-wall decks, and each deck has its own gas burner, gas valve and thermometer. Our photographs show gas range ovens, as in the photo at the top.</p>
+        <p>A deck oven is a stack of baking decks, so one deck can be loaded while another bakes. We make the <a href="/products/gas-deck-ovens/">gas deck oven</a> as well as the pugon. It is made to order, with insulated double-wall decks, and each deck has its own gas burner, gas valve and thermometer. The photo at the top shows a gas range oven.</p>
         <div class="pg-table-wrap">
         <table class="pg-table">
         <caption>Our gas deck oven: what you choose</caption>
         <thead><tr><th scope="col">You choose</th><th scope="col">What it means for the bake</th></tr></thead>
         <tbody>
-        <tr><th scope="row">Decks: one, two or three</th><td data-label="What it means for the bake">Each deck is a separate bake. Two decks can bake two batches at once, or two breads on their own settings.</td></tr>
+        <tr><th scope="row">Decks: one, two or three</th><td data-label="What it means for the bake">Each deck is a separate bake: two batches at once, or two breads on their own settings.</td></tr>
         <tr><th scope="row">Trays per deck: three or six</th><td data-label="What it means for the bake">A standard-width body takes three trays and is 700&nbsp;mm wide. A wide body takes six and is 1200&nbsp;mm wide.</td></tr>
         <tr><th scope="row">Stand: none or heavy-duty</th><td data-label="What it means for the bake">None, to set the oven on your own base, or a cross-braced box-tube stand.</td></tr>
         </tbody>
         </table>
         </div>
-        <p>The outer body is food-grade SS304 with seams welded and ground smooth. If you want something the options do not cover, add it as a note on your request and we will confirm it in the quotation.</p>
+        <p>The outer body is food-grade SS304 with seams welded and ground smooth. Add anything the options do not cover as a note on your request.</p>
       </section>
 
       <section id="compare" aria-labelledby="compare-h">
@@ -1195,12 +1213,11 @@ body{margin:0;background:#fff;color:#0E1116}
         <div class="pg-table-wrap">
         <table class="pg-table">
         <caption>Brick pugon, steel pugon and gas deck oven compared</caption>
-        <thead><tr><th scope="col">Point</th><th scope="col">Brick pugon (wood)</th><th scope="col">Steel pugon (gas)</th><th scope="col">Gas deck oven</th></tr></thead>
+        <thead><tr><th scope="col">Point</th><th scope="col">Brick pugon (wood)</th><th scope="col">Steel pugon</th><th scope="col">Gas deck oven</th></tr></thead>
         <tbody>
-        <tr><th scope="row">Heat</th><td data-label="Brick pugon (wood)">Wood burned in the chamber.</td><td data-label="Steel pugon (gas)">A gas burner.</td><td data-label="Gas deck oven">A gas burner for each deck.</td></tr>
-        <tr><th scope="row">Control</th><td data-label="Brick pugon (wood)">The fire and the flue.</td><td data-label="Steel pugon (gas)">A burner valve and a thermometer.</td><td data-label="Gas deck oven">A gas valve and a thermometer on each deck.</td></tr>
-        <tr><th scope="row">Smoke and ash</th><td data-label="Brick pugon (wood)">Smoke, ash and firewood to handle.</td><td data-label="Steel pugon (gas)">Heat and combustion gases.</td><td data-label="Gas deck oven">Heat and combustion gases.</td></tr>
-        <tr><th scope="row">Suits</th><td data-label="Brick pugon (wood)">Bakeries that keep the traditional method.</td><td data-label="Steel pugon (gas)">Pandesal and everyday trays of bread.</td><td data-label="Gas deck oven">Bread and pastry from one oven, with a setting for each deck.</td></tr>
+        <tr><th scope="row">Heat and control</th><td data-label="Brick pugon (wood)">Wood burned in the chamber, controlled by the fire and the flue.</td><td data-label="Steel pugon">An H-type burner.</td><td data-label="Gas deck oven">A gas burner, gas valve and thermometer on each deck.</td></tr>
+        <tr><th scope="row">Smoke and ash</th><td data-label="Brick pugon (wood)">Smoke, ash and firewood to handle.</td><td data-label="Steel pugon">Heat and combustion gases.</td><td data-label="Gas deck oven">Heat and combustion gases.</td></tr>
+        <tr><th scope="row">Suits</th><td data-label="Brick pugon (wood)">Bakeries that keep the traditional method.</td><td data-label="Steel pugon">Pandesal and everyday bread.</td><td data-label="Gas deck oven">Bread and pastry from one oven, with a setting for each deck.</td></tr>
         </tbody>
         </table>
         </div>
@@ -1215,8 +1232,8 @@ body{margin:0;background:#fff;color:#0E1116}
         <li>Decide how many bakes the morning allows, leaving time to unload and reload.</li>
         <li>Divide the trays by the bakes. That is what the oven must hold at once: decks times trays per deck.</li>
         </ul>
-        <p>For example, with made-up numbers: 30 trays in three bakes means 10 trays at once, and two wide decks of six trays hold 12. Our options run from three trays on one standard-width deck to eighteen on three wide decks.</p>
-        <p>Tell us your tray size, and use one size for the oven, proofing cabinet, <a href="/products/stainless-steel-racks/">racks</a> and <a href="/products/stainless-steel-work-tables/">work tables</a>, or trays will not fit.</p>
+        <p>For example, with made-up numbers: 30 trays in three bakes means 10 trays at once, and two wide decks of six trays hold 12. A two-deck pugon holds eight, so that morning would take four bakes. Our gas deck oven runs from three trays on one standard-width deck to eighteen on three wide decks.</p>
+        <p>Tell us your tray size, and use that one size for the oven, proofing cabinet, <a href="/products/stainless-steel-racks/">racks</a> and <a href="/products/stainless-steel-work-tables/">work tables</a>, so every tray fits.</p>
         <figure class="art-fig">
         <img src="/site/img/projects/ispsc/02.webp" srcset="/site/img/projects/ispsc/02-thumb.webp 600w, /site/img/projects/ispsc/02.webp 1600w" sizes="(min-width:1024px) 704px, 100vw" width="1600" height="1200" alt="ISPSC 2026 — rows of stainless-steel work tables in the school room" loading="lazy" decoding="async">
         <figcaption>Rows of stainless-steel work tables at ISPSC (March 2026).</figcaption>
@@ -1225,8 +1242,8 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="heat" aria-labelledby="heat-h">
         <h2 id="heat-h">Heat, hood and gas</h2>
-        <p>A gas oven for a bakery gives off heat and combustion gases, and the baker stands at its door in the early hours. Plan a hood and exhaust above the door and a fresh-air supply: our <a href="/guides/commercial-kitchen-exhaust-hood-guide/">exhaust hood guide</a> and <a href="/guides/kitchen-fresh-air-system-guide/">fresh-air guide</a> explain how. Keep the hot side away from the dough table and the dry store, with clear floor in front of the door for loading.</p>
-        <p>The oven burns LPG, so list it with every other gas appliance and size the pipe for all of them running at once: see our <a href="/guides/lpg-gas-line-for-restaurants/">LPG guide</a>.</p>
+        <p>A gas oven for a bakery gives off heat and combustion gases, and the baker stands at its door in the early hours. Plan a hood and exhaust above the door and a fresh-air supply: our <a href="/guides/commercial-kitchen-exhaust-hood-guide/">exhaust hood guide</a> and <a href="/guides/kitchen-fresh-air-system-guide/">fresh-air guide</a> explain how. Keep the hot side away from the dough table and the dry store, and leave clear floor in front of the door.</p>
+        <p>A gas oven burns LPG, so list it with every other gas appliance and size the pipe for all of them running at once: see our <a href="/guides/lpg-gas-line-for-restaurants/">LPG guide</a>.</p>
         <div class="art-note"><p>Ask the BFP and the city or municipal health office what applies to your bakery before the drawings are fixed.</p></div>
       </section>
 
@@ -1235,7 +1252,7 @@ body{margin:0;background:#fff;color:#0E1116}
         <ul class="art-check">
         <li>Pieces per tray, trays per bake and bakes before opening.</li>
         <li>Your tray size, written on your request.</li>
-        <li>Decks, trays per deck and the stand.</li>
+        <li>Pugon or deck oven, decks, trays per deck and the stand.</li>
         <li>Door and corridor widths at the narrowest point. A wide body is 1200&nbsp;mm wide.</li>
         <li>The hood route, the fresh-air supply and the LPG line.</li>
         <li>A thermometer you can read from the front.</li>
@@ -1244,8 +1261,8 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="help" aria-labelledby="help-h">
         <h2 id="help-h">How Barro Industries can help</h2>
-        <p>We design, fabricate, deliver and install stainless-steel kitchens, with 23 years in business. For a bakery oven in the Philippines we make the gas deck oven, work tables, racks and shelving to order, and plan the hood, exhaust and LPG line with it: see our <a href="/services/commercial-kitchen-fit-out/">commercial kitchen fit-outs</a>.</p>
-        <p>Start with the <a href="/sales/clientinformationrequest/">project brief</a>: your trays, menu and room measurements. Or configure a deck oven in the <a href="/catalogue/?configure=deck_oven#cat-cooking">catalogue</a> and request a quote online. An estimated range appears, then our team sends the final quotation. No account is needed. We give a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>
+        <p>We design, fabricate, deliver and install stainless-steel kitchens, with 23 years in business. For a bakery we make the steel pugon, the gas deck oven, work tables, racks and shelving to order, and plan the hood, exhaust and LPG line with them: see our <a href="/services/commercial-kitchen-fit-out/">commercial kitchen fit-outs</a>.</p>
+        <p>Start with the <a href="/sales/clientinformationrequest/">project brief</a>: your trays, menu and room measurements. For a pugon, <a href="/catalogue/?quote=1">request a quote</a> and tell us the decks you want. Or configure a deck oven in the <a href="/catalogue/?configure=deck_oven#cat-cooking">catalogue</a> and request a quote online. An estimated range appears, then our team sends the final quotation. No account is needed. We give a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>
       </section>
 
 <section id="faq" aria-labelledby="faq-h">
@@ -1253,11 +1270,11 @@ body{margin:0;background:#fff;color:#0E1116}
     <div class="faq-list">
       <div class="faq-item">
         <h3>What kind of oven do I need to bake pandesal?</h3>
-        <p>Any oven that heats evenly and holds its temperature from bake to bake: a pugon, either wood-fired brick or gas-fired steel, or a gas deck oven. Size it by the trays you must bake before opening.</p>
+        <p>Any oven that heats evenly and holds its temperature from bake to bake: a pugon, either wood-fired brick or steel, or a gas deck oven. Size it by the trays you must bake before opening.</p>
       </div>
       <div class="faq-item">
         <h3>What is a pugon, and how is it different from a deck oven?</h3>
-        <p>A pugon is the traditional Filipino bakery oven, classically a brick or clay chamber heated by wood and now often a gas-fired steel box. A deck oven is a stack of baking decks, and each of ours has its own burner, gas valve and thermometer.</p>
+        <p>A pugon is the traditional Filipino bakery oven, classically a brick or clay chamber heated by wood and now often a steel box with a burner. Our steel pugon has one or two decks, and our gas deck oven has one to three.</p>
       </div>
       <div class="faq-item">
         <h3>How do I work out how many trays my bakery needs?</h3>
@@ -1269,7 +1286,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
       <div class="faq-item">
         <h3>Do you make a pandesal oven or a pugon?</h3>
-        <p>Our catalogue lists a gas deck oven for bakeries, made to order with one to three decks and three or six trays per deck. We do not list a pugon. If you want something the options do not cover, add it as a note on your request.</p>
+        <p>Yes, we make both. Our pugon is a steel deck oven for pandesal and everyday bread, with one deck of four trays or two decks of eight. We also make a gas deck oven with one to three decks.</p>
       </div>
     </div>
   </section>
@@ -1281,7 +1298,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="related" class="site-sec site-sec-paper" aria-labelledby="related-h">
   <div class="site-wrap">
     <header class="sec-head">
-      <p class="eyebrow kg-kicker"><a href="/guides/#equipment">Equipment guides</a></p>
+      <p class="eyebrow">Keep reading</p>
       <h2 id="related-h">Related reading</h2>
     </header>
     <div class="pg-cards pg-cards-3 pg-cards-text">
@@ -1339,7 +1356,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

@@ -1,102 +1,168 @@
 'use strict';
 /**
- * catalogue-cards.js — the WORDS on the public catalogue cards (owner rulings 2026-11-19): every card is plain text — its name, ONE line of
- * description and three to five short feature bullets. No complete specification, no notes block, no image. This file holds those words and
- * nothing else: scripts/build-catalogue.js reads it (CARD_COPY, PROJECT_CARDS) and the build REFUSES a card that has no entry here, so a new
- * product forces a deliberate wording.
+ * catalogue-cards.js — the WORDS on the public catalogue cards. Owner rulings 2026-11-19, as set out in "Barro Kitchens – Website Notes (Nov 19, 2026)" (they supersede the
+ * earlier "name, one line and feature bullets only" ruling): a card is plain text — its name, an optional product CODE on its own small line, ONE sentence on what the product
+ * is for (`desc`), an optional "Standard size" line (`size`), three or four short key specs (`specs`: material, size and the main feature), an optional "Options" line
+ * (`options`) — then the price line and the button. No panel gauges, no part lists, no costs, no hype words ("premium", "world-class", "high quality"). Short plain
+ * sentences, millimetres, SS304. A number never carries a thousands comma (1200, not 1,200: the money scan would refuse it). This file holds those words and nothing else:
+ * scripts/build-catalogue.js reads it (CARD_COPY, PROJECT_CARDS) and the build REFUSES a card that has no entry here, so a new product forces a deliberate wording.
  *
- * What may go in a line: only what the owner already says publicly or what the private master/family definition states about the product
- * (an option the configurator really offers, a capacity the master carries). No amount of money, and none of the words the money guard knows
- * (price, pricing, cost, markup): the build scans every string here with the same guards as the rest of the page. The starting amounts live in
- * scripts/public-from-prices.json, never here.
+ * What may go in a line: only what the owner already says publicly or what the private master/family definition states about the product. No amount of money, and none of
+ * the words the money guard knows (price, pricing, cost, markup): the build scans every string here (code, size and options included) with the same guards as the rest of
+ * the page. The starting amounts live in scripts/public-from-prices.json, never here.
  *
- * Keys: a configurable family id (scripts/public-families.json), or a fixed product id (the master's, e.g. "CE-030").
+ * Keys of an entry: desc (required), specs (3 to 4, each at most 70 characters), code (optional: only where the price list has one), size (optional), options (optional),
+ * featured (a configurable family only: adds the "Featured" tag beside "Configurable"). Keys of CARD_COPY: a configurable family id (scripts/public-families.json), or a
+ * fixed product id (the master's, e.g. "CE-030"). A PROJECT card carries the same keys inline, plus id, group, name, tag, an optional `first` (placed before the
+ * configurable cards of its group), `learn`, `image`.
  */
 
 // A short line is a clause, not a sentence: no trailing full stop.
 const CARD_COPY = Object.freeze({
   // ── configurable families ────────────────────────────────────────────────────────────────────────────────────────────────────
   prep_table: {
-    desc: 'Stainless steel work table made to your size.',
-    features: ['One, two or three layers', 'Up to two upper shelves', 'Made to your length, width and height', 'Food-grade SS304, SS316 on request'],
+    code: 'PS-PT-900', desc: 'Stainless steel work table for food preparation.',
+    size: '900 × 600 × 850 mm',
+    specs: ['SS304 stainless steel', 'Top and undershelf', 'Square-tube legs with adjustable bullet feet'],
+    options: 'Lengths up to 1800 mm, up to two upper shelves, backsplash, SS316 on request',
   },
   sink: {
-    desc: 'Stainless steel sink table with one to four sinks.',
-    features: ['One to four sinks, placed left, centre or right', 'Optional undershelf and upper shelf', 'Gooseneck or pre-rinse spray faucet', 'Made to your length, width and height'],
+    code: 'WS-SK1-600', desc: 'Sink table for washing, sized for your workflow and plumbing.',
+    size: '600 × 600 × 850 mm',
+    specs: ['SS304 stainless steel', '150 mm backsplash', 'Gooseneck faucet and strainer included'],
+    options: 'One to four bowls, drainboard, undershelf and upper shelf, pre-rinse spray faucet',
   },
   dish_table: {
-    desc: 'Stainless steel dish table for the dishwasher.',
-    features: ['Clean or soiled side', 'Dishwasher on the left or the right', 'Optional pre-rinse sink with spray faucet', 'Optional undershelf'],
-  },
-  stove: {
-    desc: 'Gas range built to your layout.',
-    features: ['Choose each burner position one by one', 'Wok, high-pressure, low-pressure or soup burners', 'Add a griller, griddle, oven or fryer', 'Made to your size'],
-  },
-  wok_range: {
-    desc: 'Gas wok range with high-pressure burners.',
-    features: ['One to three wok holes', 'Optional rear stock burner', 'Optional swan-neck water faucet', 'Made to your size'],
-  },
-  cooking_line: {
-    desc: 'Griddle, lava-rock griller or fryer on its own stand.',
-    features: ['Griddle, lava-rock griller, fryer or griller-and-griddle', 'One to three burners', 'One to three fry baskets on a fryer', 'Open stand or stand with bottom shelf'],
-  },
-  deck_oven: {
-    desc: 'Gas-fired deck oven for bakeries.',
-    features: ['One to three decks', 'Three or six trays per deck', 'Optional heavy-duty stand'],
+    desc: 'Dish table that feeds your dishwasher.',
+    specs: ['SS304 stainless steel', 'Clean or soiled side', 'Dishwasher on the left or the right'],
+    options: 'Pre-rinse sink with spray faucet, undershelf, your length',
   },
   hood: {
-    desc: 'Stainless steel kitchen exhaust hood.',
-    features: ['Wall, island or slim low-profile canopy', 'Baffle grease filters', 'Optional lamp and switch', 'Made to your length and depth'],
+    code: 'VN-HD-1200', featured: true, desc: 'Rear-pitch range hood that pulls smoke and grease back, away from the cook.',
+    size: '1200 × 900 × 500 mm',
+    specs: ['SS304 stainless steel', 'Baffle filters', 'Lamp and oil cup'],
+    options: 'Lengths 1.2 to 3.0 m, wall or island canopy',
+  },
+  stove: {
+    code: 'CK-LP-2', desc: 'Chef Mode gas stove; every module shares one depth and height, so the line stays even.',
+    size: '750 mm deep, 850 mm high',
+    specs: ['SS304 top with 150 mm backsplash', 'Pilot and ball valves', 'Low- or high-pressure burners'],
+    options: '2, 4 or 6 burners, oven below',
+  },
+  wok_range: {
+    code: 'CK-WK-1', desc: 'Chef Mode wok stove for high-heat wok cooking.',
+    size: '600 × 750 × 850 mm',
+    specs: ['SS304 stainless steel', 'Ransome burner with pilot', 'Faucet and drain trough'],
+    options: '1 to 3 holes, rear stock burner',
+  },
+  cooking_line: {
+    code: 'CK-GD-600', desc: 'Chef Mode griddle, fryer or lava-rock griller on its own stand.',
+    size: '600 × 750 × 850 mm',
+    specs: ['12 mm griddle plate', 'Grease trough and drawer', 'Same depth and height as the cooking line'],
+    options: 'Griddle 600 or 900 mm, fryer with 1 or 2 vats, lava-rock griller',
+  },
+  deck_oven: {
+    desc: 'Gas deck oven for bakeries.',
+    size: 'Trays of 40 × 60 cm',
+    specs: ['Gas-fired', 'One to three decks', 'Three or six trays per deck'],
+    options: 'Heavy-duty stand',
   },
   cabinet: {
-    desc: 'Stainless steel storage cabinet, floor-standing or wall-hung.',
-    features: ['Floor-standing or wall-hung', 'Swing or sliding doors', 'One to three shelves inside', 'Made to your size'],
+    code: 'PS-CBW-900', desc: 'Stainless steel storage cabinet, floor-standing or wall-hung.',
+    size: '900 × 350 × 600 mm',
+    specs: ['SS304 stainless steel', 'Hinged doors', 'Shelf inside'],
+    options: 'Floor or wall, 900 to 1500 mm, swing or sliding doors',
   },
   wall_shelf: {
-    desc: 'Stainless steel shelving fixed to the wall.',
-    features: ['One to three tiers', 'Solid or slotted surface', 'Made to your length and depth'],
+    code: 'PS-RKW-1200', desc: 'Wall shelving for pans, plates and dry goods.',
+    size: '1200 × 300 mm',
+    specs: ['SS304 stainless steel', 'Two layers', 'Stainless brackets'],
+    options: 'One to three tiers, solid or slotted',
   },
   rack: {
-    desc: 'Stainless steel dish and storage rack.',
-    features: ['Three to six tiers', 'With or without wheels', 'Made to your size'],
+    code: 'PS-RK-900', desc: 'Storage rack for dry goods and dishes.',
+    size: '900 × 500 × 1800 mm',
+    specs: ['SS304 stainless steel', 'Four solid shelves', 'Square posts with adjustable feet'],
+    options: 'Lengths up to 1500 mm, slotted shelves, wheels',
   },
 
-  // ── fixed products (ready-made items; "Add to quote") ──────────────────────────────────────────────────────────────────────
-  'CE-030': { desc: 'Salamander broiler for finishing dishes.', features: ['Broiler heat from above', 'For browning, finishing and melting toppings', 'Sits at the end of your cooking line'] },
-  'CE-011': { desc: 'Gas rice steamer for volume cooking.', features: ['Gas-fired', 'Six-tray capacity', 'Stainless steel body'] },
-  'CE-024': { desc: 'Display warmer that keeps cooked food hot.', features: ['Three shelves', 'Stainless steel', 'Horizontal layout available'] },
-  'CE-031': { desc: 'Electric heater for the spoon and fork holder.', features: ['Electric', 'Four-hole holder and heater', 'Stainless steel'] },
-  'MS-015': { desc: 'Industrial meat grinder in stainless steel.', features: ['Stainless steel worm and blade', 'Handles 220 kg per hour', '900 W motor, 110 to 240 V'] },
-  'MS-016': { desc: 'Industrial meat slicer in stainless steel.', features: ['Stainless steel', 'Handles 150 kg per hour', '3 mm slicing thickness', '850 W motor'] },
-  'BA-006': { desc: 'Insulated dough proofing cabinet for bakeries.', features: ['Sixteen trays', 'Insulated SS304, double-wall body', 'Magnetic gasket door', 'Thermostat and humidity tray', 'Electric heating element'] },
-  'BA-011': { desc: 'Twin-door proofer-retarder cabinet.', features: ['Retard, then proof, from digital controls', 'Insulated SS304, double-wall body', 'Twin doors, two sixteen-tray sections'] },
-  'RF-001': { desc: 'Water-jacket pasteuriser in food-grade stainless steel.', features: ['Food-grade SS304', 'Double-layer water jacket', '10 litre capacity', 'Heats from 60 to 95 °C'] },
-  'RF-002': { desc: 'Single-door display chiller.', features: ['Full glass display', 'Double-layer glass door', '420 litre capacity', 'Fan-assisted cooling'] },
-  'RF-003': { desc: 'Undercounter freezer in a stainless steel body.', features: ['Holds −12 to −18 °C', 'Stainless steel body', 'Digital LED controller', 'Fan cooling, copper condenser and evaporator'] },
-  'RF-004': { desc: 'Undercounter chiller, specified for your counter.', features: ['Fits under the counter', 'Chilled storage', 'Specification confirmed with you per project'] },
-  'RF-005': { desc: 'Cake chiller for bakeries and cafés.', features: ['Keeps cakes chilled', 'For bakeries and cafés', 'Specification confirmed with you per project'] },
-  'RF-006': { desc: 'Underbar chiller for drinks.', features: ['Fits under the bar counter', 'Chilled storage for drinks', 'Specification confirmed with you per project'] },
+  // ── fixed products (ready-made items; "Add to quote"): a code only where the price list has one, no size and no options line unless the notes give one ──
+  'CE-030': { code: 'CK-SL', desc: 'Salamander broiler for finishing dishes.', size: '660 × 400 × 400 mm', specs: ['Infrared burner', 'Auto igniter', 'Catch tray and wall shelf'] },
+  'CE-011': { code: 'CK-RS-6', desc: 'Gas rice steamer for volume cooking.', specs: ['Gas-fired', 'Six trays', 'SS304 stainless steel'], options: '12-tray model' },
+  'CE-024': { desc: 'Display warmer that keeps cooked food hot.', specs: ['Three shelves', 'Stainless steel', 'Horizontal layout available'] },
+  'CE-031': { desc: 'Electric heater for the spoon and fork holder.', specs: ['Electric', 'Four-hole holder and heater', 'Stainless steel'] },
+  'MS-015': { desc: 'Industrial meat grinder in stainless steel.', specs: ['Stainless steel worm and blade', 'Handles 220 kg per hour', '900 W motor, 110 to 240 V'] },
+  'MS-016': { desc: 'Industrial meat slicer in stainless steel.', specs: ['Stainless steel', 'Handles 150 kg per hour', '3 mm slicing thickness', '850 W motor'] },
+  'BA-006': { desc: 'Insulated dough proofing cabinet for bakeries.', specs: ['Sixteen trays', 'Insulated SS304, double-wall body', 'Magnetic gasket door', 'Thermostat and humidity tray'] },
+  'BA-011': { desc: 'Twin-door proofer-retarder cabinet.', specs: ['Retard, then proof, from digital controls', 'Insulated SS304, double-wall body', 'Twin doors, two sixteen-tray sections'] },
+  'RF-001': { desc: 'Water-jacket pasteuriser in food-grade stainless steel.', specs: ['Food-grade SS304', 'Double-layer water jacket', '10 litre capacity', 'Heats from 60 to 95 °C'] },
+  'RF-002': { desc: 'Single-door display chiller.', specs: ['Full glass display', 'Double-layer glass door', '420 litre capacity', 'Fan-assisted cooling'] },
+  'RF-003': { desc: 'Undercounter freezer in a stainless steel body.', specs: ['Holds −12 to −18 °C', 'Stainless steel body', 'Digital LED controller', 'Fan cooling, copper condenser and evaporator'] },
+  'RF-004': { desc: 'Undercounter chiller, specified for your counter.', specs: ['Fits under the counter', 'Chilled storage', 'Specification confirmed with you per project'] },
+  'RF-005': { desc: 'Cake chiller for bakeries and cafés.', specs: ['Keeps cakes chilled', 'For bakeries and cafés', 'Specification confirmed with you per project'] },
+  'RF-006': { desc: 'Underbar chiller for drinks.', specs: ['Fits under the bar counter', 'Chilled storage for drinks', 'Specification confirmed with you per project'] },
 });
 
 // Cards that have no ready-made SKU or configurator in the quote flow (yet): the page shows them like any card, but their button is a plain
 // link to the "Request a quote" section instead of "Add to quote" / "Configure & add", so nothing the server does not know can be added to a
-// quote. `group` is the public category id the card sits in (scripts/build-catalogue.js PUBLIC_CATEGORIES); `learn` is an optional link.
+// quote. `group` is the public category id the card sits in (scripts/build-catalogue.js PUBLIC_CATEGORIES); `learn` is an optional link; `first` puts the card
+// before the configurable cards of its group (the three featured hero products). Their starting amounts are in scripts/public-from-prices.json.
 const PROJECT_CARDS = Object.freeze([
   {
-    id: 'station', group: 'station', name: 'Multi-purpose kitchen station', tag: 'Made to order',
-    desc: 'A stainless steel station built around your layout and the work it has to do.',
-    features: ['Stainless steel construction', 'Made to your size and layout', 'Configuration agreed with you per project'],
+    id: 'station', group: 'station', image: 'site/img/products/render-15-commercial-station-183-cabinet-trash.webp', name: 'Multi-purpose kitchen station', tag: 'Made to order',
+    desc: 'Multi-purpose kitchen station built around your layout.',
+    size: 'Built to your layout',
+    specs: ['SS304 stainless steel', 'Cabinets, drawers, sink and open bays in one run', 'Worktop with backsplash'],
+    options: 'Layout, length and modules agreed with you',
   },
   {
-    id: 'exhaust', group: 'exhaust', photo: 'EX-004', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
-    desc: 'Ducting, blowers and fresh air planned together with your range hood.',
-    features: ['Exhaust ducting and fittings', 'Inline blowers', 'Fresh-air supply for the kitchen', 'Designed around your hood and your layout'],
+    id: 'exhaust', group: 'exhaust', image: 'site/img/products/render-74-exhaust-and-fresh-air-cutaway.webp', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
+    desc: 'Exhaust and fresh-air system, designed and installed by our team.',
+    size: 'Designed per kitchen',
+    specs: ['Exhaust ducting and blowers', 'Fresh-air supply and ceiling diffusers', 'Designed around your hood'],
+    options: 'Black-iron grease duct, insulated fresh-air duct',
     learn: { path: '/services/exhaust-and-fresh-air-systems/', about: 'exhaust and fresh-air systems' },
   },
+  // the three featured hero products come FIRST in the Chef Mode group
   {
-    id: 'trolley', group: 'storage', photo: 'PW-034', name: 'Trolleys', tag: 'Made to order',
-    desc: 'Stainless steel trolleys for trays, pans and dishes.',
-    features: ['Stainless steel construction', 'Caster wheels', 'Tray-slide trolleys and bakery pan-rack trolleys', 'Size and tray capacity agreed with you'],
+    id: 'pugon', group: 'cooking', first: true, code: 'BK-PG-1', name: 'Pugon pandesal oven', tag: 'Featured',
+    desc: 'Steel deck oven built for pandesal and everyday bread.',
+    size: '4 trays of 40 × 60 cm per deck',
+    specs: ['SS304 interior, insulated body', 'H-type burner with needle valve and gauge', 'Counterweighted door that stays where you put it'],
+    options: '1 deck (4 trays) or 2 decks (8 trays)',
+  },
+  {
+    id: 'teppanyaki', group: 'cooking', first: true, code: 'CK-TP-900', name: 'Teppanyaki grill', tag: 'Featured',
+    desc: 'Flat-plate grill with even heat across the whole surface.',
+    size: '900 × 750 × 850 mm',
+    specs: ['12 mm cooking plate', 'Grease trough and drawer', '150 mm backsplash'],
+    options: '900 or 1200 mm wide',
+  },
+  {
+    id: 'inasal', group: 'cooking', first: true, code: 'GR-CH-900', name: 'Inasal charcoal grill', tag: 'Featured',
+    desc: 'Charcoal grill built for chicken inasal.',
+    size: '900 mm long',
+    specs: ['5/16 in stainless grill bars', 'Pull-out charcoal bin', 'Stainless frame with adjustable feet'],
+    options: '900, 1200 or 1500 mm long',
+  },
+  {
+    id: 'noodle_boiler', group: 'cooking', code: 'CK-NB-6', name: 'Noodle boiler', tag: 'Chef Mode',
+    desc: 'Chef Mode noodle boiler for volume noodle service.',
+    specs: ['Six cooking baskets', 'Gas-fired', 'SS304 stainless steel'],
+    options: 'With or without baskets',
+  },
+  {
+    id: 'combi_stove', group: 'cooking', code: 'CK-CB-1800', name: 'Combi stove', tag: 'Chef Mode',
+    desc: 'Chef Mode combi stove: two burners, a griddle and a fryer on one top.',
+    size: '1800 mm wide',
+    specs: ['Oven under the burners', 'One top, one gas line', 'SS304 stainless steel'],
+  },
+  {
+    id: 'trolley', group: 'storage', code: 'PS-TR-UT', name: 'Trolleys', tag: 'Made to order',
+    desc: 'Stainless steel trolley for trays, pans and dishes.',
+    size: '900 × 500 × 900 mm',
+    specs: ['SS304 stainless steel', 'Two shelves', '4-inch castors'],
+    options: 'Food-service, dish-collection or tray-rack trolley',
   },
 ]);
 

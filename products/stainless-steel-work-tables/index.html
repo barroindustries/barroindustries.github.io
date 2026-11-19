@@ -9,10 +9,10 @@
      the <noscript> link is the same URL). No app script, no inline script (apart from the JSON-LD data block below) and no style attribute. The scripts
      are the shared /js/site.js (phone menu, project photo lightbox) and /js/late-fonts.js. Not in the service worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open
      Graph, JSON-LD (the FAQ block mirrors the visible questions word for word) and visible breadcrumb in step:
-     tests/seo-products.test.mjs pins all of them. The social photo is a crop of a project photo (site/img/seo/). No amount appears on this
-     page, ever (owner ruling R1): the one sentence about money is the owner's own, "Prices depend on size and options.", and it sends the
-     visitor to the online estimate. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-yswRdaZs1h0s7XwlCeF2hDP17mJ4GCHP6qyPXkMxmcM=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+     tests/seo-products.test.mjs pins all of them. The social photo is a crop of a project photo (site/img/seo/). The only amount on this
+     page is the starting-amount line ("From", an amount, "+ VAT"; or the words that say it is quoted per project), the same as this product's card in /catalogue/ (owner ruling 2026-11-19;
+     the catalogue's from-amount file is the source, scripts/check-catalogue-cards.js pins the match); no other amount, ever (owner ruling R1). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-ksa7muZ81iU12SZw3prT/zGR1kJm6qjuH8vntevJLbw=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Stainless Steel Table Philippines — Built to Order | Barro Industries</title>
 <meta name="description" content="Stainless steel work and prep tables from Barro Kitchens (Barro Industries): one to three layers, your size, SS304 or SS316. Get an estimated range online.">
 <link rel="canonical" href="https://barroindustries.com/products/stainless-steel-work-tables/">
@@ -137,7 +137,7 @@
           "@type": "ListItem",
           "position": 2,
           "name": "Products",
-          "item": "https://barroindustries.com/products/"
+          "item": "https://barroindustries.com/catalogue/"
         },
         {
           "@type": "ListItem",
@@ -269,12 +269,16 @@
       ]
     },
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/ispsc/04.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
-    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/stainless-steel-island-type-worktable-with-mid-and-bottom-shelf.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
-    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/stainless-steel-wall-type-worktable-with-mid-and-bottom-shelf-with-backsplash.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
+    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/render-03-straight-table-152-two-shelves.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
+    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/render-02-straight-table-122-backsplash-shelf.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/ispsc/03.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/ispsc/02.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
     {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/dmmmsu/05.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
-    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/dmmmsu/02.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"}
+    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/projects/dmmmsu/02.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
+    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/render-01-straight-table-122-bare.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
+    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/render-05-straight-table-122-upper-shelf-4-posts.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
+    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/render-06-straight-table-183-two-upper-shelves-4-posts.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"},
+    {"@type":"ImageObject","contentUrl":"https://barroindustries.com/site/img/products/render-04-straight-table-183-slotted-shelf.webp","creator":{"@type":"Organization","name":"Barro Industries OPC"},"creditText":"Barro Industries OPC","copyrightNotice":"© 2026 Barro Industries OPC","copyrightHolder":{"@id":"https://barroindustries.com/#business"},"license":"https://barroindustries.com/#copyright","acquireLicensePage":"https://barroindustries.com/#copyright"}
   ]
 }
 </script>
@@ -1007,6 +1011,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 </style>
 <!-- PAGE-CSS:END -->
 </head>
@@ -1019,12 +1038,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/" aria-current="true">Products</a>
+      <a href="/catalogue/" aria-current="true">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1036,7 +1052,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section class="pg-hero">
   <div class="site-wrap pg-hero-in">
     <div class="pg-hero-copy">
-      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/products/">Products</a></li><li><span aria-current="page">Stainless steel work tables</span></li></ol></nav>
+      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/catalogue/">Products</a></li><li><span aria-current="page">Stainless steel work tables</span></li></ol></nav>
       <p class="eyebrow">Products</p>
       <h1>Stainless steel tables: work tables and prep tables</h1>
       <p class="site-lead">Stainless steel tables for restaurant, hotel, hospital, school and commissary kitchens, bakeries and laboratories in the Philippines. Choose one to three layers and up to two upper shelves, then set your own length, width and height.</p>
@@ -1070,8 +1086,8 @@ body{margin:0;background:#fff;color:#0E1116}
     </header>
     <div class="pg-split">
       <div class="pg-figs pg-figs-one">
-        <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/stainless-steel-island-type-worktable-with-mid-and-bottom-shelf-thumb.webp" srcset="/site/img/products/stainless-steel-island-type-worktable-with-mid-and-bottom-shelf-thumb.webp 400w, /site/img/products/stainless-steel-island-type-worktable-with-mid-and-bottom-shelf.webp 800w" sizes="(min-width:1024px) 300px, (min-width:600px) 30vw, 90vw" width="400" height="341" alt="Stainless steel work table with a middle shelf and a bottom shelf" loading="lazy" decoding="async"></div><figcaption>Work table with two undershelves<span>Representative image</span></figcaption></figure>
-        <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/stainless-steel-wall-type-worktable-with-mid-and-bottom-shelf-with-backsplash-thumb.webp" srcset="/site/img/products/stainless-steel-wall-type-worktable-with-mid-and-bottom-shelf-with-backsplash-thumb.webp 400w, /site/img/products/stainless-steel-wall-type-worktable-with-mid-and-bottom-shelf-with-backsplash.webp 800w" sizes="(min-width:1024px) 300px, (min-width:600px) 30vw, 90vw" width="400" height="360" alt="Stainless steel work table with a middle shelf, a bottom shelf and a backsplash" loading="lazy" decoding="async"></div><figcaption>Wall-type work table with a backsplash<span>Representative image</span></figcaption></figure>
+        <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-03-straight-table-152-two-shelves-thumb.webp" srcset="/site/img/products/render-03-straight-table-152-two-shelves-thumb.webp 600w, /site/img/products/render-03-straight-table-152-two-shelves.webp 1200w" sizes="(min-width:1024px) 300px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel work table with two shelves" loading="lazy" decoding="async"></div><figcaption>Work table with two shelves<span>Representative image</span></figcaption></figure>
+        <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-02-straight-table-122-backsplash-shelf-thumb.webp" srcset="/site/img/products/render-02-straight-table-122-backsplash-shelf-thumb.webp 600w, /site/img/products/render-02-straight-table-122-backsplash-shelf.webp 1200w" sizes="(min-width:1024px) 300px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel work table with a backsplash and a shelf" loading="lazy" decoding="async"></div><figcaption>Work table with a backsplash<span>Representative image</span></figcaption></figure>
       </div>
       <div>
     <div class="pg-example">
@@ -1100,6 +1116,7 @@ body{margin:0;background:#fff;color:#0E1116}
     </header>
     <div class="pg-example">
       <h3>Prices depend on size and options.</h3>
+      <p class="cat-from">From <data value="23500">₱23,500</data> <span class="cat-vat">+ VAT</span></p>
       <p>Get an estimated range online in minutes — no account needed. The number of layers, the upper shelves, the grade, the finish and your length, width and height all matter. Choose them in the online configurator, add the other items you need and the quote request shows an estimated range as your list grows. Our team then reviews it and sends the final quotation.</p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?configure=prep_table#cat-preparation">Configure a work table</a><a class="site-btn site-btn-outline" href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a></p>
     </div>
@@ -1214,6 +1231,24 @@ body{margin:0;background:#fff;color:#0E1116}
   </div>
 </section>
 
+<section id="renders" class="site-sec" aria-labelledby="renders-h">
+  <div class="site-wrap">
+    <header class="sec-head">
+      <p class="eyebrow">Configurations</p>
+      <h2 id="renders-h">What it can look like</h2>
+      <p class="site-lead">Representative images of stainless-steel configurations. Every piece is made to order; anything not listed above can be added as a note on your request and confirmed in the quotation.</p>
+    </header>
+    <div class="pg-figs">
+      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-01-straight-table-122-bare-thumb.webp" srcset="/site/img/products/render-01-straight-table-122-bare-thumb.webp 600w, /site/img/products/render-01-straight-table-122-bare.webp 1200w" sizes="(min-width:1024px) 360px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel work table with the top only, on four legs" loading="lazy" decoding="async"></div><figcaption>Work table, top only<span>Representative image</span></figcaption></figure>
+      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-03-straight-table-152-two-shelves-thumb.webp" srcset="/site/img/products/render-03-straight-table-152-two-shelves-thumb.webp 600w, /site/img/products/render-03-straight-table-152-two-shelves.webp 1200w" sizes="(min-width:1024px) 360px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel work table with two undershelves" loading="lazy" decoding="async"></div><figcaption>Work table with two undershelves<span>Representative image</span></figcaption></figure>
+      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-05-straight-table-122-upper-shelf-4-posts-thumb.webp" srcset="/site/img/products/render-05-straight-table-122-upper-shelf-4-posts-thumb.webp 600w, /site/img/products/render-05-straight-table-122-upper-shelf-4-posts.webp 1200w" sizes="(min-width:1024px) 360px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel work table with an upper shelf on four posts" loading="lazy" decoding="async"></div><figcaption>Work table with an upper shelf<span>Representative image</span></figcaption></figure>
+      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-06-straight-table-183-two-upper-shelves-4-posts-thumb.webp" srcset="/site/img/products/render-06-straight-table-183-two-upper-shelves-4-posts-thumb.webp 600w, /site/img/products/render-06-straight-table-183-two-upper-shelves-4-posts.webp 1200w" sizes="(min-width:1024px) 360px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel work table with two upper shelves" loading="lazy" decoding="async"></div><figcaption>Work table with two upper shelves<span>Representative image</span></figcaption></figure>
+      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-02-straight-table-122-backsplash-shelf-thumb.webp" srcset="/site/img/products/render-02-straight-table-122-backsplash-shelf-thumb.webp 600w, /site/img/products/render-02-straight-table-122-backsplash-shelf.webp 1200w" sizes="(min-width:1024px) 360px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel wall-type work table with a backsplash and an undershelf" loading="lazy" decoding="async"></div><figcaption>Wall-type table with a backsplash<span>Representative image</span></figcaption></figure>
+      <figure class="pg-fig"><div class="pg-fig-well"><img src="/site/img/products/render-04-straight-table-183-slotted-shelf-thumb.webp" srcset="/site/img/products/render-04-straight-table-183-slotted-shelf-thumb.webp 600w, /site/img/products/render-04-straight-table-183-slotted-shelf.webp 1200w" sizes="(min-width:1024px) 360px, (min-width:600px) 30vw, 90vw" width="600" height="400" alt="Stainless steel work table with a slotted undershelf" loading="lazy" decoding="async"></div><figcaption>Work table with a slotted undershelf<span>Representative image</span></figcaption></figure>
+    </div>
+  </div>
+</section>
+
 <section id="kitchen-guide" class="site-sec" aria-labelledby="kitchen-guide-h">
   <div class="site-wrap">
     <header class="sec-head">
@@ -1253,7 +1288,7 @@ body{margin:0;background:#fff;color:#0E1116}
         </div>
       </article>
     </div>
-    <p class="pg-note">Planning a whole kitchen? See our <a href="/services/commercial-kitchen-fit-out/">commercial kitchen fit-outs</a> or browse <a href="/products/">all our products</a>. After installation, see how to <a href="/guides/how-to-clean-and-care-for-stainless-steel/">clean and care for stainless steel</a>.</p>
+    <p class="pg-note">Planning a whole kitchen? See our <a href="/services/commercial-kitchen-fit-out/">commercial kitchen fit-outs</a> or browse <a href="/catalogue/">all our products</a>. After installation, see how to <a href="/guides/how-to-clean-and-care-for-stainless-steel/">clean and care for stainless steel</a>.</p>
   </div>
 </section>
 
@@ -1284,7 +1319,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

@@ -59,6 +59,11 @@ body{margin:0;background:#fff;color:#0E1116}
 
 #site .cat-tag{display:inline-block;margin:0 0 8px;padding:3px 9px;border-radius:999px;background:var(--site-navy);color:#fff;font:600 11px/1.3 var(--site-sans);letter-spacing:.1em;text-transform:uppercase}
 #site .cat-card h3{margin:0 0 6px;color:var(--site-ink);font:600 17px/1.3 var(--site-sans);letter-spacing:0}
+/* the "Featured" tag beside "Configurable" / on the hero cards: an outline in the gold, so it reads as a second mark, not a second button */
+#site .cat-tag+.cat-tag{margin-left:6px}
+#site .cat-tag-featured{background:transparent;color:var(--site-gold-ink);box-shadow:inset 0 0 0 1px var(--site-gold)}
+/* the product code under the name: small, muted, letter-spaced (Website Notes 2026-11-19) */
+#site .cat-code{margin:-2px 0 6px;color:var(--site-muted);font:500 11.5px/1.3 var(--site-sans);letter-spacing:.12em;overflow-wrap:anywhere}
 /* the one-line description: 14.5px, near-black (about 12:1) */
 #site .cat-lead{margin:0;color:var(--cat-ink);font-size:14.5px;line-height:1.5}
 
@@ -66,6 +71,11 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .cat-feat{margin:12px 0 0;padding:0;list-style:none;color:var(--cat-ink);font-size:14px;line-height:1.45}
 #site .cat-feat li{position:relative;margin:0;padding:3px 0 3px 16px}
 #site .cat-feat li::before{content:"";position:absolute;left:0;top:.95em;width:8px;height:2px;border-radius:1px;background:var(--site-gold)}
+/* the "Standard size:" and "Options:" lines: the label muted and semibold, the value in the card's ink; they wrap, never widen the card */
+#site .cat-size,#site .cat-options{margin:12px 0 0;color:var(--cat-ink);font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+#site .cat-size span,#site .cat-options span{color:var(--site-muted);font-weight:600}
+#site .cat-options{margin:0 0 14px}
+#site .cat-size+.cat-feat{margin-top:8px}
 /* a configurable card's "Learn more" link to its product page (SEO build, 2026-10-22) */
 #site .cat-learn{margin:10px 0 0;font-size:14px;line-height:1.5}
 

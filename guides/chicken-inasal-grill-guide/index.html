@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-XLW3MXgn+Utun3WUId/fH3s2rh3SIeSaQHjzUTibxwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Chicken Inasal Grill Guide: What to Look For | Barro Industries</title>
 <meta name="description" content="How to choose an inasal grill for a restaurant: grill bars, charcoal bin, size, airflow, smoke and cleaning. A guide from Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/chicken-inasal-grill-guide/">
@@ -153,7 +153,7 @@
           "name": "How long should a charcoal grill be for an inasal restaurant?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "It depends on how many pieces you grill in your busiest hour. As rules of thumb, not codes, about 900 mm suits a small stall, about 1200 mm a typical inasal restaurant and 1500 mm and more a busy branch. Measure your door and the space beside the grill first."
+            "text": "It depends on how many pieces you grill in your busiest hour. As rules of thumb, not codes, about 900 mm suits a small stall, about 1200 mm a typical inasal restaurant and 1500 mm and more a busy branch. Our grill comes in 900, 1200 and 1500 mm lengths. Measure your door and the space beside the grill first."
           }
         },
         {
@@ -177,7 +177,7 @@
           "name": "Do you make charcoal grills for inasal?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "A charcoal grill is not one of our catalogue items, which list gas lava-rock grillers. We can fabricate stainless-steel items to your drawing, so send a drawing with a project brief and ask for a quotation built to your specification. We also design, fabricate, deliver and install the hood and exhaust over a cooking line."
+            "text": "Yes. We make an inasal grill, built for chicken inasal, with 5/16 inch stainless grill bars and a pull-out charcoal bin, in 900, 1200 and 1500 mm lengths, as part of our grilling line with the lava-rock griller. Request a quote and tell us the length you need. We also design, fabricate, deliver and install the hood and exhaust over the line."
           }
         }
       ]
@@ -914,6 +914,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
    (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
    contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
@@ -1097,12 +1112,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/">Products</a>
+      <a href="/catalogue/">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/" aria-current="true">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1157,14 +1169,14 @@ body{margin:0;background:#fff;color:#0E1116}
       <section id="job" aria-labelledby="job-h">
         <h2 id="job-h">What an inasal grill has to do</h2>
         <p>Chicken inasal is marinated, basted with annatto oil and grilled over charcoal. Pork barbecue, liempo and isaw, the usual fare of an ihawan, ask the same of the grill: steady heat, room for many pieces, and a quick clean at the end of the night.</p>
-        <p>Fat and basting oil drip onto the coals, so a good grill also keeps flare-ups under control. That is why the grate height, the airflow and the charcoal bin matter as much as the length. This guide is general good practice for choosing or specifying a charcoal grill.</p>
+        <p>Fat and basting oil drip onto the coals, so a good grill also keeps flare-ups under control. That is why the grate height, the airflow and the charcoal bin matter as much as the length. This guide is general good practice.</p>
       </section>
 
       <section id="bars" aria-labelledby="bars-h">
         <h2 id="bars-h">Grill bars and the grate</h2>
-        <p>Stainless-steel round bars are strong, easy to clean and resist rust. Check four points:</p>
+        <p>Stainless-steel bars are strong, easy to clean and resist rust. Check four points:</p>
         <ul>
-        <li><strong>Thickness.</strong> Thin bars sag under a full load of chicken. Ask for the bar diameter in writing.</li>
+        <li><strong>Thickness.</strong> Thin bars sag under a full load of chicken. Ask for the bar size in writing. Our grill uses 5/16&nbsp;inch stainless grill bars.</li>
         <li><strong>Spacing.</strong> Close enough to carry skewers and small pieces, open enough for heat and smoke to pass and a brush to get between.</li>
         <li><strong>Height above the coals.</strong> A grate that sits higher or lower lets you manage flare-ups from basting oil and fat.</li>
         <li><strong>Welds.</strong> Bars should be welded firmly, with smooth joins that do not trap food.</li>
@@ -1173,7 +1185,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="bin" aria-labelledby="bin-h">
         <h2 id="bin-h">Charcoal bin, airflow and ash</h2>
-        <p>A pull-out charcoal bin lets your cooks add charcoal and remove ash without lifting the grate or the food. Choose thick steel, because thin sheet warps under repeated heat.</p>
+        <p>A pull-out charcoal bin lets your cooks add charcoal and remove ash without lifting the grate or the food, and our grill has one. Choose thick steel, because thin sheet warps under repeated heat.</p>
         <p>Charcoal needs air to burn evenly. Look for vents or adjustable openings under the coals: open them to raise the heat and close them to calm it. Keep them clear of ash, and look for an ash tray so nobody reaches into a hot bin.</p>
       </section>
 
@@ -1191,12 +1203,12 @@ body{margin:0;background:#fff;color:#0E1116}
         </tbody>
         </table>
         </div>
-        <p>Measure the narrowest door or gate the grill must pass, and leave clear room for the cook beside it. The hood must reach past the whole length.</p>
+        <p>Our inasal grill is made in 900, 1200 and 1500&nbsp;mm lengths. Measure the narrowest door or gate the grill must pass, and leave clear room for the cook beside it. The hood must reach past the whole length.</p>
       </section>
 
       <section id="smoke" aria-labelledby="smoke-h">
         <h2 id="smoke-h">Smoke, hood and where the grill stands</h2>
-        <p>Charcoal makes heavy smoke and throws sparks. Indoors, a grill should stand under a hood with an exhaust duct and a fresh-air supply planned for that smoke. Our <a href="/guides/commercial-kitchen-exhaust-hood-guide/">exhaust hood guide</a> explains the parts, and <a href="/guides/kitchen-exhaust-problems/">kitchen exhaust problems</a> shows what goes wrong when one is missing.</p>
+        <p>Charcoal makes heavy smoke and throws sparks. Indoors, a grill should stand under a hood with an exhaust duct and a fresh-air supply planned for that smoke. Our <a href="/guides/commercial-kitchen-exhaust-hood-guide/">exhaust hood guide</a> explains the parts, and <a href="/guides/kitchen-exhaust-problems/">kitchen exhaust problems</a> shows what goes wrong when one is missing. Our <a href="/products/stainless-steel-range-hoods/">rear-pitch range hood</a> pulls smoke and grease to the back, away from the cook, with baffle filters, a lamp and an oil cup, in sizes from 1.2&nbsp;m to 3.0&nbsp;m. We also make wall, island and slim canopies.</p>
         <p>Outdoors or semi-outdoors, think about wind direction, your neighbours and your customers’ seats. Smoke that drifts into a dining area or a neighbour’s window causes complaints. Keep paper, plastic, cloth and cooking oil away from the grill.</p>
         <div class="art-note"><p>Ask the Bureau of Fire Protection (BFP) and the city or municipal building office what applies to charcoal cooking at your site before the drawings are fixed.</p></div>
         <figure class="art-fig">
@@ -1236,7 +1248,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="help" aria-labelledby="help-h">
         <h2 id="help-h">How Barro Industries can help</h2>
-        <p>We are based in Quezon City and work across Metro Manila and Luzon. A charcoal grill is not one of our catalogue items: the catalogue lists gas <a href="/products/commercial-griddles-grillers-and-fryers/">lava-rock grillers</a>. We can fabricate stainless-steel items to your drawing, so send a drawing or sketch with the length, bar spacing, bin and height, and ask for a quotation built to your specification. See <a href="/services/stainless-steel-fabrication/">stainless-steel fabrication</a> and our <a href="/guides/custom-stainless-steel-fabrication-guide/">guide to ordering work to your drawing</a>.</p>
+        <p>We are based in Quezon City and work across Metro Manila and Luzon. We make an inasal grill, built for chicken inasal, with 5/16&nbsp;inch stainless grill bars and a pull-out charcoal bin, in 900, 1200 and 1500&nbsp;mm lengths. It is part of our grilling line with the <a href="/products/commercial-griddles-grillers-and-fryers/">lava-rock griller</a>, and our cooking and grilling modules share the same depth and height, so they line up into one clean cooking line. <a href="/catalogue/?quote=1">Request a quote</a> and tell us the length you need. For a feature not listed here, send a drawing: see <a href="/services/stainless-steel-fabrication/">stainless-steel fabrication</a> and our <a href="/guides/custom-stainless-steel-fabrication-guide/">guide to ordering work to your drawing</a>.</p>
         <p>We also design, fabricate, deliver and install the hood, ducting and fresh-air supply over a cooking line: see <a href="/services/exhaust-and-fresh-air-systems/">exhaust and fresh-air systems</a>. Before you send a brief, settle:</p>
         <ul class="art-check">
         <li>How many pieces you grill in your busiest hour.</li>
@@ -1256,7 +1268,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
       <div class="faq-item">
         <h3>How long should a charcoal grill be for an inasal restaurant?</h3>
-        <p>It depends on how many pieces you grill in your busiest hour. As rules of thumb, not codes, about 900 mm suits a small stall, about 1200 mm a typical inasal restaurant and 1500 mm and more a busy branch. Measure your door and the space beside the grill first.</p>
+        <p>It depends on how many pieces you grill in your busiest hour. As rules of thumb, not codes, about 900 mm suits a small stall, about 1200 mm a typical inasal restaurant and 1500 mm and more a busy branch. Our grill comes in 900, 1200 and 1500 mm lengths. Measure your door and the space beside the grill first.</p>
       </div>
       <div class="faq-item">
         <h3>Does a charcoal grill need a hood and exhaust?</h3>
@@ -1268,7 +1280,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
       <div class="faq-item">
         <h3>Do you make charcoal grills for inasal?</h3>
-        <p>A charcoal grill is not one of our catalogue items, which list gas lava-rock grillers. We can fabricate stainless-steel items to your drawing, so send a drawing with a project brief and ask for a quotation built to your specification. We also design, fabricate, deliver and install the hood and exhaust over a cooking line.</p>
+        <p>Yes. We make an inasal grill, built for chicken inasal, with 5/16 inch stainless grill bars and a pull-out charcoal bin, in 900, 1200 and 1500 mm lengths, as part of our grilling line with the lava-rock griller. Request a quote and tell us the length you need. We also design, fabricate, deliver and install the hood and exhaust over the line.</p>
       </div>
     </div>
   </section>
@@ -1280,7 +1292,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="related" class="site-sec site-sec-paper" aria-labelledby="related-h">
   <div class="site-wrap">
     <header class="sec-head">
-      <p class="eyebrow kg-kicker"><a href="/guides/#equipment">Equipment guides</a></p>
+      <p class="eyebrow">Keep reading</p>
       <h2 id="related-h">Related reading</h2>
     </header>
     <div class="pg-cards pg-cards-3 pg-cards-text">
@@ -1338,7 +1350,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

@@ -267,7 +267,7 @@ const RULE_TEXT = {
   stale: 'scripts/public-categories.json names a product the master does not have',
   family: 'not classified in scripts/public-families.json — absorb it into a family or list it under "fixed"',
   familyStale: 'scripts/public-families.json names a product the master does not have or the catalogue does not publish',
-  copy: 'card wording in scripts/catalogue-cards.js needs a description and three to five features of at most 70 characters',
+  copy: 'card wording in scripts/catalogue-cards.js needs a description, three or four specs of at most 70 characters, and a well-formed code / size / options line',
 };
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -559,6 +559,36 @@ function loadPhotoMap(opts) {
   }
   if (problems.length) throw new Error(`${rel}: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
   return { photos, files: new Set(Object.values(photos).map(p => p.src)).size, skipped };
+}
+
+/**
+ * loadProjectImages({ cards, root }) -> { images } — a PROJECT card (scripts/catalogue-cards.js) may name its own image path directly, `image: 'site/img/products/<slug>.webp'`
+ * (the owner's own design drawings are not tied to a master product id). Validated exactly like the photo map: path shape, no pricing / brand word in the path, the file
+ * and its -thumb sibling exist, both are real WebP of the same shape, the thumb is narrower. images[cardId] = { src, thumb, width, height, mainWidth }. One aggregated Error.
+ */
+function loadProjectImages(opts) {
+  opts = opts || {};
+  const root = opts.root || REPO_ROOT;
+  const images = Object.create(null);
+  const problems = [];
+  const sizeOf = (relPath) => { try { return webpSize(fs.readFileSync(path.join(root, relPath))); } catch (_) { return null; } };
+  for (const pc of (opts.cards || [])) {
+    if (pc.image === undefined) continue;
+    const val = pc.image, id = pc.id;
+    if (typeof val !== 'string' || !PHOTO_PATH_RE.test(val) || /-thumb\.webp$/.test(val)) { problems.push(`${id}: image must look like "site/img/products/<slug>.webp" (lower-case slug, not a -thumb file)`); continue; }
+    if (brandInPath(val) || isMoneyish(val)) { problems.push(`${id}: the image path trips a pricing / partner-brand guard`); continue; }
+    const thumb = thumbPathOf(val);
+    let ok = true;
+    for (const f of [val, thumb]) if (!fs.existsSync(path.join(root, f))) { problems.push(`${id}: missing file ${f}`); ok = false; }
+    if (!ok) continue;
+    const m = sizeOf(val), t = sizeOf(thumb);
+    if (!m || !t) { problems.push(`${id}: ${!m ? val : thumb} is not a readable WebP`); continue; }
+    if (Math.abs(m.width / m.height - t.width / t.height) > 0.03) { problems.push(`${id}: ${val} and its thumb have different aspect ratios`); continue; }
+    if (t.width >= m.width) { problems.push(`${id}: the thumb must be narrower than ${val}`); continue; }
+    images[id] = { src: val, thumb, width: t.width, height: t.height, mainWidth: m.width };
+  }
+  if (problems.length) throw new Error(`scripts/catalogue-cards.js: ${problems.length} image problem(s):\n  ${problems.join('\n  ')}`);
+  return { images };
 }
 
 // ── public categories ───────────────────────────────────────────────────────
@@ -1141,7 +1171,7 @@ function loadFromPrices(opts) {
 // ── rendering ───────────────────────────────────────────────────────────────
 // OWNER RULINGS 2026-11-19 (they replace the 2026-10-21 "notes in full / no prices" cards): no drawing and no placeholder tile; a card shows its product PHOTO on top when
 // scripts/product-photos.json has one (owner, 2026-11-19 later: "put the photos back"; captioned "Representative image" as before), then
-// holding the name, one line of description, three to five short feature bullets and ONE price line; the long specification tables are gone. The words come from
+// holding the name, an optional code line, one sentence, an optional standard size, three or four key specs, an optional options line and ONE price line (owner rulings 2026-11-19, "Website Notes": material, size and main features only); the long specification tables are gone. The words come from
 // scripts/catalogue-cards.js, the starting amounts from scripts/public-from-prices.json. The layout lives in css/catalogue.css.
 const PHOTO_SIZES = '(min-width:1024px) 300px, (min-width:720px) 45vw, calc(100vw - 34px)';
 const PHOTO_FIGURE = (photo, name) => photo ?
@@ -1178,24 +1208,44 @@ const FAMILY_PAGES = Object.freeze({
   rack:         { path: '/products/stainless-steel-racks/',                  about: 'stainless steel racks' },
 });
 
-const featList = (copy) => (copy && copy.features && copy.features.length) ? `<ul class="cat-feat">${copy.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '';
+// The words of a card (owner rulings 2026-11-19, "Website Notes"): an optional CODE on its own small line under the name, one sentence (desc), an optional "Standard size" line,
+// three or four key specs as bullets, an optional "Options" line. Every one of them was scanned by checkCardWords() before it gets here.
+const codeLine = (c) => (c && c.code) ? `<p class="cat-code">${esc(c.code)}</p>` : '';
+const sizeLine = (c) => (c && c.size) ? `<p class="cat-size"><span>Standard size:</span> ${esc(c.size)}</p>` : '';
+const specList = (c) => (c && c.specs && c.specs.length) ? `<ul class="cat-feat">${c.specs.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : '';
+const optionsLine = (c) => (c && c.options) ? `<p class="cat-options"><span>Options:</span> ${esc(c.options)}</p>` : '';
 const learnLink = (page) => page ? `<p class="cat-learn"><a class="link-arrow" href="${esc(page.path)}">Learn more about ${esc(page.about)}</a></p>` : '';
+const CODE_RE = /^[A-Z]{2}-[A-Z0-9]{2,5}(?:-[A-Z0-9]{1,5})?$/;
+const CARD_WORD_KEYS = ['desc', 'specs', 'code', 'size', 'options', 'featured'];
+// checkCardWords(add, id, c, own) — the shape and the guards of one card's words (own: the project card's extra keys are allowed)
+function checkCardWords(add, id, c, extraKeys) {
+  const o = c && typeof c === 'object' ? c : {};
+  for (const k of Object.keys(o)) if (!CARD_WORD_KEYS.includes(k) && !(extraKeys || []).includes(k)) add(id, `key ${k}`, 'copy');
+  scanEmitted(add, id, 'desc', str(o.desc));
+  const specs = Array.isArray(o.specs) ? o.specs : [];
+  specs.forEach((t, i) => scanEmitted(add, id, `specs[${i}]`, str(t)));
+  let bad = !str(o.desc) || specs.length < 3 || specs.length > 4 || specs.some((t) => typeof t !== 'string' || !t.trim() || t.length > 70);
+  if (o.code !== undefined) { scanEmitted(add, id, 'code', str(o.code)); if (typeof o.code !== 'string' || !CODE_RE.test(o.code)) bad = true; }
+  for (const k of ['size', 'options']) if (o[k] !== undefined) { scanEmitted(add, id, k, str(o[k])); if (typeof o[k] !== 'string' || !o[k].trim() || o[k].length > 100) bad = true; }
+  if (o.featured !== undefined && o.featured !== true) bad = true;
+  if (bad) add(id, 'copy', 'copy');
+}
 
 // The card of a CONFIGURABLE family: the "Configurable" tag, the name, one line, the feature bullets, "Learn more", the price line; the "Configure & add" button is
 // added at run time by js/quote-request.js (like "Add to quote" on a fixed item), so the card needs no script to read. data-kw carries the names/codes of the SKUs the family
 // absorbed (live search only — never shown).
 function renderFamilyCard(fam, copy, price, keywords, photo) {
   return `<li class="cat-card cat-card-family" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` + PHOTO_FIGURE(photo, fam.label) +
-    `<div class="cat-head"><p class="cat-tag">Configurable</p><h3>${esc(fam.label)}</h3>${copy && copy.desc ? `<p class="cat-lead">${esc(copy.desc)}</p>` : ''}</div>` +
-    featList(copy) + learnLink(has(FAMILY_PAGES, fam.id) ? FAMILY_PAGES[fam.id] : null) + priceLine(price) +
+    `<div class="cat-head"><p class="cat-tag">Configurable</p>${copy && copy.featured ? '<p class="cat-tag cat-tag-featured">Featured</p>' : ''}<h3>${esc(fam.label)}</h3>${codeLine(copy)}${copy && copy.desc ? `<p class="cat-lead">${esc(copy.desc)}</p>` : ''}</div>` +
+    sizeLine(copy) + specList(copy) + optionsLine(copy) + learnLink(has(FAMILY_PAGES, fam.id) ? FAMILY_PAGES[fam.id] : null) + priceLine(price) +
     `</li>`;
 }
 
 // A FIXED card (a ready-made product): name, one line, features, price; "Add to quote" is appended at run time by js/quote-request.js. The product code is searchable only (data-kw).
 function renderCard(p, copy, price, photo) {
   return `<li class="cat-card" data-id="${esc(p.id)}" data-kw="${esc(p.id)}">` + PHOTO_FIGURE(photo, p.name) +
-    `<div class="cat-head"><h3>${esc(p.name)}</h3>${copy && copy.desc ? `<p class="cat-lead">${esc(copy.desc)}</p>` : ''}</div>` +
-    featList(copy) + priceLine(price) +
+    `<div class="cat-head"><h3>${esc(p.name)}</h3>${codeLine(copy)}${copy && copy.desc ? `<p class="cat-lead">${esc(copy.desc)}</p>` : ''}</div>` +
+    sizeLine(copy) + specList(copy) + optionsLine(copy) + priceLine(price) +
     `</li>`;
 }
 
@@ -1203,8 +1253,8 @@ function renderCard(p, copy, price, photo) {
 // (nothing the server does not know can be added to a quote).
 function renderProjectCard(pc, price, photo) {
   return `<li class="cat-card cat-card-project" data-ask="${esc(pc.id)}" data-kw="${esc(pc.id)}">` + PHOTO_FIGURE(photo, pc.name) +
-    `<div class="cat-head">${pc.tag ? `<p class="cat-tag">${esc(pc.tag)}</p>` : ''}<h3>${esc(pc.name)}</h3><p class="cat-lead">${esc(pc.desc)}</p></div>` +
-    featList(pc) + learnLink(pc.learn || null) + priceLine(price) +
+    `<div class="cat-head">${pc.tag ? `<p class="cat-tag">${esc(pc.tag)}</p>` : ''}<h3>${esc(pc.name)}</h3>${codeLine(pc)}<p class="cat-lead">${esc(pc.desc)}</p></div>` +
+    sizeLine(pc) + specList(pc) + optionsLine(pc) + learnLink(pc.learn || null) + priceLine(price) +
     `<a class="cat-ask" href="#request-quote">Request a quote</a>` +
     `</li>`;
 }
@@ -1214,7 +1264,7 @@ function renderProjectCard(pc, price, photo) {
  * CATALOGUE markers of catalogue/index.html: the intro + search, the category nav
  * (desktop sidebar / mobile chip bar) and one section per PUBLIC category holding EVERY product.
  * opts: { report, noteOverrides, textFixes, publicCategories, excludedCategories, families, cardCopy, prices, projectCards }.
- *   cardCopy          { id: { desc, features[3-5] } } (scripts/catalogue-cards.js CARD_COPY); a card with no entry shows its name and price line only
+ *   cardCopy          { id: { desc, specs[3-4], code?, size?, options?, featured? } } (scripts/catalogue-cards.js CARD_COPY); a card with no entry shows its name and price line only
  *   prices            loadFromPrices().prices — { id: { from } | { perProject: true } }; a card with no entry shows "Priced per project"
  *   projectCards      scripts/catalogue-cards.js PROJECT_CARDS: cards with no SKU / configurator, whose button is a link to the "Request a quote" section
  *   (no photo option any more: owner ruling 2026-11-19, a card is plain text)
@@ -1315,19 +1365,11 @@ function renderCatalogue(db, opts) {
     if (!grp || !ID_RE.test(str(pc.id))) { add(str(pc.id) || '(project card)', 'group', 'shape'); continue; }
     scanEmitted(add, pc.id, 'name', str(pc.name));
     scanEmitted(add, pc.id, 'tag', str(pc.tag));
-    scanEmitted(add, pc.id, 'desc', str(pc.desc));
-    (pc.features || []).forEach((t, i) => scanEmitted(add, pc.id, `features[${i}]`, str(t)));
-    if (!Array.isArray(pc.features) || pc.features.length < 3 || pc.features.length > 5) add(pc.id, 'features', 'copy');
+    checkCardWords(add, pc.id, pc, ['id', 'group', 'name', 'tag', 'first', 'learn', 'image', 'photo']);
     grp.projectCards.push(pc);
   }
-  // the words on the cards: scanned like every other emitted string, and three to five short bullets each
-  for (const id of Object.keys(cardCopy)) {
-    const c = cardCopy[id];
-    scanEmitted(add, id, 'desc', str(c && c.desc));
-    const feats = c && Array.isArray(c.features) ? c.features : [];
-    feats.forEach((t, i) => scanEmitted(add, id, `features[${i}]`, str(t)));
-    if (!str(c && c.desc) || feats.length < 3 || feats.length > 5 || feats.some((t) => typeof t !== 'string' || !t.trim() || t.length > 70)) add(id, 'copy', 'copy');
-  }
+  // the words on the cards: scanned like every other emitted string; three or four short specs each
+  for (const id of Object.keys(cardCopy)) checkCardWords(add, id, cardCopy[id], []);
   if (violations.length) throw new CatalogueGuardError(violations);
 
   // Order: the five public categories as ruled; inside each, the master's own category order and then id — so
@@ -1351,7 +1393,7 @@ function renderCatalogue(db, opts) {
   // SEO build, 2026-10-22: the H1 and the opening sentence carry the page's keyword ("commercial kitchen equipment") and who it is for; the sentences after
   // it are the owner's own, unchanged (tests/catalogue-layout.test.mjs, catalogue-public.test.mjs and site-public-surface.test.mjs pin them).
   lines.push('<h1>Commercial kitchen equipment catalogue</h1>');
-  lines.push('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens: preparation, washing, cooking, ventilation, storage and refrigeration. Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications. Default sizes are in millimetres. The “From” figure on each card is a starting amount before VAT; your quotation depends on the size and options you choose. Ask us for a quotation on any item.</p>');
+  lines.push('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, made in our own shop in SS304 stainless steel (SS316 on request) and built to your sizes. Sizes are in mm. The “From” figure on each card is a starting amount before VAT; your quotation depends on the size and options you choose.</p>');
   lines.push('<form class="cat-search" id="cat-search-form" role="search">');
   lines.push('<label class="sr-only" for="cat-search">Search products</label>');
   lines.push(SEARCH_ICON);
@@ -1378,9 +1420,10 @@ function renderCatalogue(db, opts) {
     lines.push(`<h2 id="cat-h-${esc(g.id)}">${esc(g.label)} <span class="cat-count">${n}</span></h2>`);
     // one responsive grid of equal text cards per group (css/catalogue.css); inside a group: the configurable cards, the fixed items, then the project cards
     lines.push('<ul class="cat-grid">');
+    for (const pc of g.projectCards.filter(x => x.first)) lines.push(renderProjectCard(pc, priceOf(pc.id), photoFor(pc.photo || (pc.image ? 'image:' + pc.id : null))));   // the featured hero products come first in their group
     for (const f of g.familyCards) lines.push(renderFamilyCard(f, copyOf(f.id), priceOf(f.id), keywordsOf(f.id), photoFor(fams && fams.photoOf[f.id])));
     for (const p of g.products) lines.push(renderCard(p, copyOf(p.id), priceOf(p.id), photoFor(p.id)));
-    for (const pc of g.projectCards) lines.push(renderProjectCard(pc, priceOf(pc.id), photoFor(pc.photo)));
+    for (const pc of g.projectCards.filter(x => !x.first)) lines.push(renderProjectCard(pc, priceOf(pc.id), photoFor(pc.photo || (pc.image ? 'image:' + pc.id : null))));
     lines.push('</ul>');
     lines.push('</section>');
   }
@@ -1422,7 +1465,7 @@ function renderCatalogue(db, opts) {
     }
   }
   report.droppedMaterialKeys = droppedMaterialKeys;
-  report.photos = groups.reduce((n, g) => n + g.familyCards.filter(f => photoFor(fams && fams.photoOf[f.id])).length + g.products.filter(p => photoFor(p.id)).length + g.projectCards.filter(pc => photoFor(pc.photo)).length, 0);
+  report.photos = groups.reduce((n, g) => n + g.familyCards.filter(f => photoFor(fams && fams.photoOf[f.id])).length + g.products.filter(p => photoFor(p.id)).length + g.projectCards.filter(pc => photoFor(pc.photo || (pc.image ? 'image:' + pc.id : null))).length, 0);
   report.projects = groups.flatMap(g => g.projectCards.map(pc => ({ id: pc.id, category: g.id })));
   const everyCard = [...report.families.map(x => x.id), ...report.published.map(x => x.id), ...report.projects.map(x => x.id)];
   report.cardIds = everyCard;
@@ -1536,13 +1579,15 @@ function renderItemListLd(db, opts) {
   const fixes = opts.textFixes || TEXT_FIXES;
   const byId = new Map(db.products.map(p => [str(p && p.id), p]));
   const items = [];
+  const projectCard = (id) => (opts.projectCards || []).find(x => x.id === id);
   for (const c of report.categories) {
+    for (const pc of (report.projects || []).filter(x => x.category === c.id && projectCard(x.id).first)) items.push({ name: projectCard(pc.id).name, cat: c.id });   // the featured hero cards lead their group
     for (const f of report.families.filter(x => x.category === c.id)) items.push({ name: fams.families[f.id].label, cat: c.id, url: FAMILY_PAGES[f.id] ? SITE_ORIGIN + FAMILY_PAGES[f.id].path : null });
     for (const p of report.published.filter(x => x.category === c.id)) {
       items.push({ name: publicProduct(byId.get(p.id), { noteOverrides: overrides, textFixes: fixes }).name, cat: c.id });
     }
-    for (const pc of (report.projects || []).filter(x => x.category === c.id)) {
-      const card = (opts.projectCards || []).find(x => x.id === pc.id);
+    for (const pc of (report.projects || []).filter(x => x.category === c.id && !projectCard(x.id).first)) {
+      const card = projectCard(pc.id);
       items.push({ name: card.name, cat: c.id });                       // a project card points at its group anchor
     }
   }
@@ -1616,6 +1661,7 @@ function main(argv) {
   const fams = loadPublicFamilies({ published, master: db });   // throws unless every published SKU is absorbed or fixed, exactly once
   const projectPhotoIds = new Set(CARDS.PROJECT_CARDS.map(pc => pc.photo).filter(Boolean));   // a project card may borrow an unpublished product's photo (the trolley)
   const photoMap = loadPhotoMap({ ids, skipIds: ids.filter(id => !published.has(id) && !projectPhotoIds.has(id)) });   // throws on a bad photo map; {} when the file is absent
+  const projectImages = loadProjectImages({ cards: CARDS.PROJECT_CARDS });                // a project card's own image path (owner designs); throws on a bad path / file
   const previewMap = loadPreviewManifest({ families: fams });                              // throws on a bad preview manifest; {} when none yet
   const projectCards = CARDS.PROJECT_CARDS;
   const cardCopy = CARDS.CARD_COPY;
@@ -1631,7 +1677,8 @@ function main(argv) {
   if (copyProblems.length) throw new Error(`scripts/catalogue-cards.js: ${copyProblems.length} problem(s):\n  ${copyProblems.join('\n  ')}`);
 
   const report = {};
-  const rOpts = { photos: photoMap.photos, publicCategories: pub, families: fams, projectCards, cardCopy, prices };
+  const photosAll = Object.assign({}, photoMap.photos); for (const id of Object.keys(projectImages.images)) photosAll['image:' + id] = projectImages.images[id];   // a project card's own image sits under 'image:<card id>'
+  const rOpts = { photos: photosAll, publicCategories: pub, families: fams, projectCards, cardCopy, prices };
   const block = renderCatalogue(db, Object.assign({ report }, rOpts));                   // throws before anything is written
 
   const island = renderCatalogueData(db, Object.assign({}, rOpts, { previews: previewMap.previews }));   // same guards, same product set
@@ -1686,7 +1733,7 @@ function main(argv) {
 }
 
 module.exports = {
-  publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, renderItemListLd, injectIntoHtml, injectIsland, injectItemList, stripJsonComments, esc, webpSize, loadPhotoMap,
+  publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, renderItemListLd, injectIntoHtml, injectIsland, injectItemList, stripJsonComments, esc, webpSize, loadPhotoMap, loadProjectImages,
   loadPublicCategories, publishedProductIds, PUBLIC_CATEGORIES, EXCLUDED_CATEGORIES,
   loadPublicFamilies, renderFamiliesJs, loadPreviewManifest, renderFamilyCard, FAMILIES_FILE, FAMILIES_JS, FAMILIES_JS_MIRROR, PREVIEWS_FILE,
   FAMILY_PAGES, FINISH_IDS, loadFromPrices, FROM_PRICES_FILE, FROM_LINE_RE, stripFromLines, priceLine, renderCard, renderProjectCard,

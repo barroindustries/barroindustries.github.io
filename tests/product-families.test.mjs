@@ -151,13 +151,15 @@ describe('the mapping: every published SKU is absorbed by exactly one family or 
     assert.deepEqual(cards('exhaust'), [['ask', 'exhaust']], 'exhaust and fresh air is ONE project card, never the ducting and blowers one by one');
     assert.deepEqual(cards('storage'), [['family', 'cabinet'], ['family', 'wall_shelf'], ['family', 'rack'], ['ask', 'trolley']]);
     const cooking = cards('cooking');
-    assert.deepEqual(cooking.slice(0, 4), [['family', 'stove'], ['family', 'wok_range'], ['family', 'cooking_line'], ['family', 'deck_oven']], 'the four cooking families lead Chef Mode, in the family order');
-    assert.ok(cooking.slice(4).every(([k]) => k === 'id'));
+    assert.deepEqual(cooking.slice(0, 3), [['ask', 'pugon'], ['ask', 'teppanyaki'], ['ask', 'inasal']], 'the three featured hero products (Website Notes, 2026-11-19) lead Chef Mode');
+    assert.deepEqual(cooking.slice(3, 7), [['family', 'stove'], ['family', 'wok_range'], ['family', 'cooking_line'], ['family', 'deck_oven']], 'then the four cooking families, in the family order');
+    assert.ok(cooking.slice(7, -2).every(([k]) => k === 'id'));
+    assert.deepEqual(cooking.slice(-2), [['ask', 'noodle_boiler'], ['ask', 'combi_stove']], 'the noodle boiler and combi stove (price list only, not in the master) close Chef Mode as quote-request cards (owner 2026-11-19)');
     // the steamer, the warmers and the salamander oven stay fixed Chef Mode cards; the meat grinder and slicer and the proofers are "other equipment" (the fryers, griddles and deck ovens are families)
     for (const id of ['CE-011', 'CE-024', 'CE-030', 'CE-031']) assert.ok(cooking.some(([, x]) => x === id), `${id} should be a fixed Chef Mode card`);
     for (const id of ['CE-007', 'CE-009', 'CE-010', 'CE-012', 'CE-016', 'CE-019', 'CE-020', 'CE-021', 'CE-022', 'CE-023', 'CE-026', 'CE-028']) assert.ok(!cooking.some(([, x]) => x === id), `${id} is absorbed: no card of its own`);
     assert.deepEqual(cards('refrigeration').map(([, x]) => x), ['RF-001', 'RF-002', 'RF-003', 'RF-004', 'RF-005', 'RF-006', 'BA-006', 'BA-011', 'MS-015', 'MS-016']);
-    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 28);
+    assert.equal(Object.values(secs).reduce((n, h) => n + (h.match(/<li class="cat-card/g) || []).length, 0), 33);
     // and the families' own categories are the ones the ruling names
     assert.deepEqual(ORDER.map((f) => FAMS.families[f].category), CATEGORY_OF);
   });
@@ -347,11 +349,11 @@ describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
     assert.ok(/"l":"Centre"/.test(all));
     assert.ok(!/\b(color|gray|meter|catalog)\b/i.test(all));
   });
-  it('the family cards are TEXT cards (2026-11-19): the "Configurable" tag, the name, one line, the feature bullets, "Learn more", the price line — and no option table, no Size / Construction / Material rows', () => {
-    const copy = { desc: 'One line.', features: ['One', 'Two', 'Three'] };
+  it('the family cards are TEXT cards (2026-11-19): the "Configurable" tag, the name, the code, one sentence, the standard size, the specs, the options line, "Learn more", the price line — and no option table, no Size / Construction / Material rows', () => {
+    const copy = { code: 'WS-SK1-600', desc: 'One line.', size: '600 × 600 mm', specs: ['One', 'Two', 'Three'], options: 'One to four bowls' };
     const html = B.renderFamilyCard(FAMS.families.sink, copy, { from: 20500 }, 'PW-004 SS Wash Sink');
-    assert.equal(html, '<li class="cat-card cat-card-family" data-family="sink" data-kw="PW-004 SS Wash Sink"><div class="cat-head"><p class="cat-tag">Configurable</p><h3>Sink</h3><p class="cat-lead">One line.</p></div>' +
-      '<ul class="cat-feat"><li>One</li><li>Two</li><li>Three</li></ul><p class="cat-learn"><a class="link-arrow" href="/products/stainless-steel-sinks/">Learn more about stainless steel sinks</a></p>' +
+    assert.equal(html, '<li class="cat-card cat-card-family" data-family="sink" data-kw="PW-004 SS Wash Sink"><div class="cat-head"><p class="cat-tag">Configurable</p><h3>Sink</h3><p class="cat-code">WS-SK1-600</p><p class="cat-lead">One line.</p></div>' +
+      '<p class="cat-size"><span>Standard size:</span> 600 × 600 mm</p><ul class="cat-feat"><li>One</li><li>Two</li><li>Three</li></ul><p class="cat-options"><span>Options:</span> One to four bowls</p><p class="cat-learn"><a class="link-arrow" href="/products/stainless-steel-sinks/">Learn more about stainless steel sinks</a></p>' +
       '<p class="cat-from">From <data value="20500">₱20,500</data> <span class="cat-vat">+ VAT</span></p></li>');
     assert.ok(!/<dt>|<dl|Specifications|Construction|Material|Made to your/.test(html));
     // a family with no product page yet simply has no link (a new family needs its page first), and no copy / no price still renders a safe card
@@ -360,12 +362,12 @@ describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
     // the words of every family come from scripts/catalogue-cards.js and say only what its configurator offers (the size line names the axes the family has)
     const WORDS = require('../scripts/catalogue-cards.js').CARD_COPY;
     for (const f of ORDER) {
-      const text = WORDS[f].features.join(' | ');
+      const text = [WORDS[f].desc, WORDS[f].size, ...WORDS[f].specs, WORDS[f].options].filter(Boolean).join(' | ').replace('Same depth and height as the cooking line', '');   // the owner's own spec line (Website Notes): the stand's standard height, not a size the visitor sets
       const axes = ['W', 'D', 'H'].filter((k) => fam(f).dims[k]).length;
       assert.ok(!/height/i.test(text) || axes === 3, `${f}: promises a height it does not offer`);
     }
-    assert.ok(!/height/i.test(WORDS.wall_shelf.features.join(' ')), 'wall shelving must not promise a height');
-    assert.ok(WORDS.stove.features.some((t) => /Wok, high-pressure, low-pressure or soup burners/.test(t)) && WORDS.stove.features.some((t) => /griller, griddle, oven or fryer/.test(t)));
+    assert.ok(!/height/i.test([WORDS.wall_shelf.desc, WORDS.wall_shelf.size, ...WORDS.wall_shelf.specs, WORDS.wall_shelf.options].join(' ')), 'wall shelving must not promise a height');
+    assert.ok(WORDS.stove.specs.some((t) => /Low- or high-pressure burners/.test(t)) && /2, 4 or 6 burners, oven below/.test(WORDS.stove.options));
   });
   it('a family card escapes everything and never carries a price word', () => {
     const evil = { ...FAMS.families.sink, label: 'A <b>&"\'' };
@@ -2000,7 +2002,7 @@ describe('when / maxDimWhen — conditional options and upper limits (spec §4, 
       assert.ok(!/\(Type is|\(Side is|<dt>/.test(card), `${f.id}: a condition or an option row is on the card`);
       assert.ok((card.match(/<ul class="cat-feat">/g) || []).length === 1);
     }
-    assert.ok(WORDS.cooking_line.features.some((t) => /One to three fry baskets on a fryer/.test(t)), 'the bullet says the baskets belong to a fryer');
+    assert.ok(/fryer with 1 or 2 vats/.test(WORDS.cooking_line.options), 'the options line says the vats belong to a fryer');
     assert.ok(PF.whenText(ck, ck.groups.find((g) => g.key === 'burners')).length > 0, 'the condition text is still produced for the sheet');
   });
 

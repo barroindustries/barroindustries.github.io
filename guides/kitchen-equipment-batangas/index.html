@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-XLW3MXgn+Utun3WUId/fH3s2rh3SIeSaQHjzUTibxwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Commercial Kitchen Equipment in Batangas | Barro Industries</title>
 <meta name="description" content="Plan kitchen equipment for a Batangas restaurant, lomi house or beach resort with Barro Kitchens (Barro Industries): stock pots, grills, salt air and peak days.">
 <link rel="canonical" href="https://barroindustries.com/guides/kitchen-equipment-batangas/">
@@ -153,7 +153,7 @@
           "name": "Can you supply stock pot burners, grills and fryers for a lomi house?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Our gas stove lets you choose a soup burner at any burner position, and our wok range has an optional rear stock burner. We list a gas-fired lava-rock griller and fryers with one, two or three baskets. A noodle boiler is not in our catalogue, but we can fabricate stainless-steel items to your drawing."
+            "text": "Our gas stove lets you choose a soup burner at any burner position, and our wok range has an optional rear stock burner. We make a gas-fired lava-rock griller, a charcoal inasal grill, lechon roasters and skewer grills, and fryers with one, two or three baskets. Our catalogue also lists a noodle boiler."
           }
         },
         {
@@ -914,6 +914,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
    (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
    contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
@@ -1097,12 +1112,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/">Products</a>
+      <a href="/catalogue/">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/" aria-current="true">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1157,7 +1169,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <section id="menus" aria-labelledby="menus-h">
         <h2 id="menus-h">Menus and the busiest day</h2>
         <p>Lomi houses and bulalohan cook for hours in big pots. Beach resorts and event venues cook for crowds that arrive all at once. Many kitchens here do both, and their hardest days are weekends and holidays.</p>
-        <p>So plan for that day. Before you choose equipment, write down how many covers you serve at the peak, which dishes are on the fire together, and which station slows first. Count burners and fryer baskets, not menu items. Those answers shape the cooking line, the holding space and the storage more than the size of the room does.</p>
+        <p>Before you choose equipment, plan for that day: write down how many covers you serve at the peak, which dishes are on the fire together, and which station slows first. Count burners and fryer baskets, not menu items. Those answers shape the line, the holding space and the storage more than the room does.</p>
       </section>
 
       <section id="cooking" aria-labelledby="cooking-h">
@@ -1166,16 +1178,16 @@ body{margin:0;background:#fff;color:#0E1116}
         <div class="pg-table-wrap">
         <table class="pg-table">
         <caption>What common menus ask of the cooking line</caption>
-        <thead><tr><th scope="col">Dish</th><th scope="col">Plan for</th><th scope="col">What our pages list</th></tr></thead>
+        <thead><tr><th scope="col">Dish</th><th scope="col">Plan for</th><th scope="col">What we make</th></tr></thead>
         <tbody>
-        <tr><th scope="row">Bulalo and other soups</th><td data-label="Plan for">A burner that carries a heavy stock pot for hours.</td><td data-label="What our pages list">Our <a href="/products/commercial-gas-stoves/">gas stove</a> lets you choose a soup burner at any burner position, and our <a href="/products/commercial-wok-ranges/">wok range</a> has an optional rear stock burner.</td></tr>
-        <tr><th scope="row">Lomi and pancit</th><td data-label="Plan for">A tank of boiling water for noodles, beside a wok or stove.</td><td data-label="What our pages list">A noodle boiler is not in our catalogue. We can fabricate stainless-steel items to your drawing: describe it in your brief, and see our <a href="/guides/noodle-boiler-guide/">noodle boiler guide</a>.</td></tr>
-        <tr><th scope="row">Fried fish and chicken</th><td data-label="Plan for">A fryer sized to your batches, with a place to drain.</td><td data-label="What our pages list">Fryers with one, two or three baskets: see <a href="/products/commercial-griddles-grillers-and-fryers/">griddles, grillers and fryers</a>.</td></tr>
-        <tr><th scope="row">Grilled seafood and barbecue</th><td data-label="Plan for">A grill station with its own smoke path to the hood.</td><td data-label="What our pages list">A gas-fired lava-rock griller. Charcoal grills are not listed: read <a href="/guides/lava-rock-vs-charcoal-grill/">lava rock vs charcoal</a>.</td></tr>
+        <tr><th scope="row">Bulalo and other soups</th><td data-label="Plan for">A burner that carries a heavy stock pot for hours.</td><td data-label="What we make">Our <a href="/products/commercial-gas-stoves/">gas stove</a> lets you choose a soup burner at any burner position, and our <a href="/products/commercial-wok-ranges/">wok range</a> has an optional rear stock burner.</td></tr>
+        <tr><th scope="row">Lomi and pancit</th><td data-label="Plan for">A tank of boiling water for noodles, beside a wok or stove.</td><td data-label="What we make">Our <a href="/catalogue/#cat-cooking">catalogue</a> lists a noodle boiler under the cooking line, made to order: see our <a href="/guides/noodle-boiler-guide/">noodle boiler guide</a>.</td></tr>
+        <tr><th scope="row">Fried fish and chicken</th><td data-label="Plan for">A fryer sized to your batches, with a place to drain.</td><td data-label="What we make">Fryers with one, two or three baskets: see <a href="/products/commercial-griddles-grillers-and-fryers/">griddles, grillers and fryers</a>.</td></tr>
+        <tr><th scope="row">Grilled seafood and barbecue</th><td data-label="Plan for">A grill station with its own smoke path to the hood.</td><td data-label="What we make">A gas-fired lava-rock griller and a charcoal inasal grill, with lechon roasters and skewer grills made to order: read <a href="/guides/lava-rock-vs-charcoal-grill/">lava rock vs charcoal</a>, or <a href="/catalogue/?quote=1">request a quote</a> and give the size you need.</td></tr>
         </tbody>
         </table>
         </div>
-        <p>Put the heat-making equipment in one line under one hood, then size the gas line for every burner running at once, as our <a href="/guides/lpg-gas-line-for-restaurants/">LPG gas line guide</a> explains.</p>
+        <p>Put the heat-making equipment in one line under one hood. Our cooking and grilling modules share the same depth and height, so they line up into one clean cooking line. Then size the gas line for every burner running at once, as our <a href="/guides/lpg-gas-line-for-restaurants/">LPG gas line guide</a> explains.</p>
       </section>
 
       <section id="stations" aria-labelledby="stations-h">
@@ -1185,7 +1197,7 @@ body{margin:0;background:#fff;color:#0E1116}
         <li><strong>The pots.</strong> Stock pots simmer for hours, so give them burners that hold a heavy pot steady, under the hood. Our <a href="/guides/stock-pot-burner-guide/">stock pot burner guide</a> covers the station.</li>
         <li><strong>The noodles.</strong> Boil noodles in batches beside the soup, with water and a drain close by.</li>
         <li><strong>The plating table.</strong> Put a <a href="/products/stainless-steel-work-tables/">work table</a> between the stove and the pass, with an upper shelf for condiments and an undershelf for pans and containers.</li>
-        <li><strong>The wash-up.</strong> A great many bowls and spoons come back, so give them a <a href="/products/stainless-steel-sinks/">sink table</a> with a pre-rinse spray faucet, and a slotted shelf to drain on.</li>
+        <li><strong>The wash-up.</strong> Many bowls and spoons come back, so give them a <a href="/products/stainless-steel-sinks/">sink table</a> with a pre-rinse spray faucet, and a slotted shelf to drain on. Soup fat goes down the drain, so add a <a href="/guides/grease-trap-guide-restaurants/">grease trap</a>: we make them, sized for your plumbing.</li>
         </ul>
         <p>Keep the line short, so a cook turns from the stove to the table in one step.</p>
         <figure class="art-fig">
@@ -1227,14 +1239,14 @@ body{margin:0;background:#fff;color:#0E1116}
       <section id="distance" aria-labelledby="distance-h">
         <h2 id="distance-h">Planning from a distance</h2>
         <p>Our shop is in Tandang Sora, Quezon City, and our <a href="/areas-we-serve/">areas we serve</a> page lists Batangas among the places where we have completed projects. Everything is made to order in our shop, then delivered and installed on your site, whether you need stainless steel fabrication in Lipa or a commercial kitchen in Batangas City.</p>
-        <p>Prepare from your own kitchen. Send the <a href="/sales/clientinformationrequest/">project brief</a> with:</p>
+        <p>Send the <a href="/sales/clientinformationrequest/">project brief</a> with:</p>
         <ul class="art-check">
         <li>Photos of the kitchen, its ceiling, and any outside wall that could carry a duct or take the gas tanks.</li>
         <li>A sketch with lengths in millimetres, and the narrowest gate, door or stair on the way in.</li>
         <li>Who supplies your LPG, and where the tank cage can stand.</li>
         <li>Your menu and your busiest day.</li>
         </ul>
-        <p>The site visit, drawings, fabrication, delivery and installation follow: see <a href="/guides/commercial-kitchen-fabrication-luzon/">kitchen fabrication across Luzon</a>. Cavite and Laguna, between Metro Manila and Batangas, have their own <a href="/guides/commercial-kitchen-cavite-laguna/">guide</a>.</p>
+        <p>The site visit, drawings, fabrication, delivery and installation follow: see <a href="/guides/commercial-kitchen-fabrication-luzon/">kitchen fabrication across Luzon</a>. Cavite and Laguna have their own <a href="/guides/commercial-kitchen-cavite-laguna/">guide</a>.</p>
       </section>
 
       <section id="help" aria-labelledby="help-h">
@@ -1252,7 +1264,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
       <div class="faq-item">
         <h3>Can you supply stock pot burners, grills and fryers for a lomi house?</h3>
-        <p>Our gas stove lets you choose a soup burner at any burner position, and our wok range has an optional rear stock burner. We list a gas-fired lava-rock griller and fryers with one, two or three baskets. A noodle boiler is not in our catalogue, but we can fabricate stainless-steel items to your drawing.</p>
+        <p>Our gas stove lets you choose a soup burner at any burner position, and our wok range has an optional rear stock burner. We make a gas-fired lava-rock griller, a charcoal inasal grill, lechon roasters and skewer grills, and fryers with one, two or three baskets. Our catalogue also lists a noodle boiler.</p>
       </div>
       <div class="faq-item">
         <h3>How do I keep food hot at a resort buffet or banquet?</h3>
@@ -1276,7 +1288,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="related" class="site-sec site-sec-paper" aria-labelledby="related-h">
   <div class="site-wrap">
     <header class="sec-head">
-      <p class="eyebrow kg-kicker"><a href="/guides/#areas">Areas we serve</a></p>
+      <p class="eyebrow">Keep reading</p>
       <h2 id="related-h">Related reading</h2>
     </header>
     <div class="pg-cards pg-cards-3 pg-cards-text">
@@ -1334,7 +1346,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-XLW3MXgn+Utun3WUId/fH3s2rh3SIeSaQHjzUTibxwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Inasal Restaurant Equipment Checklist | Barro Industries</title>
 <meta name="description" content="Inasal restaurant equipment, station by station: grill, marinade prep, rice, ventilation and washing. A checklist from Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/chicken-inasal-restaurant-setup/">
@@ -169,15 +169,15 @@
           "name": "How much rice equipment does an inasal restaurant need?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "It depends on the portions you serve in your busiest hour. Unli-rice makes the volume high, so work out rice per hour first. The catalogue lists a gas rice steamer with six trays, and our rice steamer guide explains how to size one."
+            "text": "It depends on the portions you serve in your busiest hour. Unli-rice makes the volume high, so work out rice per hour first. Our rice steamer guide explains how to size a gas rice steamer."
           }
         },
         {
           "@type": "Question",
-          "name": "Can you fabricate an inasal grill and plan the whole kitchen?",
+          "name": "Can you make an inasal grill and plan the whole kitchen?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "A charcoal grill is not a catalogue item, but we can fabricate stainless-steel items to your drawing. Send the counter length, bar spacing and bin you want, and we confirm it in the quotation. We also design, fabricate, deliver and install the rest of the kitchen, with the hood and exhaust."
+            "text": "Yes. We make a charcoal inasal grill, with 5/16 inch stainless grill bars and a pull-out charcoal bin, in 900, 1200 and 1500 mm lengths. We also design, fabricate, deliver and install the rest of the kitchen, with the hood and exhaust. Request a quote and tell us the grill length you need."
           }
         }
       ]
@@ -914,6 +914,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
    (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
    contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
@@ -1097,12 +1112,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/">Products</a>
+      <a href="/catalogue/">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/" aria-current="true">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1117,7 +1129,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">The Kitchen Guide</a></li><li><span aria-current="page">Inasal restaurant equipment</span></li></ol></nav>
       <p class="eyebrow kg-kicker"><a href="/guides/#business">By type of business</a></p>
       <h1>Inasal Restaurant Equipment: A Kitchen Checklist for Starting a Chicken Inasal Restaurant</h1>
-      <p class="site-lead">Inasal restaurant equipment starts with the grill, but the grill is only one of six stations. Here is the full kitchen checklist, in the order a chicken travels, with layout tips.</p>
+      <p class="site-lead">Inasal restaurant equipment starts with the grill, but the grill is only one of six stations. Here is the full checklist, in the order a chicken travels.</p>
       <p class="art-meta"><span>By Barro Industries</span><span aria-hidden="true">·</span><time datetime="2026-11-19">19 November 2026</time><span aria-hidden="true">·</span><span>6 min read</span></p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?quote=1">Get a quote</a><a class="site-btn site-btn-outline" href="#grill">Start with the grill station</a></p>
     </div>
@@ -1174,7 +1186,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="marinade" aria-labelledby="marinade-h">
         <h2 id="marinade-h">Marinade and prep</h2>
-        <p>Marinating is a wet, acidic job done in volume. Give it stainless-steel prep tables, large containers on racks, a double or triple sink and chiller space for marinated chicken.</p>
+        <p>Marinating is a wet, acidic job done in volume. Give it stainless-steel prep tables, containers on racks, a double or triple sink and chiller space for marinated chicken.</p>
         <ul>
         <li>Choose <a href="/products/stainless-steel-work-tables/">work tables</a> with an undershelf, so containers sit within reach, and <a href="/products/stainless-steel-shelving/">wall shelving</a> above for spices.</li>
         <li>Keep raw chicken on its own table, with its own boards and knives, apart from cooked chicken and vegetables. See <a href="/guides/raw-and-cooked-food-separation/">separating raw and cooked food</a>.</li>
@@ -1186,14 +1198,14 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="grill" aria-labelledby="grill-h">
         <h2 id="grill-h">The grill station</h2>
-        <p>A charcoal grill is not a catalogue item, so specify it with care. Our <a href="/guides/chicken-inasal-grill-guide/">inasal grill guide</a> covers the bars, charcoal bin, airflow and length. Here is where it sits in the kitchen.</p>
+        <p>We make a charcoal inasal grill, built for chicken inasal, with 5/16&nbsp;inch stainless grill bars and a pull-out charcoal bin, in 900, 1200 and 1500&nbsp;mm lengths. It is part of our grilling line with the lava-rock griller. Our <a href="/guides/chicken-inasal-grill-guide/">inasal grill guide</a> covers the bars, charcoal bin, airflow and length. Here is where it sits in the kitchen.</p>
         <ul>
         <li><strong>Basting table.</strong> Keep the achuete (annatto) oil, brushes and containers on a table within one step of the coals, with a tray to catch drips. Annatto stains, so wipe spills at once.</li>
         <li><strong>Holding and chopping.</strong> Grilled chicken rests before it is chopped. Give it a holding shelf close to the pass, and a chopping table with a board. The catalogue lists a three-shelf display warmer.</li>
-        <li><strong>Charcoal and ash.</strong> Keep charcoal dry in a metal bin away from the heat, and put cooled ash into a metal container, never a bag.</li>
+        <li><strong>Charcoal and ash.</strong> Keep charcoal dry in a metal bin, and put cooled ash into a metal container, never a bag.</li>
         <li><strong>If charcoal is not possible.</strong> The catalogue lists a gas lava-rock griller with one to three burners. See <a href="/guides/lava-rock-vs-charcoal-grill/">lava rock vs charcoal</a>.</li>
         </ul>
-        <p>We can fabricate stainless-steel items to your drawing: see our <a href="/services/stainless-steel-fabrication/">stainless-steel fabrication</a>.</p>
+        <p>Our cooking and grilling modules share the same depth and height, so they line up into one clean cooking line. <a href="/catalogue/?quote=1">Request a quote</a> and tell us the grill length you need.</p>
       </section>
 
       <section id="rice" aria-labelledby="rice-h">
@@ -1204,7 +1216,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="smoke" aria-labelledby="smoke-h">
         <h2 id="smoke-h">Smoke, hood and fresh air</h2>
-        <p>Charcoal grilling makes heavy smoke and throws sparks. A properly sized hood, duct and exhaust blower are essential, above all in a mall or any shared building. The hood should cover the whole length of the grill: our <a href="/guides/commercial-kitchen-exhaust-hood-guide/">exhaust hood guide</a> explains the parts.</p>
+        <p>Charcoal grilling makes heavy smoke and throws sparks. A properly sized hood, duct and exhaust blower are essential, above all in a mall. The hood should cover the whole length of the grill: our <a href="/guides/commercial-kitchen-exhaust-hood-guide/">exhaust hood guide</a> explains the parts. Our <a href="/products/stainless-steel-range-hoods/">rear-pitch range hood</a> pulls smoke and grease to the back, away from the cook.</p>
         <ul>
         <li><strong>Fresh air.</strong> The air the hood removes must be replaced, or smoke spills and flames flicker. See our <a href="/guides/kitchen-fresh-air-system-guide/">fresh air guide</a>.</li>
         <li><strong>Your landlord.</strong> In a mall or leased space, ask the landlord or building administrator whether charcoal cooking is allowed and where the duct may leave the building.</li>
@@ -1251,11 +1263,11 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
       <div class="faq-item">
         <h3>How much rice equipment does an inasal restaurant need?</h3>
-        <p>It depends on the portions you serve in your busiest hour. Unli-rice makes the volume high, so work out rice per hour first. The catalogue lists a gas rice steamer with six trays, and our rice steamer guide explains how to size one.</p>
+        <p>It depends on the portions you serve in your busiest hour. Unli-rice makes the volume high, so work out rice per hour first. Our rice steamer guide explains how to size a gas rice steamer.</p>
       </div>
       <div class="faq-item">
-        <h3>Can you fabricate an inasal grill and plan the whole kitchen?</h3>
-        <p>A charcoal grill is not a catalogue item, but we can fabricate stainless-steel items to your drawing. Send the counter length, bar spacing and bin you want, and we confirm it in the quotation. We also design, fabricate, deliver and install the rest of the kitchen, with the hood and exhaust.</p>
+        <h3>Can you make an inasal grill and plan the whole kitchen?</h3>
+        <p>Yes. We make a charcoal inasal grill, with 5/16 inch stainless grill bars and a pull-out charcoal bin, in 900, 1200 and 1500 mm lengths. We also design, fabricate, deliver and install the rest of the kitchen, with the hood and exhaust. Request a quote and tell us the grill length you need.</p>
       </div>
     </div>
   </section>
@@ -1267,7 +1279,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="related" class="site-sec site-sec-paper" aria-labelledby="related-h">
   <div class="site-wrap">
     <header class="sec-head">
-      <p class="eyebrow kg-kicker"><a href="/guides/#business">By type of business</a></p>
+      <p class="eyebrow">Keep reading</p>
       <h2 id="related-h">Related reading</h2>
     </header>
     <div class="pg-cards pg-cards-3 pg-cards-text">
@@ -1281,7 +1293,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <article class="pg-card">
         <div class="pg-card-body">
           <h3><a href="/guides/commercial-kitchen-exhaust-hood-guide/">Commercial kitchen exhaust hood guide</a></h3>
-          <p>Sizing, filters, ducting and fresh air for the hood over your cooking line.</p>
+          <p>Sizing, filters, ducting and fresh air for the hood.</p>
           <span class="link-arrow" aria-hidden="true">Read more</span>
         </div>
       </article>
@@ -1325,7 +1337,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>
