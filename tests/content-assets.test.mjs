@@ -261,6 +261,7 @@ const GUIDES = [
   { path: '/guides/commercial-kitchen-exhaust-hood-guide/', kind: 'article', h1: 'Commercial Kitchen Exhaust Hood Guide: Sizing, Filters, Ducting and Fresh Air', ogImage: 'og-exhaust.webp', published: '2026-10-29' },
   { path: '/guides/lpg-gas-line-for-restaurants/', kind: 'article', h1: 'LPG Gas Line Installation for Restaurants: Tanks, Piping, Testing and Safety', ogImage: 'og-lpg.webp', published: '2026-10-29' },
   { path: '/guides/how-to-clean-and-care-for-stainless-steel/', kind: 'article', h1: 'How to Clean Stainless Steel Kitchen Equipment and Prevent Rust', ogImage: 'og-fabrication.webp', published: '2026-10-29' },
+  { path: '/guides/kitchen-ventilation-requirements-philippines/', kind: 'article', h1: 'Kitchen Ventilation Requirements in the Philippines: Sanitation Code, Fire Code and Exhaust', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
 ];
 // the owner's own sentence, the one answer to the price question that the product pages give (CHECK 9 takes it out of the product pages and of the equipment list before it scans for the word "price")
 const PRICE_SENTENCE = 'Prices depend on size and options.';
@@ -309,8 +310,8 @@ const firstHit = (p, re) => { const hit = publicStrings(p).find((s) => re.test(s
 const allStrings = (v, out = []) => { if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) v.forEach((x) => allStrings(x, out)); else if (v && typeof v === 'object') Object.values(v).forEach((x) => allStrings(x, out)); return out; };
 const allKeys = (v, out = new Set()) => { if (Array.isArray(v)) v.forEach((x) => allKeys(x, out)); else if (v && typeof v === 'object') for (const k of Object.keys(v)) { out.add(k); allKeys(v[k], out); } return out; };
 
-describe('guides: the pages exist (the index and seven articles), nothing else lives in the folder, and the stylesheet is scoped and clean', () => {
-  it('has an index and the seven articles, and no other file under /guides/', () => {
+describe('guides: the pages exist (the index and eight articles), nothing else lives in the folder, and the stylesheet is scoped and clean', () => {
+  it('has an index and the eight articles, and no other file under /guides/', () => {
     for (const p of PAGES) assert.ok(p.html.length > 8000, `${p.file} is missing or empty`);
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) (e.isDirectory() ? walk(`${d}/${e.name}`) : files.push(`${d}/${e.name}`)); };
@@ -828,7 +829,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
     }
     assert.ok(lastmodOf(`${BASE}/guides/`) >= '2026-10-29', `the hub changed on 2026-10-29 (three more guides), so its lastmod is that day or later (${lastmodOf(`${BASE}/guides/`) || 'missing'})`);
     const order = hub.node('CollectionPage')[0].mainEntity.itemListElement.map((i) => i.url.replace(BASE, ''));
-    assert.deepEqual(order, ['/guides/commissary-kitchen-requirements-philippines/', '/guides/ss304-vs-ss316-stainless-steel/', layout.path, list.path, '/guides/commercial-kitchen-exhaust-hood-guide/', '/guides/lpg-gas-line-for-restaurants/', '/guides/how-to-clean-and-care-for-stainless-steel/']);
+    assert.deepEqual(order, ['/guides/commissary-kitchen-requirements-philippines/', '/guides/ss304-vs-ss316-stainless-steel/', layout.path, list.path, '/guides/commercial-kitchen-exhaust-hood-guide/', '/guides/lpg-gas-line-for-restaurants/', '/guides/how-to-clean-and-care-for-stainless-steel/', '/guides/kitchen-ventilation-requirements-philippines/']);
     assert.ok(/layout/i.test(hub.meta('description')) && /equipment/i.test(hub.meta('description')), 'the hub description names the two new guides');
   });
 
@@ -1047,7 +1048,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
     assert.ok(/sp_body "\$sp" /.test(ci), 'the body scan goes through sp_body(), which takes the sentence out');
   });
 
-  it('CHECK 9 itself, its content-page scan run against scratch trees: passes the eight guides, lets the equipment list say the owner\'s sentence, and refuses that sentence — and every other use of "price", an amount or a missing page — anywhere else', () => {
+  it('CHECK 9 itself, its content-page scan run against scratch trees: passes the nine guides, lets the equipment list say the owner\'s sentence, and refuses that sentence — and every other use of "price", an amount or a missing page — anywhere else', () => {
     const ci = read('scripts/ci-invariants.sh');
     const a = ci.indexOf('page_head() {'), b = ci.indexOf('if [ "$seo_fail" -eq 0 ]; then');
     assert.ok(a > 0 && b > a, 'the content-page scan is no longer between page_head() and the seo_fail verdict');
@@ -1212,6 +1213,69 @@ describe('guides: the exhaust hood, LPG gas line and stainless steel care guides
       const html = read(`${pg}/index.html`);
       assert.equal(html.split(`href="${g}"`).length - 1, 1, `${pg}: exactly one link to ${g}`);
       assert.ok(!(html.match(/"@type":\s*"FAQPage"[\s\S]*?<\/script>/) || [''])[0].includes(g), `${pg}: the guide link stays out of the FAQPage JSON-LD`);
+    }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// The ventilation requirements guide (2026-11-19). OWNER RULING 2026-11-19: this ONE guide may NAME the laws (the Code on Sanitation PD 856, the Fire Code
+// RA 9514, the National Building Code PD 1096 and the Philippine Mechanical Engineering Code), because the searches it answers name them
+// ("philippines food establishment kitchen ventilation sanitation code"). It still quotes no section, clause or figure, and sends the reader to the three offices.
+// What it says of the Sanitation Code's rules for food establishments was checked against the DOH implementing rules of Chapter III (1995).
+describe('guides: the kitchen ventilation requirements guide (2026-11-19) — the laws named but no clause or figure, the three offices, structure, keywords and links', () => {
+  const vent = byPath('/guides/kitchen-ventilation-requirements-philippines/');
+  const hrefsOf = (p) => new Set(p.S.attrs.filter((a) => a.tag === 'a' && a.name === 'href').map((a) => a.value));
+  const sectionIds = (p) => [...p.article.matchAll(/<section id="([^"]+)" aria-labelledby="[^"]+">/g)].map((m) => m[1]);
+  const faqOf = (p) => [...p.html.matchAll(/<div class="faq-item">\s*<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/g)].map((m) => ({ q: visibleText(m[1]), a: visibleText(m[2]) }));
+
+  it('is dated 19 November 2026, in sitemap.xml, on the hub (card and ItemList, last) and in llms.txt', () => {
+    const sm = read('sitemap.xml'), llms = read('llms.txt'), hub = byPath('/guides/');
+    assert.equal(vent.published, '2026-11-19');
+    const lm = (new RegExp(`<loc>${vent.url}</loc>\\s*<lastmod>(\\d{4}-\\d{2}-\\d{2})</lastmod>`).exec(sm) || [])[1] || '';
+    assert.ok(lm >= '2026-11-19', `its sitemap entry or lastmod (${lm || 'missing'})`);
+    assert.ok(llms.includes(`](${vent.url}):`), 'llms.txt does not list it');
+    const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${vent.path}"[\\s\\S]*?</article>`));
+    assert.ok(card && card[0].includes(`>${vent.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), 'its card on the hub');
+  });
+
+  it('puts "kitchen ventilation requirements" and "Philippines" in the title, H1 and description, and the searched words in the text — without stuffing', () => {
+    for (const [what, text] of [['title', vent.title], ['H1', vent.headings.find((h) => h.level === 1).text], ['description', vent.meta('description')]]) {
+      assert.ok(/kitchen ventilation requirements/i.test(text) && /Philippines/.test(text), `the ${what}`);
+    }
+    for (const k of ['food establishment', 'sanitary permit', 'exhaust', 'fresh air', 'hood', 'grease', 'fire suppression', 'duct', 'sanitation code']) assert.ok(vent.body.toLowerCase().includes(k), `"${k}" is not in the text`);
+    const n = (vent.body.toLowerCase().match(/kitchen ventilation requirements/g) || []).length;
+    assert.ok(n >= 1 && n <= 9, `"kitchen ventilation requirements" appears ${n} times`);
+  });
+
+  it('has five FAQ questions, an article of 1000-1500 words and its sections in order', () => {
+    assert.equal(faqOf(vent).length, 5);
+    const n = words(vent.article);
+    assert.ok(n >= 1000 && n <= 1500, `${n} words`);
+    assert.deepEqual(sectionIds(vent), ['which-rules', 'sanitation', 'fire', 'building', 'in-practice', 'checklist', 'help', 'faq']);
+    const checks = [...vent.article.match(/<ul class="art-check">([\s\S]*?)<\/ul>/)[1].matchAll(/<li>/g)].length;
+    assert.ok(checks >= 6 && checks <= 12, `${checks} checklist items`);
+  });
+
+  it('names the four laws (owner ruling 2026-11-19) and the three offices, says it is not legal advice — and quotes no section, clause, figure, foreign standard or statistic', () => {
+    const t = vent.body;
+    for (const f of ['Code on Sanitation of the Philippines (PD 856)', 'Fire Code of the Philippines (RA 9514)', 'National Building Code (PD 1096)', 'Philippine Mechanical Engineering Code', 'Department of Health', 'city or municipal health office', 'Bureau of Fire Protection (BFP)', 'city or municipal building office', 'not legal advice']) assert.ok(t.includes(f), `the guide lacks "${f}"`);
+    assert.ok(!/\b(Section \d+|Sec\. ?\d+|Article \d+|clause \d+|Rule \d+|Chapter [IVX]+|NFPA|ASHRAE|UL ?300|ASTM|ISO ?\d{3,}|HACCP|FSIC|FSEC)\b/i.test(vent.html.replace(STYLE_RE, '')), 'a clause, section or foreign standard');
+    assert.ok(!/\d+(\.\d+)?\s*(%|per cent|percent|lux|cubic|m³|°C|ºC|foot candles?)/i.test(t), 'a figure from the rules');
+    assert.ok(!/\b(compliant|complies|guarantee\w*|pass(?:es)? inspection|approved by)\b/i.test(t), 'a promise that the work passes or is approved');
+    assert.ok(/The approval itself is theirs to give/.test(t), 'the approval is the offices\'');
+    assert.ok(!/\b(free|offer(?:s|ed)?|budget|cost\w*|pric\w*)\b/i.test(t), 'a price word');
+  });
+
+  it('links the exhaust, fresh-air, fire-suppression and fit-out services, the range hoods, the hood guide and the brief, and is linked back once from the hood guide and the exhaust service (outside the FAQPage JSON-LD)', () => {
+    const h = hrefsOf(vent);
+    for (const u of ['/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/kitchen-fire-suppression/', '/services/commercial-kitchen-fit-out/', '/products/stainless-steel-range-hoods/', '/guides/commercial-kitchen-exhaust-hood-guide/', '/sales/clientinformationrequest/']) assert.ok(h.has(u), `does not link ${u}`);
+    const rel = vent.html.match(/<section id="related"[\s\S]*?<\/section>/)[0];
+    assert.equal((rel.match(/<article class="pg-card">/g) || []).length, 3);
+    assert.equal(vent.imgs.filter((i) => /site\/img\/projects\//.test(i.attrs.src)).length, 2, 'the hero and one inline project photograph');
+    for (const pg of ['guides/commercial-kitchen-exhaust-hood-guide', 'services/exhaust-and-fresh-air-systems']) {
+      const html = read(`${pg}/index.html`);
+      assert.equal(html.split(`href="${vent.path}"`).length - 1, 1, `${pg}: exactly one link to the guide`);
+      assert.ok(!(html.match(/"@type":\s*"FAQPage"[\s\S]*?<\/script>/) || [''])[0].includes(vent.path), `${pg}: the link stays out of the FAQPage JSON-LD`);
     }
   });
 });
