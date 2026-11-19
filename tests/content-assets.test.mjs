@@ -279,7 +279,7 @@ const GUIDES = [
   { path: '/guides/commercial-deep-fryer-guide/', kind: 'article', h1: 'Commercial Deep Fryers: Vat Size, Drains and Safety', ogImage: 'og-fire.webp', published: '2026-11-19' },
   { path: '/guides/chicken-inasal-grill-guide/', kind: 'article', h1: 'Chicken Inasal Grills: What to Look for in a Commercial Charcoal Grill', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
   { path: '/guides/lava-rock-vs-charcoal-grill/', kind: 'article', h1: 'Lava Rock Griller vs Charcoal Grill for Restaurants: Flavour, Control, Smoke and Cleaning', ogImage: 'og-lpg.webp', published: '2026-11-19' },
-  { path: '/guides/pandesal-oven-pugon-guide/', kind: 'article', h1: 'Pandesal Oven Guide: Pugon or Gas Deck Oven for a Small Bakery', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/pandesal-oven-pugon-guide/', kind: 'article', h1: 'Pandesal Oven Guide: Choosing and Running a Pugon for a Small Bakery', ogImage: 'og-faq.webp', published: '2026-11-19' },
   { path: '/guides/commercial-storage-rack-guide/', kind: 'article', h1: 'Commercial Storage Rack Guide: Solid or Slotted Shelves, Tiers, Wheels and Layout', ogImage: 'og-institutional.webp', published: '2026-11-19' },
   { path: '/guides/kitchen-trolley-guide/', kind: 'article', h1: 'Kitchen Trolleys: Types, Wheels, Shelves and Fit for Restaurants and Hotels', ogImage: 'og-institutional.webp', published: '2026-11-19' },
   { path: '/guides/stainless-steel-cabinet-guide/', kind: 'article', h1: 'Stainless Steel Cabinets for Commercial Kitchens: Choosing Type, Doors and Shelves', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
@@ -971,7 +971,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
         ['Gas stove', ['/products/commercial-gas-stoves/']],
         ['Wok range', ['/products/commercial-wok-ranges/']],
         ['Griddle, griller and fryer', ['/products/commercial-griddles-grillers-and-fryers/']],
-        ['Deck oven', ['/products/gas-deck-ovens/']],   // the guide (owned by another session) still lists it; the page now forwards to the catalogue
+        ['Pugon pandesal oven', ['/catalogue/#cat-cooking']],
         ['Steamers and warmers', ['/catalogue/#cat-cooking']],
       ],
       'ventilation-safety': [
@@ -1101,7 +1101,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       [layout, /A wet chemical system integrated with the hood protects the cooking surface and the exhaust path/, 'services/kitchen-fire-suppression/index.html', /wet chemical fire suppression system integrated with your range hood, designed to protect the cooking surface and the exhaust path/],
       [list, /a soiled table where dirty dishes are loaded and a clean table where washed dishes land, either side of the dishwasher/, P('stainless-steel-dish-tables'), /Side Clean, where washed dishes land, or soiled, where dirty dishes are loaded\./],
       [list, /Our dish tables sit beside it, with the machine on the left or on the right/, P('stainless-steel-dish-tables'), /Dishwasher On the left or on the right, facing the table\./],
-      [list, /a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/, 'faq/index.html', /6-month warranty on workmanship\. Full-kitchen projects also include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/],
+      [list, /a 6-month warranty on workmanship, and full-kitchen projects include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/, 'faq/index.html', /6-month warranty on workmanship\. Full-kitchen projects also include 12 months of preventive maintenance service \(PMS\) with KitchenShield™/],
       [list, /built to order in food-grade SS304 as standard, or laboratory-grade SS316 on request, with seams welded and ground smooth\. Our standard finish is hairline, with brushed, mirror or satin on request\./, 'faq/index.html', /Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request\. Our standard finish is hairline, with brushed, mirror or satin on request\. Seams are welded and ground smooth/],
       [list, /A griller beside a gas range under a stainless steel hood at DMMMSU\./, P('commercial-griddles-grillers-and-fryers'), /A griller beside a gas range under a stainless steel hood at DMMMSU\./],
       [list, /We design, fabricate, deliver and install commercial kitchens, and commission everything on site/, 'faq/index.html', /We design, fabricate, deliver and install, then commission everything on site\./],
@@ -1279,13 +1279,13 @@ describe('guides: the exhaust hood, LPG gas line and stainless steel care guides
     assert.ok(!/we (?:do|offer|provide|carry out) passivation/i.test(care.body), 'passivation is not offered as a service');
     assert.ok(!/online quote[^.]*SS316|SS316[^.]*online quote/i.test(care.body), 'no SS316 option in the online quote flow');
     assert.ok(care.body.includes('full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™'), 'KitchenShield worded as the site words it');
-    assert.ok(care.body.includes('6-month service warranty on our equipment and work'));
+    assert.ok(care.body.includes('6-month warranty on workmanship'));
   });
 
   it('link to the matching pages, and the three guides link each other where they overlap', () => {
     const need = {
       [hood.path]: ['/products/stainless-steel-range-hoods/', '/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/kitchen-fire-suppression/', '/products/commercial-wok-ranges/', '/products/commercial-griddles-grillers-and-fryers/', '/services/lpg-gas-line-installation/', '/sales/clientinformationrequest/'],
-      [lpg.path]: ['/services/lpg-gas-line-installation/', '/products/commercial-gas-stoves/', '/products/commercial-wok-ranges/', '/products/gas-deck-ovens/', '/services/kitchen-fire-suppression/', '/guides/commercial-kitchen-exhaust-hood-guide/', '/sales/clientinformationrequest/'],
+      [lpg.path]: ['/services/lpg-gas-line-installation/', '/products/commercial-gas-stoves/', '/products/commercial-wok-ranges/', '/services/kitchen-fire-suppression/', '/guides/commercial-kitchen-exhaust-hood-guide/', '/sales/clientinformationrequest/'],
       [care.path]: ['/guides/ss304-vs-ss316-stainless-steel/', '/products/stainless-steel-sinks/', '/products/stainless-steel-work-tables/', '/products/stainless-steel-dish-tables/', '/products/stainless-steel-shelving/', '/products/stainless-steel-racks/', '/services/', '/guides/commercial-kitchen-exhaust-hood-guide/'],
     };
     for (const p of THREE) {
@@ -1396,7 +1396,7 @@ describe('guides: the seven guides of 2026-11-19 — dates, keywords, structure,
     ['/guides/kitchen-fresh-air-system-guide/', 'fresh air system for kitchen', ['/services/fresh-air-systems/', '/guides/commercial-kitchen-exhaust-hood-guide/']],
     ['/guides/custom-stainless-steel-fabrication-guide/', 'stainless steel fabrication', ['/services/stainless-steel-fabrication/', '/guides/ss304-vs-ss316-stainless-steel/']],
     ['/guides/kitchen-exhaust-problems/', 'kitchen exhaust', ['/services/exhaust-and-fresh-air-systems/', '/guides/commercial-kitchen-exhaust-hood-guide/']],
-    ['/guides/commercial-bakery-equipment-guide/', 'commercial bakery equipment', ['/products/gas-deck-ovens/', '/services/lpg-gas-line-installation/']],
+    ['/guides/commercial-bakery-equipment-guide/', 'commercial bakery equipment', ['/catalogue/#cat-cooking', '/services/lpg-gas-line-installation/']],
   ];
   const faqOf = (p) => [...p.html.matchAll(/<div class="faq-item">\s*<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/g)];
   const hrefsOf = (p) => new Set(p.S.attrs.filter((a) => a.tag === 'a' && a.name === 'href').map((a) => a.value));
