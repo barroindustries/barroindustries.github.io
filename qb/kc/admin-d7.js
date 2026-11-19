@@ -555,7 +555,20 @@ function switchBlock(){
   return `<div class="cfg-group cfg-wide"><div class="cfg-lbl">Configurators for new quotes <span class="cfg-staff-chip" title="Only the President can set it">President only</span></div>
     <div class="kc-sm">Who starts a NEW quote with the configurators (the seven tabs and the new pricing). It takes effect the next time each person opens the quote builder. Quotes, drafts and templates made before it was switched on always open and price exactly as before, and Brilliance Steel never uses it.</div>
     <div class="kc-adm-radios" role="radiogroup" aria-label="Configurators for new quotes">${SWITCH_OPTS.map(([v,l,t]) => `<label><input type="radio" name="kcMode" value="${v}" data-kcmode ${cur===v?'checked':''}${BUSY||!(L&&L.saveSwitch)?' disabled':''}><span>${l}<span class="kc-sm">${t}</span></span></label>`).join('')}</div>
-    <div class="kc-sm" style="margin-top:6px">One device can opt out from Help › Configurators on this device.</div></div>`;
+    <div class="kc-sm" style="margin-top:6px">One device can opt out from Help › Configurators on this device.</div>
+    <label style="margin-top:12px;display:flex;gap:10px;align-items:flex-start;cursor:pointer;text-transform:none;letter-spacing:normal;font-weight:400;font-size:13px;color:inherit"><input type="checkbox" style="flex:0 0 auto;margin-top:3px" data-approveall ${approveAllNow()?'checked':''}${BUSY||!(L&&L.saveSwitch)?' disabled':''}><span><b>Every quote needs the President's approval</b><span class="kc-sm"> Sales can only send a configurator quote for approval; the President files it. Turn off when the price rules are trusted.</span></span></label></div>`;
+}
+/* owner 2026-11-20 (Finalize Step 1.4): day-one "every quote goes to Neil", the approveAll flag of settings/quote_builder, as a screen control (the write is KCLive.saveSwitch) */
+function approveAllNow(){ const L = live(); return !!(L && L.flags && L.flags.approveAll === true); }
+async function setApproveAll(on){
+  if(BUSY || !KC.can('editSettings')) return renderSettings();
+  BUSY = true; say('st','ok','Saving…'); renderSettings();
+  try{
+    await viaLive('saveSwitch', { approveAll: !!on });
+    const L = live(); if(L && L.flags && typeof L.flags==='object') L.flags.approveAll = !!on;
+    say('st','ok', on ? 'Saved: every configurator quote now needs your approval before it is filed.' : 'Saved: quotes need your approval only when the price rules say so.');
+  }catch(err){ console.error('KC admin: approveAll was not saved', err); say('st','err','Not saved: '+errText(err)+'. Nothing changed.'); }
+  BUSY = false; renderSettings();
 }
 /* "Import prices from a file": the seed made by scripts/kc-seed-build.js. The file is parsed and counted here; the write is KCLive.importSeed(json). */
 let SEED = null;                                   // { name, json, counts } once a valid file has been chosen
@@ -659,6 +672,7 @@ document.addEventListener('change',e=>{
   if(el.id==='naCat'){ const b = el.value===BLOW; if($('naBlow')) $('naBlow').hidden = !b; if($('naSizeWrap')) $('naSizeWrap').hidden = b; return; }
   if(el.id==='kcSeedFile') return chooseSeed(el);
   if('kcmode' in d) return setSwitch(el.value);
+  if('approveall' in d) return setApproveAll(!!el.checked);
   if('floor' in d) return setFloor(el.value);
   /* a price: a blank entry is refused (never saved as no price, never as zero); an invalid entry snaps back; every real change goes through KCLive */
   if(d.plp) return editPrice(d.plp, el);

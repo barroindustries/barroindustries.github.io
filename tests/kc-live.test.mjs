@@ -47,6 +47,17 @@
 //   56. host-d7.js      D4: the card shows the cheapest start / the dearest standard model; the start cache ignores the list; D14: the id chip back  -> the "D4 / D14" tests
 //   57. d7-doc.js       D7: the client's box stays first / is not put back when the quote stops being a KC one  -> "Prepared by: one box added ..." and "the order is also set when the page asks for the header ..."
 //   58. kc-live.js      D7: the approver's name is never looked up / falls back to the signed-in user / overwrites a stored name / overwrites a carry set meanwhile / holds the carry back until the lookup answers  -> the six "D7" afterLoad tests
+// FABLE REVIEW ROUND (2026-11-20, findings F5 F7 F8 F10 F12 F13 F15; specs/BK-LIVE-FABLE-REVIEW-2026-11-20.md): 75 mutants in a scratch copy (the page ones are in tests/kc-builder-port.test.mjs), every one KILLED:
+//   59. d7-pricing.js   F5: a formula catalogue line has no calculator-price standard / that price replaces a fixed product's base price                         -> the four "F5" tests (+ "a typed catalogue price ..." / "standard total ...")
+//   60. d7-adapter.js   F7: a loaded line is never "not known" / sidecarRow ignores the mark / graft does not end the doubt / typed numbers (or typed custom parts) on the line do not count
+//                                                                                                                                                       -> the five "Fable review F7" adapter tests
+//   61. js/app.js       F7: keepTypedCosts never applied / replaces a row the builder knows / does not check the name or the kind / a revision does not look at its parent / a failing read blocks the write /
+//                       the stored sidecar is read on every save / the kept rows are not written / no cap on the read  -> the "keepTypedCosts" and the six bridge tests (the real listener, lifted out of js/app.js)
+//   62. d7-flow.js      F8: the buttons for everyone on a KC quote again / Purchasing loses them / no link, a link for the President, a link on a legacy quote, a link at the end of the row, a link to the wrong screen /
+//                       no way back for a person without the buttons (bar, phone menu) / the phone back row for the President too; d7-flow.css: no 44 px target  -> the "Fable review F8" tests
+//   63. kc-live.js      F10: failedForUser ignores the switch / says nothing for denied or for offline / says it when the prices loaded / a timeout forgets the switch or the person; allowsNew without the prices test
+//                                                                                                                                                       -> the four "Fable review F10" tests, "KCLive.allowsNew"
+//   64. d7-adapter.js   F12: the chip says "cannot be filed until then" again                                                                         -> "Fable review F12"
 //
 // Run with: node --test tests/kc-live.test.mjs        (or  KC_QB_DIR=/path/to/scratch/qb node --test tests/kc-live.test.mjs)
 
@@ -638,7 +649,7 @@ describe('standard total, costKnown and the below-markup warning', () => {
     const i = env.D7.pricing.standardInfo();
     assert.equal(i.costKnown, false); assert.equal(i.standardTotal, 4321); assert.equal(i.net, 4321);
   });
-  it('a typed catalogue price: the base price of a fixed product is the standard; a formula product\'s cannot be read back, so the cost is not known', () => {
+  it('a typed catalogue price: the base price of a fixed product is the standard; a formula product made before the calculator\'s price was kept on the line has none to read back, so the cost is not known', () => {
     const env = readyEnv('president'); const fixed = addCatalogue(env, { priceBasis: 'manual', priceManual: true, unitPrice: 900, amount: 900 });
     let i = env.D7.pricing.standardInfo();
     assert.equal(i.standardTotal, 1111); assert.equal(i.net, 900); assert.equal(i.costKnown, true);
@@ -646,6 +657,42 @@ describe('standard total, costKnown and the below-markup warning', () => {
     addCatalogue(env2, { id: 'PW-013', priceBasis: 'manual', priceManual: true, unitPrice: 900, amount: 900 });
     i = env2.D7.pricing.standardInfo(); assert.equal(i.costKnown, false);
     void fixed;
+  });
+  // Fable review F5 (2026-11-20): a size-priced catalogue line used to escape the approval rule once its price was typed (the standard could not be read back); the page now keeps the calculator's price on the line
+  // when it is added (basisUnitPrice, KC mode) and that is the standard a typed price is held against.
+  const formulaLine = (over = {}) => ({ id: 'PW-013', formulaType: 'per_sqm', unitPrice: 1234, amount: 1234, basisUnitPrice: 1234, ...over });     // as the calculator adds it: no priceBasis, no priceManual
+  const typeOver = (env, price) => env.run(`items[0].unitPrice = ${price}; items[0].amount = ${price}; items[0].priceManual = true;`);                // what updatePrice() does to a catalogue line
+  it('F5: a typed price on a size-priced catalogue line is held against the price the calculator gave: the standard is that price, the cost is known, and Sales must send it for approval', () => {
+    const env = readyEnv('sales'); addCatalogue(env, formulaLine()); typeOver(env, 900);
+    const i = env.D7.pricing.standardInfo();
+    assert.equal(i.standardTotal, 1234); assert.equal(i.net, 900); assert.equal(i.costKnown, true);
+    const r = env.D7.flow.approvalRequired();
+    assert.equal(r.required, true); assert.equal(r.locked, true); assert.deepEqual(plain(r.reasons), ['below-standard']);
+    assert.match(env.D7.h('flow.approvalReason'), /below its standard price/);
+    assert.match(env.D7.h('pricing.priceNote', itemsOf(env)[0], 0), /Below the list price \(P1234\.00\)/, 'the line says so under the price box');
+  });
+  it('F5: the President is never forced; a typed price equal to the calculator\'s, or above it, forces nothing; a line nobody typed over is neutral', () => {
+    const pres = readyEnv('president'); addCatalogue(pres, formulaLine()); typeOver(pres, 900);
+    assert.equal(pres.D7.flow.approvalRequired().required, false, 'the approver is the President');
+    for (const price of [1234, 1500]) { const env = readyEnv('sales'); addCatalogue(env, formulaLine()); typeOver(env, price); assert.equal(env.D7.flow.approvalRequired().required, false, 'typed ' + price); }
+    const plainLine = readyEnv('sales'); addCatalogue(plainLine, formulaLine());
+    assert.equal(plainLine.D7.flow.approvalRequired().required, false); assert.equal(plainLine.D7.pricing.standardInfo().standardTotal, 1234);
+  });
+  it('F5: a typed price below the calculator\'s also shows on a quote of several lines (the total is held against the sum of the standards), and the approval carry still covers an approved quote', () => {
+    const env = readyEnv('sales'); addCatalogue(env, formulaLine({ qty: 2, amount: 2468 })); addSink(env);
+    env.run('items[0].unitPrice = 1000; items[0].amount = 2000; items[0].priceManual = true;');
+    const i = env.D7.pricing.standardInfo();
+    assert.ok(i.net < i.standardTotal); assert.equal(env.D7.flow.approvalRequired().required, true);
+    env.KCLive.setCarry({ lastApprovedNet: i.net, lastApprovedGrand: i.net, approvedBy: 'u-pres', sourceColl: 'bk_quotes', sourceDocId: 'q1' });
+    assert.equal(env.D7.flow.approvalRequired().required, false, 'an approved quote keeps its approval on reopen (Q65): unchanged');
+  });
+  it('F5 keeps every other case: a FIXED product is still held against its base price (a stored calculator price does not replace it), a line from before the change stays neutral, a website line keeps its own rule', () => {
+    const fixed = readyEnv('sales'); addCatalogue(fixed, { priceBasis: 'manual', priceManual: true, unitPrice: 900, amount: 900, basisUnitPrice: 1000 });
+    assert.equal(fixed.D7.pricing.standardInfo().standardTotal, 1111, 'the fixed rule, unchanged');
+    const old = readyEnv('sales'); addCatalogue(old, formulaLine({ basisUnitPrice: undefined })); typeOver(old, 900);
+    assert.equal(old.D7.pricing.standardInfo().costKnown, false); assert.equal(old.D7.flow.approvalRequired().required, false, 'no stored price: neutral, as before');
+    const web = readyEnv('sales'); addCatalogue(web, { id: 'PW-004', familyId: 'sink', priceBasis: 'manual', priceManual: true, unitPrice: 900, amount: 900, basisUnitPrice: 2000 });
+    assert.equal(web.D7.pricing.standardInfo().standardTotal, 2000, 'a website line: its website price');
   });
   it('Q64: a typed price on a list-priced line is warned against its list-based price; the amount is the list price, so every role reads it', () => {
     for (const role of ['president', 'sales']) {
@@ -1180,11 +1227,12 @@ describe('the approval link and the screens', () => {
     const body = env.els.get('d7ModalBody').innerHTML;
     assert.match(body, /Q&lt;b&gt;1/); assert.doesNotMatch(body, /<img/); assert.doesNotMatch(body, /<b>1/);
   });
-  it('the two screen buttons are wanted for the President and Purchasing (even while the switch is off), and for everyone only when the quote is a KC one', () => {
+  it('the two screen buttons are for the President and Purchasing only (the bar was crowded: Fable review F8), whatever the quote; nothing is drawn when the feature is not live', () => {
     const off = (role, kc) => { const e = readyEnv(role); e.run(`quoteEngine = "${kc ? 'kc1' : 'legacy'}"`); return e.D7.flow.wantsButtons(); };
     assert.equal(off('president', false), true); assert.equal(off('purchasing', false), true);
     assert.equal(off('sales', false), false, 'Sales and Operations see today\'s builder, byte for byte, while the switch is off'); assert.equal(off('manager', false), false);
-    for (const role of ['sales', 'manager', 'president', 'purchasing']) assert.equal(off(role, true), true, role);
+    for (const role of ['president', 'purchasing']) assert.equal(off(role, true), true, role);
+    for (const role of ['sales', 'manager']) assert.equal(off(role, true), false, role + ' has no buttons on a KC quote either: they cannot change anything on either screen');
     const dead = makeEnv({ without: ['d7/d7-pricing.js'] }); dead.run('quoteEngine = "kc1"');
     assert.equal(dead.D7.flow ? !!(dead.D7.flow.wantsButtons && dead.D7.flow.wantsButtons()) : false, false, 'nothing is drawn when the feature is not live');
   });
@@ -1849,5 +1897,304 @@ describe('D4 (Addendum 1 A1 rule 5): a product card\'s "from" price is the list 
       void title;
     }
     const env = cardsEnv(); env.KC.openCustom('prep'); assert.equal(env.els.get('kcPanelTitle').innerHTML, '➕ Add custom item');
+  });
+});
+
+// ═════════════════════════════ Fable review F7 (2026-11-20): typed costs the page does not hold are never sent as "none" ═════════════════════════════
+// The typed costs of a custom item live only in the cost sidecar (the payload never carries them) and the sidecar is REPLACED as a whole on every save.  A line loaded from a saved quote has none in memory until
+// afterLoad grafts them back: if that read has not answered, failed, matched nothing, or the quote came from a draft (which never reads them), the page sends typed: null ("not known"), and the bridge in js/app.js keeps
+// what is stored for that line.  Made in this session, typed by the person, or grafted back = known, and sent as it is.
+describe('Fable review F7: the typed costs of a custom item survive an update in place when the graft did not run', () => {
+  const TYPED = { custom: [], m: 999, lab: 88 };
+  // a custom item with typed materials and labor, as it is FILED: the payload copy (publicItem) and its sidecar row; then "loaded" into a page that has neither the typed costs nor the graft
+  function filedCustom() {
+    const env = readyEnv('president');
+    env.KC.addLine('custom', { cat: 'prep', name: 'Cart', desc: '', dims: '', rows: [{ k: 'sh12', q: 1 }], m: TYPED.m, lab: TYPED.lab }, { render: false });
+    const row = plain(env.D7.h('adapter.sidecarRow', itemsOf(env)[0])), pub = plain(env.D7.h('adapter.publicItem', itemsOf(env)[0]));
+    return { env, row, pub };
+  }
+  function loadInto(env, pub, docs = null, opt = {}) {
+    env.run(`items.length = 0; reopenSourceDocId = "q1"; reopenSourceCollection = "bk_quotes"; items.push(${JSON.stringify(pub)})`);
+    env.D7.h('adapter.hydrate', itemsOf(env)[0]); env.D7.h('adapter.sync');
+    if (docs) env.win.db = makeFakeDb(docs, opt);
+    return env;
+  }
+  it('a loaded line is "not known": its sidecar row says typed: null, not a row of nulls; a line made in this session sends what it holds, even when that is nothing', () => {
+    const { env, row, pub } = filedCustom();
+    assert.deepEqual(row.typed, { custom: [], m: 999, lab: 88 }, 'in the session that made it: the typed costs');
+    loadInto(env, pub);
+    assert.equal(itemsOf(env)[0].cfg.lab == null, true, 'the payload never carried them'); assert.equal(itemsOf(env)[0]._kc.typedUnknown, true);
+    const loaded = plain(env.D7.h('adapter.sidecarRow', itemsOf(env)[0]));
+    assert.equal(loaded.typed, null); assert.equal(loaded.kcId, 'K1'); assert.equal(loaded.kind, 'custom'); assert.ok(loaded.M > 0, 'the rest of the row is as it was');
+    assert.ok(JSON.stringify(loaded).indexOf('undefined') < 0, 'nothing a Firestore write would refuse');
+    const fresh = readyEnv('president'); fresh.KC.addLine('custom', { cat: 'prep', name: 'Plain', desc: '', dims: '', rows: [{ k: 'sh12', q: 1 }], m: null, lab: 5 }, { render: false });
+    fresh.KC.addLine('sink', fresh.KC.products.sink.startCfg('hand'), { render: false });
+    assert.deepEqual(plain(fresh.D7.h('adapter.sidecarRow', itemsOf(fresh)[1])).typed, { custom: [] }, 'a product made in this session: a row of nulls is the truth');
+    assert.equal(itemsOf(fresh)[0]._kc.typedUnknown, undefined);
+  });
+  it('typed numbers in memory end the doubt (a restore from this browser\'s own storage keeps them), and so does typing them on a loaded line', () => {
+    const { env, pub } = filedCustom();
+    const raw = JSON.parse(JSON.stringify(plain(env.run('items[0]')))); delete raw._kc;                 // what bkqb_items holds: the line with its typed costs, no _kc
+    loadInto(env, raw);
+    assert.equal(itemsOf(env)[0]._kc.typedUnknown, undefined); assert.deepEqual(plain(env.D7.h('adapter.sidecarRow', itemsOf(env)[0])).typed, { custom: [], m: 999, lab: 88 });
+    loadInto(env, pub); env.run('items[0].cfg.lab = 12');
+    assert.deepEqual(plain(env.D7.h('adapter.sidecarRow', itemsOf(env)[0])).typed, { custom: [], m: null, lab: 12 }, 'the person typed a cost on a line that was not known: that is what is sent');
+  });
+  it('a product line with typed costs on its custom parts (restored from this browser\'s own storage) is known too: part by part, the row of costs goes out as it is', () => {
+    const env = readyEnv('president'); addSink(env);
+    env.run('items[0].cfg.custom = [{ text: "a bracket", m: 10, lab: 20 }, { text: "a shelf", m: null, lab: null }]');
+    const raw = JSON.parse(JSON.stringify(plain(env.run('items[0]')))); delete raw._kc;
+    env.run(`items.length = 0; items.push(${JSON.stringify(raw)})`); env.D7.h('adapter.hydrate', itemsOf(env)[0]); env.D7.h('adapter.sync');
+    assert.equal(itemsOf(env)[0]._kc.typedUnknown, undefined); assert.deepEqual(plain(env.D7.h('adapter.sidecarRow', itemsOf(env)[0])).typed, { custom: [{ m: 10, lab: 20 }, { m: null, lab: null }] });
+    const bare = JSON.parse(JSON.stringify(raw)); bare.cfg.custom = [{ text: 'a bracket' }, { text: 'a shelf' }];
+    env.run(`items.length = 0; items.push(${JSON.stringify(bare)})`); env.D7.h('adapter.hydrate', itemsOf(env)[0]); env.D7.h('adapter.sync');
+    assert.equal(itemsOf(env)[0]._kc.typedUnknown, true, 'the payload copy has none of them'); assert.equal(plain(env.D7.h('adapter.sidecarRow', itemsOf(env)[0])).typed, null);
+  });
+  it('afterLoad grafts the stored typed costs back and the line is known again; a sidecar that cannot be read, or does not match, leaves it "not known"', async () => {
+    const approved = { approvalStatus: 'approved', netAmount: 5000, grandTotal: 5600, vatAmount: 600, approvedBy: 'u-pres' };
+    const ok = filedCustom(); loadInto(ok.env, ok.pub, { 'bk_quotes/q1': approved, 'quote_costs/bk_quotes_q1': { items: [{ i: 0, n: 'Cart', kc: ok.row }] } });
+    await ok.env.KCLive.afterLoad({ sourceDocId: 'q1', sourceCollection: 'bk_quotes' });
+    assert.equal(itemsOf(ok.env)[0].cfg.lab, 88); assert.equal(itemsOf(ok.env)[0]._kc.typedUnknown, undefined);
+    assert.deepEqual(plain(ok.env.D7.h('adapter.sidecarRow', itemsOf(ok.env)[0])).typed, { custom: [], m: 999, lab: 88 }, 'round trip: what was stored goes back');
+    for (const [why, docs, opt] of [['the read is refused', { 'bk_quotes/q1': approved, 'quote_costs/bk_quotes_q1': { items: [] } }, { deny: ['quote_costs'] }], ['the read fails', { 'bk_quotes/q1': approved }, { fail: ['quote_costs'] }],
+      ['no sidecar', { 'bk_quotes/q1': approved }, {}], ['the row is another line\'s', { 'bk_quotes/q1': approved, 'quote_costs/bk_quotes_q1': { items: [{ i: 0, n: 'Not Cart', kc: ok.row }] } }, {}]]) {
+      const x = filedCustom(); loadInto(x.env, x.pub, docs, opt); await x.env.KCLive.afterLoad({ sourceDocId: 'q1', sourceCollection: 'bk_quotes' });
+      assert.equal(itemsOf(x.env)[0]._kc.typedUnknown, true, why); assert.equal(plain(x.env.D7.h('adapter.sidecarRow', itemsOf(x.env)[0])).typed, null, why);
+    }
+  });
+  it('a draft resume never reads the typed costs (afterLoad returns at once): its custom items stay "not known", so an autosave cannot erase them', async () => {
+    const { env, pub } = filedCustom(); loadInto(env, pub); env.run('reopenSourceDocId = null; reopenSourceCollection = null');
+    assert.equal(await env.KCLive.afterLoad({ draftDocId: 'd1', items: [pub] }), false);
+    assert.equal(plain(env.D7.h('adapter.sidecarRow', itemsOf(env)[0])).typed, null);
+  });
+  it('a duplicate of a line, and a line the product file does not know, carry no flag problems: a copy of a known line is known, a missing configurator has no row at all', () => {
+    const { env } = filedCustom(); env.run('items.push(JSON.parse(JSON.stringify(items[0]))); items[1].kcId = "K2"');
+    assert.equal(itemsOf(env)[1]._kc && itemsOf(env)[1]._kc.typedUnknown, undefined); assert.equal(env.D7.h('adapter.sidecarRow', { kcKind: 'nothing', cfg: {} }), '');
+  });
+
+  // ── the bridge in js/app.js, the REAL listener lifted out of its own source and driven with real messages (the same way tests/quote-link.test.mjs drives it) ──
+  const APP = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+  const LISTENER = (() => {
+    const start = APP.indexOf("window.addEventListener('message', async (e) => {", APP.indexOf('Quote Builder iframe → Firestore bridge'));
+    assert.ok(start > 0, 'the bridge listener was not found');
+    const end = APP.indexOf('\n});', start); assert.ok(end > start && APP.slice(start, end).includes('saveCostSidecar'));
+    return APP.slice(start, end + 4);
+  })();
+  const KEEP = (APP.match(/^function keepTypedCosts\([\s\S]*?\n\}/m) || [])[0];
+  const ORIGIN = 'https://app.test';
+  function makeBridge(docs = {}, opt = {}) {
+    const store = new Map(Object.entries(docs).map(([k, v]) => [k, plain(v)])), reads = [], sets = [], listeners = [], FRAME = {};
+    let seq = 0;
+    const ref = (coll, id) => ({ id,
+      get: async () => { const k = coll + '/' + id; reads.push(k); if (opt.failGet && coll === 'quote_costs') throw Object.assign(new Error('unavailable'), { code: 'unavailable' }); if (opt.hangGet && coll === 'quote_costs') return new Promise(() => {}); return { exists: store.has(k), id, data: () => plain(store.get(k)) }; },
+      set: async (body) => { const k = coll + '/' + id; sets.push({ key: k, body: plain(body) }); store.set(k, plain(body)); },
+      update: async (patch) => { const k = coll + '/' + id; store.set(k, Object.assign({}, store.get(k), plain(patch))); }, delete: async () => { store.delete(coll + '/' + id); } });
+    const db = { collection: (coll) => ({ doc: (id) => ref(coll, id), add: async (data) => { const id = 'new' + (++seq); store.set(coll + '/' + id, plain(data)); return ref(coll, id); }, where: () => ({ get: async () => ({ docs: [] }) }) }) };
+    const win = { location: { origin: ORIGIN }, addEventListener: (t, f) => { if (t === 'message') listeners.push(f); }, QUOTE_COLLECTIONS: ['bk_quotes', 'bs_quotes'], quoteCollectionFor: () => 'bk_quotes',
+      quoteStateFields: (s) => ({ filed: { status: 'filed' }, pending_approval: { status: 'pending_approval' } })[s], Clients: { upsertFromQuote: async () => 'c1' }, fmtN2: String, logAudit() {}, linkQuoteToRequest: async () => true };
+    const ctx = vm.createContext({ window: win, db, console: { log() {}, error() {}, warn() {} }, document: { getElementById: (id) => (id === 'qb-frame' ? { contentWindow: FRAME } : null) },
+      firebase: { firestore: { FieldValue: { serverTimestamp: () => ({ ts: 1 }) } } }, currentUser: { uid: 'u-sales', email: 's@example.test' }, userProfile: { displayName: 'Sales One' }, currentRole: 'employee',
+      Notifs: { showToast() {}, success() {}, sendToOwner: async () => {} }, dbCacheInvalidate() {}, setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, clearTimeout });
+    vm.runInContext('function _qbCleanSourceRef() { return null; } function _qbCleanEstimateCheck() { return null; }\n' + (opt.noKeep ? '' : KEEP + '\n') + LISTENER, ctx);       // the two sanitisers are not what this is about
+    const send = async (type, payload, extra) => { await listeners[0]({ origin: ORIGIN, source: FRAME, data: Object.assign({ type, payload }, extra || {}) }); };
+    return { store, reads, sets, send, ctx };
+  }
+  const row = (typed, over = {}) => ({ i: 0, n: 'Cart', kc: { kcId: 'K1', kind: 'custom', markup: 2, M: 100, projectCost: 200, groups: [], lines: [], typed }, ...over });
+  const sidecarOf = (rows, over = {}) => ({ v: 1, items: rows, kcSummary: { v: 1, net: 4000 }, approval: null, ...over });
+  const quote = (over = {}) => ({ quoteNumber: 'BKTEST261120-001R1', company: 'BK', clientName: 'Juan', items: [], total: 4000, grandTotal: 4000, netAmount: 4000, ...over });
+  const stored = (b, key) => b.store.get(key);
+
+  it('keepTypedCosts: a row with typed null takes the stored typed costs of the same line (kcId, kind and name); a row with typed as an object, even of nulls, is the builder\'s word and replaces; nothing is mutated', () => {
+    assert.ok(KEEP, 'keepTypedCosts is a top-level function of js/app.js');
+    const fn = new Function(KEEP + '; return keepTypedCosts;')();
+    const prev = [row({ custom: [], m: 1, lab: 2 }), row({ custom: [{ m: 3, lab: 4 }] }, { i: 1, n: 'Sink', kc: { kcId: 'K2', kind: 'sink', typed: { custom: [{ m: 3, lab: 4 }] } } })];
+    const rows = [row(null), row({ custom: [{ m: null, lab: null }] }, { i: 1, n: 'Sink', kc: { kcId: 'K2', kind: 'sink', typed: { custom: [{ m: null, lab: null }] } } })];
+    const frozen = JSON.parse(JSON.stringify([rows, prev]));
+    const out = plain(fn(rows, prev));
+    assert.deepEqual(out[0].kc.typed, { custom: [], m: 1, lab: 2 }, 'not known: the stored costs');
+    assert.deepEqual(out[1].kc.typed, { custom: [{ m: null, lab: null }] }, 'known (a row of nulls): replaces');
+    assert.equal(out[0].kc.M, 100, 'every other field is the new row\'s'); assert.deepEqual(plain([rows, prev]), frozen, 'inputs untouched');
+    for (const other of [row(null, { n: 'Renamed' }), row(null, { kc: { kcId: 'K1', kind: 'sink', typed: null } }), row(null, { kc: { kcId: 'K7', kind: 'custom', typed: null } }), row(null, { kc: { kind: 'custom', typed: null } })])
+      assert.equal(plain(fn([other], prev))[0].kc.typed, null, 'a row that is not the same line keeps null');
+    assert.equal(plain(fn([row(null)], [row(null)]))[0].kc.typed, null, 'nothing stored to keep');
+    for (const junk of [null, undefined, 'x', 5, {}]) { assert.equal(fn(junk, prev), junk); assert.deepEqual(plain(fn(rows, junk)), plain(rows)); }
+    assert.deepEqual(plain(fn([null, { i: 2 }, { i: 3, kc: null }], prev)), [null, { i: 2 }, { i: 3, kc: null }]);
+  });
+  it('QUOTE_UPDATE (update in place) with a line the page does not know the typed costs of: the stored typed costs survive the write; everything else in the sidecar is the new one', async () => {
+    const b = makeBridge({ 'quote_costs/bk_quotes_q1': sidecarOf([row({ custom: [], m: 999, lab: 88 })], { kcSummary: { v: 1, net: 1 } }) });
+    await b.send('QUOTE_UPDATE', quote(), { docId: 'q1', collection: 'bk_quotes', costSidecar: sidecarOf([row(null)]) });
+    const w = b.sets.filter(s => s.key === 'quote_costs/bk_quotes_q1'); assert.equal(w.length, 1, 'one write');
+    assert.deepEqual(w[0].body.items[0].kc.typed, { custom: [], m: 999, lab: 88 }, 'the cost basis is kept'); assert.equal(w[0].body.kcSummary.net, 4000, 'the summary is the new one');
+    assert.equal(w[0].body.quoteDocId, 'q1'); assert.equal(w[0].body.createdBy, 'u-sales');
+  });
+  it('the builder\'s own word replaces: typed as an object (the person cleared the costs on a line the page knows) overwrites, and no read is made when no row says "not known"', async () => {
+    const b = makeBridge({ 'quote_costs/bk_quotes_q1': sidecarOf([row({ custom: [], m: 999, lab: 88 })]) });
+    await b.send('QUOTE_UPDATE', quote(), { docId: 'q1', collection: 'bk_quotes', costSidecar: sidecarOf([row({ custom: [], m: null, lab: null })]) });
+    assert.deepEqual(b.sets.filter(s => s.key === 'quote_costs/bk_quotes_q1')[0].body.items[0].kc.typed, { custom: [], m: null, lab: null });
+    assert.equal(b.reads.some(r => r.startsWith('quote_costs/')), false, 'no read of the stored sidecar');
+  });
+  it('a stored sidecar that is missing, cannot be read, or does not answer in time never blocks the write: the rows go as they are', { timeout: 8000 }, async () => {
+    for (const [why, docs, opt] of [['missing', {}, {}], ['fails', { 'quote_costs/bk_quotes_q1': sidecarOf([row({ custom: [], m: 1, lab: 2 })]) }, { failGet: true }]]) {
+      const b = makeBridge(docs, opt);
+      await b.send('QUOTE_UPDATE', quote(), { docId: 'q1', collection: 'bk_quotes', costSidecar: sidecarOf([row(null)]) });
+      assert.equal(b.sets.filter(s => s.key === 'quote_costs/bk_quotes_q1')[0].body.items[0].kc.typed, null, why);
+    }
+    const hang = makeBridge({ 'quote_costs/bk_quotes_q1': sidecarOf([row({ custom: [], m: 1, lab: 2 })]) }, { hangGet: true }); hang.ctx.setTimeout = (fn) => { fn(); return 0; };      // the 4 s cap fires at once
+    await hang.send('QUOTE_UPDATE', quote(), { docId: 'q1', collection: 'bk_quotes', costSidecar: sidecarOf([row(null)]) });
+    assert.equal(hang.sets.filter(s => s.key === 'quote_costs/bk_quotes_q1').length, 1, 'still written');
+  });
+  it('a draft autosave and a draft save keep the stored typed costs of that draft too (a resumed draft never reads them back)', async () => {
+    const b = makeBridge({ 'quote_costs/bk_quotes_draft_u-sales': sidecarOf([row({ custom: [], m: 5, lab: 6 })]) });
+    await b.send('QUOTE_DRAFT', quote(), { costSidecar: sidecarOf([row(null)]) });
+    assert.deepEqual(b.sets.filter(s => s.key === 'quote_costs/bk_quotes_draft_u-sales')[0].body.items[0].kc.typed, { custom: [], m: 5, lab: 6 });
+    const named = makeBridge({ 'bk_quotes/d9': { status: 'draft' }, 'quote_costs/bk_quotes_d9': sidecarOf([row({ custom: [], m: 7, lab: 8 })]) });
+    await named.send('QUOTE_SAVE_DRAFT', quote(), { draftDocId: 'd9', costSidecar: sidecarOf([row(null)]) });
+    assert.deepEqual(named.sets.filter(s => s.key === 'quote_costs/bk_quotes_d9')[0].body.items[0].kc.typed, { custom: [], m: 7, lab: 8 });
+  });
+  it('a NEW REVISION of a reopened quote (QUOTE_FILED, a new document) keeps the typed costs of the quote it was reopened from; a quote with no parent reads only its own (new) document', async () => {
+    const b = makeBridge({ 'quote_costs/bk_quotes_q1': sidecarOf([row({ custom: [], m: 999, lab: 88 })]) });
+    await b.send('QUOTE_FILED', quote({ parentQuoteId: 'q1', rootQuoteId: 'q1' }), { costSidecar: sidecarOf([row(null)]) });
+    const w = b.sets.filter(s => s.key.startsWith('quote_costs/') && s.key !== 'quote_costs/bk_quotes_q1');
+    assert.equal(w.length, 1); assert.deepEqual(w[0].body.items[0].kc.typed, { custom: [], m: 999, lab: 88 });
+    assert.deepEqual(stored(b, 'quote_costs/bk_quotes_q1').items[0].kc.typed, { custom: [], m: 999, lab: 88 }, 'the first copy is untouched');
+    const alone = makeBridge({}); await alone.send('QUOTE_FILED', quote(), { costSidecar: sidecarOf([row(null)]) });
+    assert.deepEqual(alone.reads.filter(r => r.startsWith('quote_costs/')), ['quote_costs/bk_quotes_new1']);
+  });
+  it('the sidecar write keeps its shape: the whole document is replaced (set, no merge), the call sites are as they were, and a bridge without the helper still writes', async () => {
+    assert.match(LISTENER, /await db\.collection\('quote_costs'\)\.doc\(coll \+ '_' \+ id\)\.set\(\{\s*\.\.\.sc, items: rows, quoteColl: coll, quoteDocId: id,/);
+    assert.equal((LISTENER.match(/saveCostSidecar\(coll, docRef\.id\)/g) || []).length, 2); assert.match(LISTENER, /saveCostSidecar\(collection, docId\)/);
+    const b = makeBridge({ 'quote_costs/bk_quotes_q1': sidecarOf([row({ custom: [], m: 9, lab: 9 })]) }, { noKeep: true });
+    await b.send('QUOTE_UPDATE', quote(), { docId: 'q1', collection: 'bk_quotes', costSidecar: sidecarOf([row(null)]) });
+    assert.equal(b.sets.filter(s => s.key === 'quote_costs/bk_quotes_q1').length, 1, 'no helper (an older app file): the write is the old one');
+  });
+});
+
+// ═════════════════════════════ Fable review F8 (2026-11-20): the top bar, the Estimator link, the way back ═════════════════════════════
+// A small tree of nodes stands in for the page: .topbar-right (with ❓ Help), the phone menu sheet (header, rows, a divider) and the search row (with "Add custom item").  The real d7-flow.js draws into it.
+describe('Fable review F8: the two screen buttons are the President\'s and Purchasing\'s; everyone else gets one text link beside "Add custom item", and a way back from a screen', () => {
+  function node(tag, id = '', cls = '') {
+    const n = { tag, id, className: cls, children: [], parentNode: null, attrs: {}, dataset: {}, textContent: '', style: {}, hidden: false,
+      setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'id') this.id = String(v); if (k.startsWith('data-')) this.dataset[k.slice(5).replace(/-(\w)/g, (m, c) => c.toUpperCase())] = String(v); },
+      getAttribute(k) { return k in this.attrs ? this.attrs[k] : (k === 'id' ? this.id : null); },
+      appendChild(c) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; this.children.push(c); return c; },
+      insertBefore(c, ref) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); return c; },
+      removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); c.parentNode = null; return c; },
+      get nextSibling() { const p = this.parentNode; return p ? (p.children[p.children.indexOf(this) + 1] || null) : null; },
+      get firstChild() { return this.children[0] || null; },
+      get classList() { const o = this; return { add(c) { if (!o.className.split(' ').includes(c)) o.className = (o.className + ' ' + c).trim(); }, remove(c) { o.className = o.className.split(' ').filter(x => x !== c).join(' '); }, toggle(c, f) { f ? this.add(c) : this.remove(c); }, contains: c => o.className.split(' ').includes(c) }; },
+      querySelector(sel) { const want = sel.replace(/^\./, ''); const all = (x) => x.children.flatMap(c => [c, ...all(c)]); return all(this).find(c => c.className.split(' ').includes(want)) || null; },
+      closest(sel) { for (let x = this; x; x = x.parentNode) { if (sel === '[data-d7]' && 'd7' in x.dataset) return x; if (sel.startsWith('#') && x.id === sel.slice(1)) return x; } return null; } };
+    return n;
+  }
+  function page(role, { kc = true, builder = true } = {}) {
+    const env = readyEnv(role); env.run(`quoteEngine = "${kc ? 'kc1' : 'legacy'}"`);
+    const body = node('body'), bar = node('div', '', 'topbar-right'), help = node('button', 'btnHelp'), row = node('div', 'productSearchRow'), add = node('button', 'btnAddCustomItem'), sheet = node('div', 'mtbSheet');
+    const hdr = node('div', '', 'mtb-sheet-hdr'), r1 = node('button', 'mtbHelp', 'mtb-row'), div = node('div', '', 'mtb-divider');
+    bar.appendChild(help); row.appendChild(add); row.appendChild(node('button', 'btnImportItems')); sheet.appendChild(hdr); sheet.appendChild(r1); sheet.appendChild(div);
+    [bar, row, sheet].forEach(x => body.appendChild(x));
+    const find = (root, id) => { if (root.id === id) return root; for (const c of root.children) { const f = find(c, id); if (f) return f; } return null; };
+    const doc = env.win.document; const listeners = {};
+    doc.createElement = tag => node(tag); doc.getElementById = id => find(body, id); doc.querySelector = sel => (sel === '.topbar-right' ? bar : (sel === '.main' ? null : null));
+    doc.addEventListener = (t, fn) => { listeners[t] = fn; }; doc.contains = () => true; doc.body = Object.assign(doc.body, { appendChild: c => body.appendChild(c), removeAttribute() {}, classList: doc.body.classList });
+    void builder;
+    return { env, body, bar, row, sheet, ids: root => root.children.map(c => c.id || c.className), find: id => find(body, id), listeners, click: el => listeners.click({ target: el, preventDefault() {} }) };
+  }
+  it('the President and Purchasing: both buttons in the bar (before Help) and in the phone menu, on a KC quote and on a legacy one; no Estimator link', () => {
+    for (const role of ['president', 'purchasing']) for (const kc of [true, false]) {
+      const p = page(role, { kc }); p.env.D7.flow.syncButtons();
+      assert.deepEqual(p.ids(p.bar), ['d7BtnPrices', 'd7BtnSettings', 'btnHelp'], role + ' kc=' + kc);
+      assert.deepEqual(p.ids(p.sheet), ['mtb-sheet-hdr', 'mtbHelp', 'd7MtbPrices', 'd7MtbSettings', 'mtb-divider'], role + ' kc=' + kc);
+      assert.equal(p.find('d7LnkPrices'), null, role + ': the buttons are enough');
+      assert.equal(p.find('d7BtnPrices').textContent, '🧱 Materials price list'); assert.equal(p.find('d7BtnPrices').getAttribute('data-screen'), 'prices');
+    }
+  });
+  it('Sales and Operations on a KC quote: no button in the bar, no row in the menu; one text link "Materials price list" right after "Add custom item"; on a legacy quote nothing at all', () => {
+    for (const role of ['sales', 'manager']) {
+      const p = page(role, { kc: true }); p.env.D7.flow.syncButtons();
+      assert.deepEqual(p.ids(p.bar), ['btnHelp'], role); assert.deepEqual(p.ids(p.sheet), ['mtb-sheet-hdr', 'mtbHelp', 'mtb-divider'], role);
+      assert.deepEqual(p.ids(p.row), ['btnAddCustomItem', 'd7LnkPrices', 'btnImportItems'], role + ': right after Add custom item');
+      const l = p.find('d7LnkPrices'); assert.equal(l.textContent, 'Materials price list'); assert.equal(l.getAttribute('data-d7'), 'screen'); assert.equal(l.getAttribute('data-screen'), 'prices'); assert.equal(l.tag, 'button'); assert.equal(l.type, 'button');
+      assert.match(l.className, /d7-lnk-prices/); assert.match(l.className, /no-print/);
+      p.env.D7.flow.syncButtons(); assert.equal(p.row.children.filter(c => c.id === 'd7LnkPrices').length, 1, 'drawn once, however often it syncs');
+      const lg = page(role, { kc: false }); lg.env.D7.flow.syncButtons();
+      assert.deepEqual(lg.ids(lg.bar), ['btnHelp']); assert.deepEqual(lg.ids(lg.row), ['btnAddCustomItem', 'btnImportItems']); assert.deepEqual(lg.ids(lg.sheet), ['mtb-sheet-hdr', 'mtbHelp', 'mtb-divider'], role + ': the legacy builder is untouched');
+    }
+  });
+  it('the link follows the quote and the person: it goes when the quote stops being a KC one or the role becomes the President\'s, and comes back with the quote', () => {
+    const p = page('sales'); p.env.D7.flow.syncButtons(); assert.ok(p.find('d7LnkPrices'));
+    p.env.run('quoteEngine = "legacy"'); p.env.D7.flow.syncButtons(); assert.equal(p.find('d7LnkPrices'), null);
+    p.env.run('quoteEngine = "kc1"'); p.env.D7.flow.syncButtons(); assert.ok(p.find('d7LnkPrices'));
+    p.env.KC.S.role = 'president'; p.env.D7.flow.syncButtons(); assert.equal(p.find('d7LnkPrices'), null); assert.ok(p.find('d7BtnPrices'), 'the role became known (KCLive.load): the buttons arrive');
+    p.env.KC.S.role = 'sales'; p.env.D7.flow.syncButtons(); assert.equal(p.find('d7BtnPrices'), null); assert.equal(p.find('d7MtbSettings'), null); assert.ok(p.find('d7LnkPrices'));
+  });
+  it('a way back is always there while a screen is open: the bar button and, for a person without the two menu rows, one "Quote builder" row at the top of the phone menu; both go when the builder is back', () => {
+    const p = page('sales'); p.env.D7.flow.boot();
+    p.env.KC.S.screen2 = 'prices'; p.env.D7.flow.syncButtons();
+    assert.equal(p.bar.children[0].id, 'd7BtnBack'); assert.equal(p.find('d7BtnBack').getAttribute('data-screen'), 'builder');
+    assert.deepEqual(p.ids(p.sheet), ['mtb-sheet-hdr', 'd7MtbBack', 'mtbHelp', 'mtb-divider']); assert.equal(p.find('d7MtbBack').textContent, '← Quote builder');
+    p.click(p.find('d7MtbBack')); assert.equal(p.env.KC.S.screen2, 'builder', 'pressing it goes back to the quote');
+    assert.equal(p.find('d7BtnBack'), null); assert.equal(p.find('d7MtbBack'), null);
+    const pres = page('president'); pres.env.D7.flow.boot(); pres.env.KC.S.screen2 = 'settings'; pres.env.D7.flow.syncButtons();
+    assert.ok(pres.find('d7BtnBack')); assert.equal(pres.find('d7MtbBack'), null, 'the President leaves by pressing the row of the open screen (as before)');
+    assert.equal(pres.find('d7MtbSettings').getAttribute('aria-pressed'), 'true');
+  });
+  it('the link opens the screen through the same click handler as the buttons (data-d7="screen"); the materials screen then shows the prices to every role (Q67), and the settings screen is not reachable from it', () => {
+    const p = page('sales'); p.env.D7.flow.boot(); p.env.D7.flow.syncButtons();
+    p.click(p.find('d7LnkPrices')); assert.equal(p.env.KC.S.screen2, 'prices');
+    const src = fs.readFileSync(path.join(QB, 'd7/d7-flow.js'), 'utf8'); assert.match(src, /case 'screen':/);
+    assert.equal(p.find('d7LnkPrices').getAttribute('data-screen'), 'prices');
+  });
+  it('the stylesheet has the link\'s rules (one small text link, a 44 px target on a phone, never printed)', () => {
+    const css = fs.readFileSync(path.join(QB, 'd7/d7-flow.css'), 'utf8');
+    assert.match(css, /#productSearchRow \.d7-lnk-prices\{[^}]*text-decoration:underline/); assert.match(css, /@media\(max-width:768px\)\{ #productSearchRow \.d7-lnk-prices\{min-height:44px/); assert.match(css, /@media print\{[^}]*\.d7-lnk-prices\{display:none!important;\}/);
+  });
+});
+
+// ═════════════════════════════ Fable review F10 (2026-11-20): the switch allows this person but the prices did not load ═════════════════════════════
+describe('Fable review F10: KCLive.failedForUser — the switch gives this person the configurators, the prices did not load', () => {
+  const sw = (kcMode) => seedDocs({ 'settings/quote_builder': { kcMode } });
+  it('offline and denied, with the switch on for this person: true; loaded, loading and idle: false; the switch off, or on for the President only and this is Sales: false', async () => {
+    const down = await loaded(sw('on'), { fail: ['kc_materials'] }, {}); assert.equal(down.KCLive.state, 'offline'); assert.equal(down.KCLive.failedForUser(), true, 'a read failed');
+    const denied = await loaded(sw('on'), { deny: ['kc_materials'] }); assert.equal(denied.KCLive.state, 'denied'); assert.equal(denied.KCLive.failedForUser(), true, 'denied');
+    const empty = sw('on'); for (const k of Object.keys(empty)) if (k.startsWith('kc_materials/')) delete empty[k];
+    const none = await loaded(empty); assert.equal(none.KCLive.state, 'offline'); assert.equal(none.KCLive.failedForUser(), true, 'no prices imported yet');
+    const ok = await loaded(sw('on')); assert.equal(ok.KCLive.state, 'live'); assert.equal(ok.KCLive.failedForUser(), false, 'it loaded');
+    const idle = makeEnv({ db: makeFakeDb(sw('on')) }); assert.equal(idle.KCLive.failedForUser(), false, 'idle'); void idle.KCLive.load(); assert.equal(idle.KCLive.failedForUser(), false, 'loading');
+    const off = await loaded(sw('off'), { deny: ['kc_materials'] }); assert.equal(off.KCLive.failedForUser(), false, 'the switch is off: nothing was expected');
+    const sales = await loaded(seedDocs({ 'settings/quote_builder': { kcMode: 'president' }, 'users/u-pres': { role: 'employee', departments: ['Sales'] } }), { deny: ['kc_materials'] });
+    assert.equal(sales.KCLive.role, 'sales'); assert.equal(sales.KCLive.failedForUser(), false, 'president-only switch, a Sales person');
+    const pres = await loaded(sw('president'), { deny: ['kc_materials'] }); assert.equal(pres.KCLive.role, 'president'); assert.equal(pres.KCLive.failedForUser(), true, 'president-only switch, the President');
+  });
+  it('the device override counts: forced on says so when the prices failed, forced off never does', async () => {
+    const e = await loaded(sw('off'), { deny: ['kc_materials'] }); e.win.localStorage.setItem('bkqb_kc_force', '1'); assert.equal(e.KCLive.failedForUser(), true);
+    const f = await loaded(sw('on'), { deny: ['kc_materials'] }); f.win.localStorage.setItem('bkqb_kc_force', '0'); assert.equal(f.KCLive.failedForUser(), false);
+  });
+  it('allowsNew is what it was: only with the prices in, and the same switch rules', async () => {
+    const ok = await loaded(sw('on')); assert.equal(ok.KCLive.allowsNew(), true);
+    const bad = await loaded(sw('on'), { deny: ['kc_materials'] }); assert.equal(bad.KCLive.allowsNew(), false, 'no prices, no new configured quote');
+    const p = await loaded(sw('president')); assert.equal(p.KCLive.allowsNew(), true);
+    const s = await loaded(seedDocs({ 'settings/quote_builder': { kcMode: 'president' }, 'users/u-pres': { role: 'employee', departments: ['Sales'] } })); assert.equal(s.KCLive.allowsNew(), false);
+  });
+  it('a SLOW price list (the 6 s cap) still knows the switch and the person when those reads answered: the message is not lost to a timeout, and the prices are still not applied', async () => {
+    const env = makeEnv({ db: makeFakeDb(sw('on'), { hang: ['kc_materials'] }) });
+    const p = env.KCLive.load(); for (let i = 0; i < 12; i++) await Promise.resolve();
+    const t = env.timers.find(x => x && x.fn && x.ms === 6000); assert.ok(t, 'the 6 s cap'); t.fn(); await p;
+    assert.equal(env.KCLive.state, 'offline'); assert.equal(env.KCLive.ready, false); assert.equal(env.KCLive.flags.kcMode, 'on', 'the switch that did answer'); assert.equal(env.KCLive.role, 'president', 'and who this is');
+    assert.equal(env.KCLive.failedForUser(), true); assert.equal(env.KC.P.sh12.p, null, 'no price was applied from a half-read list');
+    const none = makeEnv({ db: makeFakeDb(sw('on'), { hang: ['settings'] }) });
+    const q = none.KCLive.load(); for (let i = 0; i < 12; i++) await Promise.resolve(); const t2 = none.timers.find(x => x && x.fn && x.ms === 6000); t2.fn(); await q;
+    assert.equal(none.KCLive.state, 'offline'); assert.equal(none.KCLive.flags.kcMode, 'off', 'a switch that did not answer is off'); assert.equal(none.KCLive.failedForUser(), false);
+  });
+});
+
+// ═════════════════════════════ Fable review F12 (2026-11-20): one sentence for the review rule ═════════════════════════════
+describe('Fable review F12: the line chip and the panel say the same about a line that needs review', () => {
+  it('the chip says the quote goes to the President for approval (the panel\'s own sentence), and no longer says it cannot be filed', () => {
+    const env = readyEnv('sales'); env.KC.addLine('custom', { cat: 'prep', name: 'Cart', desc: '', dims: '', rows: [{ k: 'sh12', q: 1 }], m: null, lab: 50 }, { render: false });
+    const html = env.D7.h('adapter.lineRow', itemsOf(env)[0], 0);
+    assert.match(html, /The President or Operations reviews it; until then the quote goes to the President for approval\./); assert.equal(/cannot be filed until then/.test(html), false);
+    const host = fs.readFileSync(path.join(QB, 'kc/host-d7.js'), 'utf8');
+    assert.ok(host.includes('until then the quote goes to the President for approval.'), 'the panel says it');
+    assert.match(env.D7.h('flow.approvalReason'), /need review/, 'and Verify & File really does send it for approval');
   });
 });

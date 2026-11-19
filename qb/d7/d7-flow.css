@@ -16,6 +16,10 @@ body[data-d7-screen] .d7-screen-open{display:block;}
 .topbar-right .d7-topbtn{white-space:nowrap;}
 .topbar-right .d7-topbtn[aria-pressed="true"]{background:rgba(255, 255, 255, .18);}
 .mtb-row.d7-mtbrow[aria-pressed="true"]{font-weight:800;}
+/* the Estimator link "Materials price list" (Fable review F8): beside "Add custom item", for everyone who does not have the two top-bar buttons; one small text link, not a button of the bar */
+#productSearchRow .d7-lnk-prices{align-self:center;background:none;border:none;padding:6px 4px;font:inherit;font-size:12px;font-weight:700;color:var(--mid-blue);text-decoration:underline;cursor:pointer;white-space:nowrap;text-transform:none;letter-spacing:0;border-radius:4px;}
+#productSearchRow .d7-lnk-prices:hover,#productSearchRow .d7-lnk-prices:focus-visible{background:var(--light-blue);outline:none;}
+@media(max-width:768px){ #productSearchRow .d7-lnk-prices{min-height:44px;padding:0 10px;} }
 /* the "↺ now ₱x" of a line that keeps the price it was filed with (adapter.lineRow) */
 .d7-cfgrow .kc-held-now{font-size:11px;font-weight:700;color:var(--dark-blue);white-space:nowrap;}
 .d7-cfgrow .kc-held-btn{font-size:14px;min-width:30px;min-height:30px;vertical-align:middle;}
@@ -150,4 +154,4 @@ pre.d7-json{font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#0f1
 }
 
 /* ---------- 6. never printed ---------- */
-@media print{ #d7Modal,.d7-scr,.d7-topbtn,.d7-mtbrow{display:none!important;} }
+@media print{ #d7Modal,.d7-scr,.d7-topbtn,.d7-mtbrow,.d7-lnk-prices{display:none!important;} }

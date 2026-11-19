@@ -2382,6 +2382,23 @@ async function graftQuoteCosts(collection, docId, state){
   } catch(_){ /* no access or not deployed yet — reopen works as before */ }
 }
 
+// Fable review F7 (2026-11-20) — the cost sidecar is REPLACED as a whole on every save (set, no merge), and a kc line's typed costs (the materials / labor the President typed on a custom item) live in it and nowhere
+// else: the quote payload never carries them. A line the builder does not hold the typed costs of (reopened or resumed, and its graft has not run, failed, or never reads: a draft) is sent with kc.typed === null
+// ("not known", qb/d7/d7-adapter.js sidecarRow); keep what the stored sidecar has for the same line (kcId, kind and name all match). kc.typed as an object, even a row of nulls, is the builder's own word and replaces.
+// Pure: returns new rows, never mutates its arguments, and never throws on junk.
+function keepTypedCosts(rows, prevRows) {
+  if (!Array.isArray(rows) || !Array.isArray(prevRows)) return rows;
+  const prev = new Map();
+  prevRows.forEach(p => { const k = p && p.kc; if (k && k.kcId && k.typed && typeof k.typed === 'object') prev.set(String(k.kcId), p); });
+  return rows.map(r => {
+    const k = r && r.kc;
+    if (!k || k.typed !== null || !k.kcId) return r;
+    const p = prev.get(String(k.kcId));
+    if (!p || p.kc.kind !== k.kind || String(p.n || '') !== String(r.n || '')) return r;
+    return { ...r, kc: { ...k, typed: p.kc.typed } };
+  });
+}
+
 // Reopen a filed quote into the builder from anywhere (Quotations list, Client
 // data view, etc.). Loads the quote's editable snapshot and navigates to the
 // matching builder. Re-filing then saves a NEW versioned copy (per the SOP).
@@ -5182,8 +5199,25 @@ window.addEventListener('message', async (e) => {
     const sc = e.data.costSidecar;
     if (!sc || !Array.isArray(sc.items) || !sc.items.length || !coll || !id) return;
     try {
+      let rows = sc.items;
+      // F7 — a kc row sent with typed: null keeps the typed costs already stored (see keepTypedCosts): those of this very doc (an update in place, a draft) or, for a new revision, of the doc the quote was reopened from
+      // (payload.parentQuoteId). One read per doc, and only when such a row is there; no answer in 4 s, no access or nothing stored: the rows go as they are.
+      if (typeof keepTypedCosts === 'function' && rows.some(r => r && r.kc && r.kc.typed === null)) {
+        const from = [id]; const parent = payload && payload.parentQuoteId; if (parent && String(parent) !== String(id)) from.push(String(parent));
+        for (const sid of from) {
+          let timer = null;
+          try {
+            const prev = await Promise.race([
+              db.collection('quote_costs').doc(coll + '_' + sid).get(),
+              new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('no answer')), 4000); }),
+            ]);
+            if (prev && prev.exists) { rows = keepTypedCosts(rows, (prev.data() || {}).items); break; }
+          } catch (_) { /* no access, or no answer: try the next doc */ }
+          finally { clearTimeout(timer); }
+        }
+      }
       await db.collection('quote_costs').doc(coll + '_' + id).set({
-        ...sc, quoteColl: coll, quoteDocId: id,
+        ...sc, items: rows, quoteColl: coll, quoteDocId: id,
         createdBy: currentUser.uid,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });

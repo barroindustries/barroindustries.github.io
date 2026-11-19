@@ -559,7 +559,7 @@ describe('static — what the builder may name (spec §2.3 / the pricing-core gu
     });
 
     it('source: the boot calls bootCompany() (not a literal), and bootCompany is an allowlist of exactly BK / BI / BS', () => {
-      assert.match(SCRIPT, /document\.getElementById\('quoteDate'\)\.value = new Date\(\)\.toISOString\(\)\.split\('T'\)\[0\];\s*setCompany\(bootCompany\(\)\);/);
+      assert.match(SCRIPT, /document\.getElementById\('quoteDate'\)\.value = manilaToday\(\);\s*setCompany\(bootCompany\(\)\);/);   // Fable review F15 (2026-11-20): the Manila date, not UTC (was new Date().toISOString().split('T')[0])
       assert.equal(/DOMContentLoaded[\s\S]{0,1200}setCompany\('BK'\);\s*cfgInit/.test(SCRIPT), false, 'the boot starts on a literal Barro Kitchens again');
       const fn = makeEnv().run('bootCompany.toString()');
       assert.match(fn, /co==='BK'\|\|co==='BI'\|\|co==='BS'/);

@@ -15,6 +15,12 @@
 // Mutation-tested in a scratch copy of the page (each must fail here): the shim moved after `const CO`; d7On() without its D7.live / quoteEngine / BS / as-issued condition; the engine missing from
 // getPricingFields / applyPricingFields / the clearForm defaults / kept by stripTemplateState; the early stamp missing from a loader; `engine` deleted from a template; the Brilliant Steel guard removed;
 // kcAdoptEngineIfBlank adopting over lines / a reopen source; a direct D7.pricing call without d7On() &&; formatPeso in centavos for legacy; the thead rewritten in legacy; D7.post back in.
+// Fable review round (2026-11-20; coordinator's two edits and the findings F5 F8 F10 F13 F15), each killed in a scratch copy of the page: clearForm without its reset of the quote number to auto / after buildQuoteNo / to manual / unconditional;
+// F5 the calculator price not kept by addFixedItemDirect or addItemFromCalc, kept in legacy, kept at 0; F8 the print buttons' wrapper no longer display:contents / the menu button shown in legacy / the drop-down outside body.d7-on or
+// below 769 px / a button of the menu with another handler or gone / no handler on the menu button / aria-expanded not kept / the outside click not a capture listener, not closing on an item, closing on the menu button / Escape
+// not closing or not giving the focus back / the tour step without its KC target or the engine ignoring it / a mode flip that does not redraw the Estimator link; F10 no notice, notice before the status line, no toast, another sentence;
+// F13 "Approved by", "and revision", "<quote no.> Rev. 1" back in Help, the tour or What's New, a bumped TUTORIAL_VERSION, a printed label that drifts from Help; F15 manilaToday on UTC, a +7 fallback, and each of the eight
+// places that make "today" (New, a new revision, the number's fallback, the page's first date, the project start, the customer-number count, the number reservation, addDays) on UTC again.
 // Addendum 2 (owner answers B4 and B5, 2026-11-19 night), each killed in a scratch copy of the page: B4 the letterhead name, the signature title, the footer line or the top-bar logo of Brilliance Steel back to the old
 // spelling; B5 the What's New list not filtered, the version constant recorded instead of the visible version, initUI not measuring the tutorial again, a seen version that can go down, a Help list that is not redrawn,
 // kcWhatsNewOn() always true, a dismissal that records the constant, a banner left showing when the tutorial boot runs again.
@@ -115,7 +121,7 @@ describe('the page — static: the loaders, the shim, the gate, the stamp, what 
     for (const type of ['QB_READY', 'QUOTE_FILED', 'QUOTE_UPDATE', 'QUOTE_APPROVAL_REQUESTED', 'QUOTE_DRAFT', 'QUOTE_SAVE_DRAFT', 'QUOTE_SAVE_TEMPLATE', 'QUOTE_REQUEST_TEMPLATES', 'QUOTE_STATE', 'QB_OPEN_SOURCE']) {
       assert.ok(new RegExp(`window\\.parent\\.postMessage\\(\\s*\\{\\s*type:'${type}'`).test(SCRIPT), `${type} is posted with window.parent.postMessage`);
     }
-    assert.equal((code.match(/window\.parent\s*===\s*window/g) || []).length, 3, 'the three "open the builder from the app" guards (open source, save draft, and since the Fable review F2 also file)');
+    assert.equal((code.match(/window\.parent\s*===\s*window/g) || []).length, 4, 'the four "open the builder from the app" guards (open source, save draft, file (Fable F2) and the standalone "Preview only" banner (Finalize 1.2))');
     assert.match(SCRIPT, /fetch\('products-database\.json'/, 'the live fallback to products-database.json is still there');
     assert.match(SCRIPT, /localStorage\.setItem\('bkqb_items'/);
     assert.match(SCRIPT, /'qbTutSeenVer'/);
@@ -221,7 +227,7 @@ function makeEnv() {
        D7.TABS = [{id:'prep',label:'Prep and storage'},{id:'wash',label:'Washing'},{id:'cook',label:'Cooking'},{id:'vent',label:'Ventilation'},{id:'cold',label:'Refrigeration'},{id:'multi',label:'Multi-purpose'},{id:'mech',label:'Mechanical Systems'}];
        D7.sectionFor = function (p) { return 'prep'; }; D7.tabOfProduct = function (p) { return 'prep'; };`);
   const kc = (on = true) => run(`D7.live = ${on ? 'true' : 'false'}; quoteEngine = ${on ? "'kc1'" : "'legacy'"};`);
-  return { ctx, run, el, posted, store, kc, calls: () => run('__calls').map((c) => c.slice()), clear: () => run('__calls.length = 0'), answer: (n, v) => run(`__answers[${JSON.stringify(n)}] = ${typeof v === 'function' ? v.toString() : JSON.stringify(v)};`), plain: (code) => JSON.parse(JSON.stringify(vm.runInContext(code, ctx) ?? null)) };
+  return { ctx, run, el, posted, store, listeners, kc, calls: () => run('__calls').map((c) => c.slice()), clear: () => run('__calls.length = 0'), answer: (n, v) => run(`__answers[${JSON.stringify(n)}] = ${typeof v === 'function' ? v.toString() : JSON.stringify(v)};`), plain: (code) => JSON.parse(JSON.stringify(vm.runInContext(code, ctx) ?? null)) };
 }
 const catalogueLine = (over = {}) => ({ id: 'PW-001', category: 'prep_washing', name: 'Table', dims: '900 x 600', specs: [], specEdit: '', qty: 2, unit: 'pc', unitPrice: 4217.5, amount: 8435, formulaType: 'per_length', priceBasis: 'manual', priceManual: true, ...over });
 const kcLine = (over = {}) => ({ id: 'KC', kcKind: 'chef_hp', kcId: 'K1', kcStart: 'hp4', kcVer: 1, category: 'cook', name: 'Chef Mode stove', dims: '1000 x 800', specs: [], specEdit: '', qty: 1, unit: 'pc', unitPrice: 26000, amount: 26000, formulaType: 'configurable', priceBasis: 'configured', ...over });
@@ -765,5 +771,237 @@ describe('Fable review 2026-11-20: filing never lies and never waits forever', (
     const r = code.slice(code.indexOf('async function reserveAtomicQnoSeq(){'), code.indexOf('async function fileQuotation(){'));
     assert.match(r, /Promise\.race\(\[\s*db\.runTransaction\(/); assert.match(r, /setTimeout\(\(\)=>rej\(new Error\('quote-number reservation timed out'\)\),8000\)/);
     assert.match(r, /\}catch\(e\)\{ console\.warn\('\[reserveAtomicQnoSeq\]',e\); \}/, 'a timeout lands in the existing fallback');
+  });
+});
+
+describe('live test 2026-11-20: a reopened filing filed as a new revision takes the next revision number (owner Q65), never the same number again', () => {
+  const code = stripComments(SCRIPT);
+  const f = code.slice(code.indexOf('async function fileQuotation(){'), code.indexOf('const quotePayload = buildQuotePayload();', code.indexOf('async function fileQuotation(){')));
+  it('the R suffix is bumped once, before the payload is built, only for a reopen filed as a revision (not for update in place)', () => {
+    assert.match(f, /if\(reopenSourceDocId && !reopenAsRevisionFlag && fileMode!=='update'\)\{\s*const _rq=document\.getElementById\('quoteNo'\); if\(_rq && _rq\.value\)\{ _rq\.value=bumpRevisionNo\(_rq\.value\); \}\s*reopenAsRevisionFlag=true;\s*\}/);
+    assert.ok(f.indexOf('bumpRevisionNo') > f.indexOf('await reserveAtomicQnoSeq()'), 'after the number reservation');
+  });
+});
+
+describe('live test 2026-11-20: "New" goes back to an automatic quote number (a reopened quote leaves the number on manual; the next quote must not reuse it)', () => {
+  const code = stripComments(SCRIPT);
+  const at = code.indexOf('function clearForm(){');
+  const cf = code.slice(at, code.indexOf('\n}\n', at) + 2);
+  it('static: clearForm resets qnoMode to auto (only when it is not auto already), immediately before buildQuoteNo — once', () => {
+    assert.ok(at > 0 && cf.includes('dismissCalc();'), 'the slice is the whole function');
+    assert.match(cf, /if\(typeof setQnoMode==='function' && qnoMode!=='auto'\) setQnoMode\('auto'\);\s*buildQuoteNo\(\);/);
+    assert.equal((cf.match(/setQnoMode\('auto'\)/g) || []).length, 1);
+    assert.ok(cf.indexOf("setQnoMode('auto')") < cf.indexOf('buildQuoteNo();'), 'the mode is reset before the number is built');
+  });
+  it('behaviour: a quote left on manual numbering is back on auto after New (button state and a freshly built number), and one that is already auto is left as it is', () => {
+    const b = makeEnv(); b.run("setQnoMode('manual'); document.getElementById('quoteNo').value = 'BKLUFB261119-001R1'");
+    assert.equal(b.run('qnoMode'), 'manual'); assert.equal(b.el('qnoBtnManual').classList.contains('active'), true);
+    b.run('clearForm()');
+    assert.equal(b.run('qnoMode'), 'auto', 'New puts the number back on auto');
+    assert.equal(b.el('qnoBtnAuto').classList.contains('active'), true); assert.equal(b.el('qnoBtnManual').classList.contains('active'), false);
+    assert.match(b.el('quoteNo').value, /^BKXXXX\d{6}-001R1$/, 'the number was built again');
+    assert.notEqual(b.el('quoteNo').value, 'BKLUFB261119-001R1', 'the old number is not reused');
+    const a = makeEnv(); a.run('clearForm()'); assert.equal(a.run('qnoMode'), 'auto'); assert.ok(a.el('quoteNo').value.length > 0, 'an auto quote still gets its number');
+  });
+});
+
+describe('Fable review F5 (2026-11-20): a catalogue line added in KC mode keeps the price the calculator gave (basisUnitPrice), so a typed price is held against it; a legacy quote gets no such field', () => {
+  const prod = (over = {}) => ({ id: 'PW-099', category: 'prep_washing', name: 'Per length table', formulaType: 'per_length', basePrice: 4217.5, unit: 'pc', specs: [], capitalMaterials: 0, capitalLabor: 0, defaultDimensions: { W: 1200, D: 600, H: 850 },
+    formula: { baseLengthMm: 900, pricePerExtraMm: 3.5 }, ...over });
+  const mk = (kc) => { const b = makeEnv(); b.ctx.priceCatalogItem = PC.priceCatalogItem; b.run("DB = { products: [], categories: [], laborRoles: [], constants: {} }; currentCatFilter = 'all';"); if (kc) b.kc(true); return b; };
+  it('the one-tap path (a fixed product): KC mode records the calculator price on the line; legacy records nothing', () => {
+    for (const kc of [true, false]) {
+      const b = mk(kc); b.run(`addFixedItemDirect(${JSON.stringify(prod({ formulaType: 'fixed' }))})`);
+      const it = b.plain('items[0]'); assert.ok(it.unitPrice > 0, 'priced by the calculator');
+      if (kc) assert.equal(it.basisUnitPrice, it.unitPrice, 'KC: the calculator price is kept'); else assert.equal('basisUnitPrice' in it, false, 'legacy: the line is exactly what it was');
+    }
+  });
+  it('the calculator path (a size-priced product): KC mode records the price the calculator gave, which is what the line was added at; legacy records nothing', () => {
+    for (const kc of [true, false]) {
+      const b = mk(kc); b.run(`selectedProduct = ${JSON.stringify(prod())}; dimsMm = { W: 1500, D: 600, H: 850 }; addItemFromCalc()`);
+      const it = b.plain('items[0]'); assert.ok(it.unitPrice > 0, 'priced by the calculator');
+      if (kc) assert.equal(it.basisUnitPrice, it.unitPrice, 'KC: the calculator price is kept'); else assert.equal('basisUnitPrice' in it, false, 'legacy: the line is exactly what it was');
+    }
+  });
+  it('a calculator that gives no price (the pricing engine did not load) leaves no basis: the line is neutral, as before', () => {
+    const b = makeEnv(); b.kc(true); b.run("DB = { products: [], categories: [], laborRoles: [], constants: {} }; currentCatFilter = 'all';");
+    b.run(`addFixedItemDirect(${JSON.stringify(prod({ formulaType: 'fixed' }))})`);
+    assert.equal(b.run('items[0].unitPrice'), 0); assert.equal('basisUnitPrice' in b.plain('items[0]'), false);
+  });
+  it('the stamp rides the payload and a reopen (it is not a cost: it is not stripped), and typing over the price leaves it alone', () => {
+    const b = mk(true); b.run(`addFixedItemDirect(${JSON.stringify(prod({ formulaType: 'fixed' }))})`);
+    const basis = b.run('items[0].basisUnitPrice');
+    b.el('x').value = '100'; b.run("updatePrice(0, document.getElementById('x'))");
+    assert.equal(b.run('items[0].unitPrice'), 100); assert.equal(b.run('items[0].priceManual'), true); assert.equal(b.run('items[0].basisUnitPrice'), basis, 'the calculator price stays');
+    assert.equal(b.plain('buildQuotePayload().items[0].basisUnitPrice'), basis, 'it is in the payload');
+    assert.equal('priceManual' in b.plain('buildQuotePayload().items[0]'), false, 'priceManual is still stripped (it rides the private sidecar)');
+  });
+});
+
+describe('Fable review F15 (2026-11-20): a new quote and a new revision are dated the Manila day, not the UTC day', () => {
+  // `new Date()` with no argument is a fixed instant inside the page's context (the real clock is never used)
+  const at = (iso) => `(function(){ const R = Date; const FIXED = new R(${JSON.stringify(iso)}).getTime(); class D extends R { constructor(...a){ if(a.length===0) super(FIXED); else super(...a); } static now(){ return FIXED; } } globalThis.Date = D; })()`;
+  const THREE_AM = '2026-11-19T19:00:00Z';                   // 03:00 on Nov 20 in Manila: Nov 19 in UTC
+  it('manilaToday: Manila midnight is the day line (15:59:59 UTC is still the 19th there, 16:00:00 UTC is the 20th); without Intl it is UTC+8', () => {
+    const b = makeEnv();
+    assert.equal(b.run("manilaToday(new Date('2026-11-19T15:59:59Z'))"), '2026-11-19');
+    assert.equal(b.run("manilaToday(new Date('2026-11-19T16:00:00Z'))"), '2026-11-20');
+    assert.equal(b.run(`manilaToday(new Date('${THREE_AM}'))`), '2026-11-20', 'the owner\'s 3 AM run: the 20th, not the 19th');
+    assert.equal(b.run("manilaToday(new Date('2026-12-31T16:30:00Z'))"), '2027-01-01', 'across a year end too');
+    b.run('globalThis.Intl = undefined');
+    assert.equal(b.run("manilaToday(new Date('2026-11-19T19:00:00Z'))"), '2026-11-20', 'no Intl: +8 hours');
+    assert.equal(b.run("manilaToday(new Date('2026-11-19T15:59:59Z'))"), '2026-11-19', 'no Intl: one second before Manila midnight'); assert.equal(b.run("manilaToday(new Date('2026-11-19T16:00:00Z'))"), '2026-11-20', 'no Intl: Manila midnight (+7 would say the 19th, +9 would have said the 20th an hour earlier)');
+    assert.equal(b.run("manilaToday(new Date('2026-11-19T15:00:00Z'))"), '2026-11-19', 'no Intl: an hour before (a +9 fallback would say the 20th)');
+    assert.equal(/^\d{4}-\d{2}-\d{2}$/.test(b.run('manilaToday()')), true, 'no argument: now');
+    assert.match(b.run("manilaToday(new Date('not a date'))"), /^\d{4}-\d{2}-\d{2}$/, 'an invalid date, or junk, is now (never "NaN-NaN-NaN")'); assert.match(b.run("manilaToday('2026-11-19')"), /^\d{4}-\d{2}-\d{2}$/);
+  });
+  it('a new quote (New): the date is the Manila day and the number carries it (…261120, not …261119)', () => {
+    const b = makeEnv(); b.run(at(THREE_AM)); b.run('clearForm()');
+    assert.equal(b.el('quoteDate').value, '2026-11-20'); assert.match(b.el('quoteNo').value, /^BKXXXX261120-001R1$/);
+    assert.equal(b.el('projStart').value, '2026-11-20', 'the project start follows the quote date');
+  });
+  it('a new revision of a reopened quote is dated the Manila day too, and the number keeps its original date segment (only the R suffix moves)', () => {
+    const b = makeEnv(); b.run(at(THREE_AM));
+    b.run(`loadEditableState({ items: [], quoteNo: 'BKLUFB261118-004R1', quoteDate: '2026-11-18', sourceDocId: 'd1', sourceCollection: 'bk_quotes', pricing: {} }, { asRevision: true })`);
+    assert.equal(b.el('quoteDate').value, '2026-11-20'); assert.equal(b.el('quoteNo').value, 'BKLUFB261118-004R2');
+  });
+  it('the number\'s own fallbacks, the customer / revision count and the project start use it as well', () => {
+    const b = makeEnv(); b.run(at(THREE_AM));
+    b.el('quoteDate').value = ''; b.run('buildQuoteNo()'); assert.match(b.el('quoteNo').value, /261120-001R1$/);
+    assert.equal(b.run('getStartDate()'), '2026-11-20'); b.el('projStart').value = '2026-12-01'; assert.equal(b.run('getStartDate()'), '2026-12-01', 'a chosen start wins');
+    assert.equal(b.run('addDays(null, 0).getDate()'), 20, 'addDays starts from the Manila day');
+  });
+  it('no UTC "today" is left in the builder: every new Date().toISOString().split(\'T\')[0] became manilaToday() (the two addDays(…) conversions are date arithmetic on a noon date, not "today")', () => {
+    const code = stripComments(SCRIPT);
+    assert.equal(/new Date\(\)\.toISOString\(\)\.split\('T'\)\[0\]/.test(code), false);
+    assert.equal(/t\.toISOString\(\)\.slice\(0,10\)/.test(code), false, 'the customer-number count compares the Manila day of a stored quote');
+    assert.equal((code.match(/manilaToday\(/g) || []).length >= 10, true);
+    assert.ok(code.includes("addDays(getStartDate(),getLeadDays()).toISOString().split('T')[0]"), 'the arithmetic on a noon date is as it was');
+  });
+});
+
+describe('Fable review F10 (2026-11-20): when the switch allows this person but the prices did not load, the page says so', () => {
+  const MSG = 'The configurators did not load. Tap Reload DB.';
+  const kcLive = (b, failed) => b.run(`globalThis.KCLive = { failedForUser: function () { return ${failed}; } }; globalThis.__toasts = []; showToast = function (m, t) { __toasts.push([m, t]); }`);
+  it('failed: the status line keeps the live-database words and adds the sentence; a toast says it once; nothing is changed when the load worked or the switch does not give this person the configurators', () => {
+    const b = makeEnv(); kcLive(b, true); b.el('statusMsg').textContent = '✅ Live database — 183 products in 9 categories';
+    assert.equal(b.run('kcNoticeIfFailed()'), true);
+    assert.equal(b.el('statusMsg').textContent, '✅ Live database — 183 products in 9 categories — ⚠️ ' + MSG);
+    assert.deepEqual(b.plain('__toasts'), [['⚠️ ' + MSG, 'error']]);
+    const ok = makeEnv(); kcLive(ok, false); ok.el('statusMsg').textContent = 'live';
+    assert.equal(ok.run('kcNoticeIfFailed()'), false); assert.equal(ok.el('statusMsg').textContent, 'live'); assert.deepEqual(ok.plain('__toasts'), []);
+    const none = makeEnv(); none.run('globalThis.__t = []; showToast = function () { __t.push(1); }'); assert.equal(none.run('kcNoticeIfFailed()'), false, 'no KCLive at all (the files did not load): nothing to say'); assert.deepEqual(none.plain('__t'), []);
+    const boom = makeEnv(); boom.run('globalThis.KCLive = { failedForUser: function () { throw new Error("x"); } }'); assert.equal(boom.run('kcNoticeIfFailed()'), false, 'never throws');
+  });
+  it('it is said after the live database is announced and before the catalogue is drawn (loadDatabase), and the sentence is the owner\'s', () => {
+    const code = stripComments(SCRIPT);
+    assert.ok(code.includes(`const KC_FAILED_MSG='${MSG}';`));
+    const ld = code.slice(code.indexOf('async function loadDatabase(force)'), code.indexOf('function reloadDatabase()'));
+    const i = ld.indexOf("setStatus('online',`✅ Live database"); assert.ok(i > 0);
+    assert.ok(ld.indexOf('kcNoticeIfFailed();', i) > i && ld.indexOf('kcNoticeIfFailed();', i) < ld.indexOf('initUI();', i), 'after the status line, before initUI()');
+    assert.equal((ld.match(/kcNoticeIfFailed\(\)/g) || []).length, 1, 'once: the fallback branches (the catalogue file, the embedded one) never reached the configurators');
+  });
+});
+
+describe('Fable review F8 (2026-11-20): the three print buttons fold into one "📄 PDF ▾" menu in KC mode on a desktop; every action, id and handler is kept; legacy and phone are as before', () => {
+  const bar = (HTML.match(/<div class="topbar-right">[\s\S]*?\n<\/div>\n/) || [''])[0];
+  it('the markup: the menu button, then the list holding the three original buttons in their original order, ids and handlers', () => {
+    assert.ok(bar.length > 500, 'found the bar');
+    assert.match(bar, /<div class="pdf-menu no-print" id="pdfMenu">\s*<button class="btn btn-outline" id="btnPdfMenu" type="button" onclick="togglePdfMenu\(\)" aria-haspopup="true" aria-expanded="false" aria-controls="pdfMenuList"/);
+    const list = (bar.match(/<div class="pdf-menu-list" id="pdfMenuList">([\s\S]*?)<\/div>/) || [])[1] || '';
+    const btns = [...list.matchAll(/<button class="btn btn-outline" id="(\w+)" onclick="(\w+)\(\)"/g)].map((m) => m.slice(1));
+    assert.deepEqual(btns, [['btnPrint', 'doPrint'], ['btnAgentPrint', 'doPrintAgent'], ['btnWorkforcePrint', 'doPrintWorkforce']]);
+    assert.ok(list.includes('📄 Save PDF') && list.includes('🧾 Agent Copy') && list.includes('🛠 Workforce Copy'), 'the legacy labels are the buttons\' own text (the doc layer relabels the first in KC mode)');
+    for (const id of ['btnHelp', 'btnNew', 'btnVerify']) assert.ok(bar.includes(`id="${id}"`), id + ' is still in the bar, outside the menu');
+    assert.equal(/id="btnVerify"[\s\S]*id="pdfMenu"/.test(bar), true, 'Verify & File comes before the PDF menu');
+    for (const fn of ['doPrint', 'doPrintAgent', 'doPrintWorkforce', 'togglePdfMenu', 'closePdfMenu']) assert.ok(new RegExp(`function ${fn}\\(`).test(SCRIPT), fn + ' is defined: no dead button');
+  });
+  it('the phone menu sheet keeps its own three rows, calling the same functions (nothing in it moved)', () => {
+    const sheet = (HTML.match(/<div class="mtb-sheet" id="mtbSheet"[\s\S]*?<div class="mtb-divider">/) || [''])[0];
+    for (const [id, fn] of [['', 'doPrint'], ['mtbAgentPrint', 'doPrintAgent'], ['mtbWorkforcePrint', 'doPrintWorkforce']]) assert.ok(sheet.includes(`onclick="mtbRun('${fn}')"`), fn);
+    assert.ok(sheet.includes('📄 Save PDF'));
+  });
+  it('the CSS: wrapper and list are display:contents and the menu button hidden unless body.d7-on on a desktop (>= 769px), so the legacy bar and the phone bar draw exactly what they drew', () => {
+    const css = HTML.slice(HTML.indexOf('<style>'), HTML.indexOf('</style>'));
+    assert.match(css, /\.pdf-menu,\.pdf-menu-list\{display:contents;\}\s*#btnPdfMenu\{display:none;\}/);
+    const block = (css.match(/@media\(min-width:769px\)\{\s*body\.d7-on \.pdf-menu\{[\s\S]*?\n\}/) || [''])[0];
+    assert.ok(block.length > 300, 'the desktop KC block');
+    for (const sel of ['body.d7-on .pdf-menu{display:block;position:relative;}', 'body.d7-on #btnPdfMenu{display:inline-flex;}', 'body.d7-on .pdf-menu.open .pdf-menu-list{display:flex;}']) assert.ok(block.includes(sel), sel);
+    assert.match(block, /body\.d7-on \.pdf-menu-list\{display:none;position:absolute;/);
+    const outside = css.replace(block, '');
+    assert.equal(/\.pdf-menu[^{]*\{[^}]*display:(block|flex|none)/.test(outside.replace('.pdf-menu,.pdf-menu-list{display:contents;}', '')), false, 'no other rule shows or hides the menu: only the desktop KC block');
+    assert.ok(css.includes('.topbar-right .btn{display:none!important;}'), 'the phone rule that hides the bar buttons (the nested ones too) is still there');
+  });
+  it('the toggle: opens and closes the list, keeps aria-expanded true to it, puts the focus on the first item; Escape and a click anywhere else close it (a click on the button itself is the toggle\'s)', () => {
+    const b = makeEnv(); const m = b.el('pdfMenu'), t = b.el('btnPdfMenu');
+    let focused = null; b.el('btnPrint').focus = () => { focused = 'btnPrint'; }; t.focus = () => { focused = 'btnPdfMenu'; };
+    const attrs = {}; t.setAttribute = (k, v) => { attrs[k] = v; };                              // the stub's setAttribute records nothing: this one does
+    b.run('togglePdfMenu()'); assert.equal(m.classList.contains('open'), true); assert.equal(focused, 'btnPrint'); assert.equal(attrs['aria-expanded'], 'true', 'aria-expanded follows the menu: open');
+    b.run('togglePdfMenu()'); assert.equal(m.classList.contains('open'), false); assert.equal(attrs['aria-expanded'], 'false', 'and closed');
+    const click = (target) => (b.listeners.document.click || []).forEach((fn) => fn({ target }));
+    const key = (k) => (b.listeners.document.keydown || []).forEach((fn) => fn({ key: k }));
+    const inside = (id) => ({ closest: (sel) => (sel === '#' + id ? {} : null) });
+    b.run('togglePdfMenu()'); click(inside('btnPdfMenu')); assert.equal(m.classList.contains('open'), true, 'the menu button\'s own click is left to the toggle');
+    click(inside('btnPrint')); assert.equal(m.classList.contains('open'), false, 'a click on an item closes it (the item\'s own handler still runs: the capture listener does not stop the click)');
+    b.run('togglePdfMenu()'); click({ closest: () => null }); assert.equal(m.classList.contains('open'), false, 'a click elsewhere closes it');
+    b.run('togglePdfMenu()'); focused = null; key('Enter'); assert.equal(m.classList.contains('open'), true, 'other keys do nothing'); key('Escape'); assert.equal(m.classList.contains('open'), false); assert.equal(focused, 'btnPdfMenu', 'Escape gives the focus back');
+    click({ closest: () => null }); key('Escape');
+    assert.equal(b.run('typeof togglePdfMenu === "function" && (togglePdfMenu(false), true)'), true, 'a forced close is harmless');
+  });
+  it('the click listener is a capture listener (the Download PDF handler of the document layer stops its click, and the menu must still close), registered before the document layer\'s', () => {
+    assert.match(stripComments(SCRIPT), /document\.addEventListener\('click',e=>\{\s*const m=document\.getElementById\('pdfMenu'\);[\s\S]*?closePdfMenu\(\);\s*\},true\);/);
+  });
+  it('the tour: the PDF step points at the menu button on a KC quote and at Save PDF on a legacy one, and both ids exist; its KC words name the menu and carry no "Rev. 1"', () => {
+    const steps = vm.runInNewContext(`${SCRIPT.slice(SCRIPT.indexOf('const TOUR_STEPS = ['), SCRIPT.indexOf('\n];\n', SCRIPT.indexOf('const TOUR_STEPS = [')) + 3)}\nTOUR_STEPS`, {});
+    const st = steps.find((x) => x.target === '#btnPrint');
+    assert.equal(st.kcTarget, '#btnPdfMenu'); assert.ok(HTML.includes('id="btnPdfMenu"') && HTML.includes('id="btnPrint"'));
+    assert.match(st.kcBody, /📄 PDF button opens a small menu/); assert.equal(/Rev\. 1/.test(st.kcBody + st.body), false); assert.match(st.kcBody, /named by its quote number and nothing else/);
+    const b = makeEnv(); const sel = (kc) => { b.kc(kc); return b.run(`tourTargetSel(${JSON.stringify(st)})`); };
+    assert.equal(sel(true), '#btnPdfMenu'); assert.equal(sel(false), '#btnPrint');
+    assert.equal(b.run('tourTargetSel({ target: "#x" })'), '#x', 'a step without a KC target is unchanged');
+    assert.match(stripComments(SCRIPT), /target=document\.querySelector\(tourTargetSel\(step\)\);/);
+  });
+  it('a mode flip redraws the screen links of the flow layer: d7SyncMode asks for flow.syncButtons when the quote changes between KC and legacy', () => {
+    const b = makeEnv(); b.run('d7SyncMode(true)'); b.clear();
+    b.kc(true); b.run('d7SyncMode()');
+    assert.ok(b.calls().some((c) => c[0] === 'flow.syncButtons'), 'KC: the Estimator link is drawn');
+    b.clear(); b.run('d7SyncMode()'); assert.equal(b.calls().some((c) => c[0] === 'flow.syncButtons'), false, 'no flip, no call');
+    b.kc(false); b.clear(); b.run('d7SyncMode()'); assert.ok(b.calls().some((c) => c[0] === 'flow.syncButtons'), 'and it goes again when the quote is legacy');
+  });
+});
+
+describe('Fable review F13 (2026-11-20): Help and the tour say what the page prints', () => {
+  const printed = (HTML.match(/<div class="sig-role">([^<]*Approved by)<\/div>/) || [])[1];
+  const help = (HTML.match(/<div class="d7-only" id="helpKcSection">[\s\S]*?<\/div>/) || [''])[0];
+  it('the signature the page prints is "Reviewed & Approved by"; the KC Help and the v51 What\'s New entry name it the same way', () => {
+    assert.equal(printed, 'Reviewed &amp; Approved by');
+    assert.ok(help.includes(`The signatures read Prepared by, ${printed} and Client conforme.`), 'Help');
+    const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
+    const e51 = wn.find((x) => x.ver === 51).items.join(' ');
+    assert.ok(e51.includes('the signatures read Prepared by, Reviewed & Approved by and Client conforme'), 'What\'s New');
+    assert.equal(/Prepared by, Approved by/.test(help + e51), false, 'the old wording is gone');
+  });
+  it('the PDF is named by the quote number and nothing else: no "revision" in the file name wording and no "Rev. 1" anywhere in Help, the tour or What\'s New', () => {
+    assert.equal(/named by its quote number and revision/.test(HTML), false);
+    assert.ok(help.includes('named by its quote number and nothing else'));
+    assert.equal(/"<quote no\.> Rev\. 1"|Rev\. 1"/.test(HTML), false);
+  });
+  it('the tutorial version is NOT bumped by these copy fixes (a bump would pop the "updated" banner for everyone on launch day)', () => {
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
+    const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
+    assert.equal(wn[0].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
+  });
+});
+
+describe('owner Finalize Step 1 (2026-11-20): the standalone banner and the "every quote needs approval" switch', () => {
+  it('the standalone page shows a "Preview only" banner (only when the page is its own parent)', () => {
+    const code = stripComments(SCRIPT);
+    assert.match(code, /if\(window\.parent===window && !document\.getElementById\('qbStandaloneBar'\)\)\{[^}]*b\.textContent='Preview only: quotes filed here are not saved\. Open the builder from Sales › Quote Builder\.'/);
+  });
+  it('Pricing settings has a President-only "Every quote needs the President\'s approval" checkbox that saves approveAll through KCLive.saveSwitch', () => {
+    const A = fs.readFileSync(path.join(ROOT, 'qb/kc/admin-d7.js'), 'utf8');
+    assert.match(A, /<input type="checkbox" style="[^"]*" data-approveall \$\{approveAllNow\(\)\?'checked':''\}/);
+    assert.match(A, /await viaLive\('saveSwitch', \{ approveAll: !!on \}\);/);
+    assert.match(A, /if\('approveall' in d\) return setApproveAll\(!!el\.checked\);/);
   });
 });

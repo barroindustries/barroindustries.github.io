@@ -345,6 +345,7 @@ A.hydrate = function(it){
   if(it.priceBasis==='manual') it.priceManual = true; else delete it.priceManual;
   if(!defOf(it.kcKind)){ it._kc = { unknown:true }; return; }                                // the product file is missing: the line keeps its stored text and price ("configurator not loaded")
   it._kc = { stale:true };                                                                   // priced and checked at the next sync(): the quote's markup override is applied AFTER the items are
+  if(!hasTyped(it)) it._kc.typedUnknown = true;                                              // Fable review F7: a loaded line has no typed costs in memory until the sidecar's are grafted back: "not known", which is not "none"
   if(!it.doc) it._kc.needsDoc = true;                                                        // no print snapshot (hand-made JSON): made at the next sync(), when the quote's items and the mirror are in place
 };
 /* a loaded line: priced (a stored price survives when the typed costs are not readable: "as filed") and checked */
@@ -426,7 +427,7 @@ function lineRow(item, idx){
     if(!isManual(item) && k.priced && k.markupOvr) out.push(chip('warn', 'markup override', costs ? 'Priced with the quote’s markup override ×' + k.markupOvr + ' instead of the standard ×' + KC.SET.markup : 'Priced with the quote’s markup override'));
     if(item.needsReview){
       if(item.reviewed) out.push(chip('ok', 'reviewed by ' + (typeof item.reviewed==='string' ? item.reviewed : KC.ROLES.president.name), item.reviewedAt ? 'Reviewed ' + item.reviewedAt : ''));
-      else out.push(chip('warn', 'needs review', reasonText(item.reviewReasons) + ' The President or Operations reviews it; the quote cannot be filed until then.'));
+      else out.push(chip('warn', 'needs review', reasonText(item.reviewReasons) + ' The President or Operations reviews it; until then the quote goes to the President for approval.'));   // the same sentence as the panel (host-d7.js): Sales can still send it, for approval (Fable review F12)
     }
     if(KC.isEdited(c)) out.push(chip('warn', 'edited by hand', 'Wording, build detail or costs were changed by hand'));
   }
@@ -460,6 +461,12 @@ function scrub(v){
   return v;
 }
 A.COST_KEYS = COST_KEYS;
+/* the typed costs of a line, when there are any in memory: a custom part's m / lab (cfg.custom[]) or, on the custom item itself, its own m / lab */
+function hasTyped(it){
+  const c = it && it.cfg; if(!c || typeof c!=='object') return false;
+  if(Array.isArray(c.custom) && c.custom.some(x => x && (x.m!=null || x.lab!=null))) return true;
+  return !!(it.kcKind==='custom' && (c.m!=null || c.lab!=null));
+}
 A.publicItem = function(x){
   if(!x || !x.kcKind) return '';
   const o = Object.assign({}, x);
@@ -472,8 +479,10 @@ A.sidecarRow = function(it){
   if(!it || !it.kcKind || !defOf(it.kcKind)) return '';
   const pr = safe(() => KC.priceOf(it.kcKind, it.cfg), null); if(!pr) return '';
   const c = it.cfg || {};
-  const typed = { custom:(Array.isArray(c.custom) ? c.custom : []).map(x => ({ m:x && x.m!=null ? x.m : null, lab:x && x.lab!=null ? x.lab : null })) };
-  if(it.kcKind==='custom'){ typed.m = c.m!=null ? c.m : null; typed.lab = c.lab!=null ? c.lab : null; }
+  /* Fable review F7: the sidecar is REPLACED as a whole on every save, so a row of nulls erases the stored typed costs.  A line loaded from a saved quote whose typed costs have not been grafted back (the read has not
+     answered, failed, matched nothing, or the quote was resumed as a draft, which never reads them) is sent as typed: null = "not known": the bridge (js/app.js keepTypedCosts) keeps what is stored for it. */
+  const typed = (it._kc && it._kc.typedUnknown && !hasTyped(it)) ? null : { custom:(Array.isArray(c.custom) ? c.custom : []).map(x => ({ m:x && x.m!=null ? x.m : null, lab:x && x.lab!=null ? x.lab : null })) };
+  if(typed && it.kcKind==='custom'){ typed.m = c.m!=null ? c.m : null; typed.lab = c.lab!=null ? c.lab : null; }
   const row = { kcId:String(it.kcId || ''), kind:it.kcKind, markup:KC.effMarkup(), M:round2(pr.M), projectCost:round2(pr.projectCost),
     groups:(pr.groups || []).map(g => ({ label:g.label, bracket:g.bracket || null, M:round2(g.M), labor:round2(g.labor), misc:round2(g.misc) })),
     lines:(pr.lines || []).map(l => ({ part:l.part, k:l.k, l:l.l, u:l.u, q:l.q, p:l.p==null ? null : l.p, t:round2(l.t) })), typed };
@@ -486,6 +495,7 @@ A.graft = function(item, row){
   const t = row.typed, c = item.cfg = item.cfg || {};
   if(Array.isArray(t.custom) && Array.isArray(c.custom)) t.custom.forEach((x, i) => { if(c.custom[i] && x){ if(x.m!=null) c.custom[i].m = x.m; if(x.lab!=null) c.custom[i].lab = x.lab; } });
   if(item.kcKind==='custom'){ if(t.m!=null) c.m = t.m; if(t.lab!=null) c.lab = t.lab; }
+  if(item._kc) delete item._kc.typedUnknown;                                                 // F7: the stored costs are in memory now: what the page holds is what is true
   return item;
 };
 
