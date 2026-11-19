@@ -1504,6 +1504,7 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
     const sandbox = {
       document: { documentElement: de }, location: { hash: env.hash || '' }, navigator: { standalone: env.navStandalone },
       localStorage: env.lsThrows ? { getItem() { throw new Error('denied'); } } : { getItem: (k) => (k === 'bi-auth-hint' && env.hint ? '1' : null) },
+      sessionStorage: env.ssThrows ? { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } } : { getItem: (k) => (k === 'bi-standalone' && env.seenApp ? '1' : null), setItem: (k, v) => { if (env.ssLog) env.ssLog.push(`${k}=${v}`); } },
       window: {},
     };
     if (!env.noMatchMedia) { sandbox.matchMedia = mm; sandbox.window.matchMedia = mm; }
@@ -1523,7 +1524,13 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
     ['#login cold load shows the login screen', { hash: '#login' }, 'login', false, true],
     ['#login with a hint boots (auth decides) but still asks for login', { hash: '#login', hint: true }, 'boot', false, true],
     ['installed PWA: display-mode standalone', { modes: ['standalone'] }, 'boot', true, false],
-    ['installed PWA: display-mode fullscreen', { modes: ['fullscreen'] }, 'boot', true, false],
+    // Owner 2026-11-19: a browser tab in macOS full screen reports display-mode fullscreen too — it is NOT the installed app.
+    ['a browser tab in full screen is the site, not the installed app', { modes: ['fullscreen'] }, 'site', false, false],
+    ['a browser tab in full screen, signed in, at / is still the site', { modes: ['fullscreen'], hint: true }, 'site', false, false],
+    ['a browser tab in full screen with #login is the login view', { modes: ['fullscreen'], hash: '#login' }, 'login', false, true],
+    ['installed PWA made full screen (tab already seen as the app) still boots', { modes: ['fullscreen'], seenApp: true }, 'boot', true, false],
+    ['sessionStorage throws: full screen alone is not the app', { modes: ['fullscreen'], ssThrows: true }, 'site', false, false],
+    ['sessionStorage throws inside a standalone PWA: still the app', { modes: ['standalone'], ssThrows: true }, 'boot', true, false],
     ['installed PWA: display-mode minimal-ui', { modes: ['minimal-ui'] }, 'boot', true, false],
     ['installed PWA: display-mode window-controls-overlay', { modes: ['window-controls-overlay'] }, 'boot', true, false],
     ['iOS home-screen app (navigator.standalone)', { navStandalone: true }, 'boot', true, false],
@@ -1536,6 +1543,11 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
   for (const [name, env, view, standalone, wantLogin] of CASES) {
     it(name, () => assert.deepEqual(decide(env), { view, standalone, wantLogin }));
   }
+
+  it('the installed app remembers itself for this tab (so it stays the app if made full screen); a browser tab never does', () => {
+    const log = []; decide({ modes: ['standalone'], ssLog: log }); assert.deepEqual(log, ['bi-standalone=1']);
+    const log2 = []; decide({ modes: ['fullscreen'], ssLog: log2 }); decide({ ssLog: log2 }); assert.deepEqual(log2, []);
+  });
 
   it('the catalogue page\'s footer "Team portal" link (/#login) lands on the login view for a signed-out visitor, and on the app for a signed-in one', () => {
     const href = cat.match(/<a class="foot-portal" href="([^"]+)">Team portal<\/a>/)[1];

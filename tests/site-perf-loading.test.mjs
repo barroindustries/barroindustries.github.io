@@ -200,6 +200,7 @@ describe('2 · the head script that writes the kit: every view except "site", an
         document: { documentElement: de, getElementById: () => makeKit(), write: (s) => writes.push(s) },
         location: { hash: env.hash || '' }, navigator: { standalone: env.navStandalone },
         localStorage: env.lsThrows ? { getItem() { throw new Error('denied'); } } : { getItem: (k) => (k === 'bi-auth-hint' && env.hint ? '1' : null) },
+        sessionStorage: env.ssThrows ? { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } } : { getItem: (k) => (k === 'bi-standalone' && env.seenApp ? '1' : null), setItem: (k, v) => { if (env.ssLog) env.ssLog.push(`${k}=${v}`); } },
         window: {},
       };
       if (!env.noMatchMedia) { sandbox.matchMedia = mm; sandbox.window.matchMedia = mm; }
@@ -210,7 +211,7 @@ describe('2 · the head script that writes the kit: every view except "site", an
     const CASES = [
       [{}, 'site', 0], [{ hash: '#services' }, 'site', 0], [{ hash: '#/tasks' }, 'site', 0], [{ hash: '#/dashboard' }, 'site', 0],
       [{ hint: true }, 'site', 0], [{ hash: '#services', hint: true }, 'site', 0], [{ hash: '#/tasks', hint: true }, 'boot', 1], [{ hash: '#login' }, 'login', 1], [{ hash: '#login', hint: true }, 'boot', 1],
-      [{ modes: ['standalone'] }, 'boot', 1], [{ modes: ['fullscreen'] }, 'boot', 1], [{ modes: ['minimal-ui'] }, 'boot', 1], [{ modes: ['window-controls-overlay'] }, 'boot', 1],
+      [{ modes: ['standalone'] }, 'boot', 1], [{ modes: ['fullscreen'] }, 'site', 0], [{ modes: ['fullscreen'], hint: true }, 'site', 0], [{ modes: ['fullscreen'], seenApp: true }, 'boot', 1], [{ modes: ['minimal-ui'] }, 'boot', 1], [{ modes: ['window-controls-overlay'] }, 'boot', 1],
       [{ navStandalone: true }, 'boot', 1], [{ modes: ['standalone'], hash: '#login' }, 'boot', 1],
       [{ lsThrows: true }, 'boot', 1], [{ mmThrows: true }, 'boot', 1], [{ noMatchMedia: true }, 'boot', 1],
     ];
