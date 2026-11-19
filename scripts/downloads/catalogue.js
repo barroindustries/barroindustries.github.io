@@ -12,7 +12,7 @@ const { CO, ic, icb, esc, link } = L;
 
 const DOC = 'Product catalogue';
 const META = {
-  title: `Product catalogue | ${CO.name}`,
+  title: `Product catalogue | ${CO.brand}`,
   subject: `${CO.brand} by ${CO.name}: product catalogue, 2026 edition.`,
   keywords: `${CO.name}, ${CO.brand}, product catalogue, commercial kitchen equipment, stainless steel, SS304, SS316, Luzon`,
 };

@@ -610,7 +610,7 @@ describe('guides: markup — one H1, a logical heading order, unique ids, sized 
     const MSG_ICON = '<svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>';
     const NEWER = new Set(['/products/', '/guides/']);
     each((p) => {
-      assert.ok(p.header.includes('<a href="/" id="site-brand">') && p.header.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'));
+      assert.ok(p.header.includes('<a href="/" id="site-brand">') && p.header.includes('<span class="site-brand-name">Barro Kitchens</span><span class="site-brand-sub">by Barro Industries OPC</span>') && p.header.includes('alt="Barro Kitchens"'));
       const nav = [...p.header.match(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/)[1].matchAll(/<a href="([^"]+)">([^<]*)<\/a>/g)].map((m) => [m[1], m[2]]);
       assert.deepEqual(nav.filter((n) => !NEWER.has(n[0])), [['/services/', 'Services'], ['/catalogue/', 'Products'], ['/work/', 'Our work'], ['/#contact', 'Contact']]);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
@@ -621,7 +621,7 @@ describe('guides: markup — one H1, a logical heading order, unique ids, sized 
       assert.deepEqual(foot.filter((n) => !NEWER.has(n[0])), [['/', 'Home'], ['/services/', 'Services'], ['/catalogue/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']]);
       assert.ok(row.includes(`<a href="${MSGR}" rel="noopener" target="_blank" data-brand>${MSG_ICON}Message us</a>`) && row.includes(`<a href="${FB}" rel="noopener" target="_blank">Facebook</a>`));
       assert.ok(row.endsWith('<a class="foot-portal" href="/#login">Team portal</a>'));
-      assert.ok(p.footer.includes(`<p>${ADDRESS}</p>`) && p.footer.includes('<p class="foot-name">Barro Industries OPC</p>'));
+      assert.ok(p.footer.includes(`<p>by Barro Industries OPC<br>${ADDRESS}</p>`) && p.footer.includes('<p class="foot-name">Barro Kitchens</p>'));
       assert.deepEqual([...p.footer.matchAll(/<li><svg[^>]*>[\s\S]*?<\/svg>([^<]+)<\/li>/g)].map((m) => m[1]), ['PhilGEPS-registered', 'SEC-registered', 'VAT-registered']);
       assert.deepEqual([...p.html.matchAll(/<a[^>]*href="\/#login"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]), ['Team portal']);
     });
@@ -1531,11 +1531,11 @@ describe('the PDF text extractor reads what Chrome writes', () => {
 // ── the three PDFs ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 const MAX_BYTES = 8 * 1024 * 1024;
 const DOCS = [
-  { key: 'company profile', file: 'downloads/barro-industries-company-profile.pdf', pages: [10, 14], title: 'Company profile | Barro Industries',
+  { key: 'company profile', file: 'downloads/barro-industries-company-profile.pdf', pages: [10, 14], title: 'Company profile | Barro Kitchens',
     must: ['Stainless-steel kitchens, built to order by our own team.', 'Barro Industries OPC', 'Barro Kitchens, by Barro Industries OPC', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'hairline', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens'] },
-  { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [10, 14], title: 'Product catalogue | Barro Industries',
+  { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [10, 14], title: 'Product catalogue | Barro Kitchens',
     must: ['Stainless-steel kitchen equipment, built to your sizes.', '32 products in 8 groups', 'Featured', 'Standard size', 'Options', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Sizes are in millimetres', 'We serve Luzon', 'food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline', '6-month warranty on workmanship', '12 months of preventive maintenance service (PMS) with KitchenShield™', '23 years', 'Built by our own team', 'SS304 food grade'] },
-  { key: 'portfolio', file: 'downloads/barro-industries-portfolio.pdf', pages: [8, 12], title: 'Portfolio | Barro Industries',
+  { key: 'portfolio', file: 'downloads/barro-industries-portfolio.pdf', pages: [8, 12], title: 'Portfolio | Barro Kitchens',
     must: ['Completed kitchens and stainless-steel installations.', 'ISPSC 2026', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026).', 'DMMMSU 2022–2023', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).', 'Restaurant kitchen, Bulacan', 'Shown without the client’s name', 'La Union', 'Bulacan', 'KitchenShield™'] },
 ];
 

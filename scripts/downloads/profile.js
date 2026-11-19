@@ -11,7 +11,7 @@ const SHOW_LEADERSHIP = true;
 // (and of the catalogue PDF's materials page). tests/content-assets.test.mjs pins them together.
 // the PDF's document information (scripts/downloads/pdf-meta.js writes it, with the copyright, after Chrome has printed the file)
 const META = {
-  title: `Company profile | ${CO.name}`,
+  title: `Company profile | ${CO.brand}`,
   subject: `${CO.brand} by ${CO.name}: company profile, 2026 edition.`,
   keywords: `${CO.name}, ${CO.brand}, stainless-steel kitchens, commercial kitchens, company profile, Quezon City, Philippines`,
 };
