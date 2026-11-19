@@ -1418,7 +1418,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
 
   it('writes the hero lead grammatically (the owner caught "We design, fabricate, delivers and installs")', () => {
     assert.ok(!/delivers and installs|fabricate, delivers/i.test(home));
-    assert.match(visibleText(hero), /We design, fabricate, deliver and install commercial kitchens/);
+    assert.match(visibleText(hero), /We design, build, deliver and install commercial kitchens/);
   });
 
   it('precaches site.css and site.js, and never a photo or the catalogue page (spec §8.4)', () => {
