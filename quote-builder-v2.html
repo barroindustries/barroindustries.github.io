@@ -1270,6 +1270,8 @@ body.d7-on .d7-legacy{display:none!important;}   /* D7:R4 — the old wording of
    Verify & File: the footer's buttons wrap into two columns and File Quotation takes the whole bottom row. Quote Items: the "Lead time" chip sits on its own line (beside the quality chip it was wider than a 360 px screen).
    Save draft had no background of its own (white label on the white footer): it takes the same dark blue as its neighbours. */
 body.d7-on #verifyModal #saveDraftBtn{background:var(--dark-blue);}
+/* QA — the approval row's reason is a whole sentence (it names the lines and why); the page's label style would print it in capitals, nine lines of shouting on a phone. Sentence case, like the rest of the modal. */
+body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:normal;}
 @media(max-width:640px){
   body.d7-on #verifyModal .modal-footer{flex-wrap:wrap;justify-content:stretch;gap:8px;padding:12px 14px;}
   body.d7-on #verifyModal .modal-footer .btn{flex:1 1 calc(50% - 4px);justify-content:center;min-height:44px;text-align:center;line-height:1.2;}
@@ -8520,6 +8522,7 @@ function deletePhoto(idx){
   renderQuotePhotos();
   saveToStorage();
   refreshLineChips();
+  if(d7On()) renderItems();   // KC:L11 — a line whose linked photo is gone goes back to its drawing
 }
 function updatePhotoCaption(idx,val){
   if(!quotePhotos[idx]) return;
@@ -8533,6 +8536,7 @@ function updatePhotoLink(idx,val){
   saveToStorage();
   renderPhotoAnnex();
   refreshLineChips();   // the "no photo" chip and the quote strength follow the link
+  if(d7On()) renderItems();   /* KC:L11 — the Photo column of a new-rules quote draws the linked photo: without this the Estimator kept the drawing until some other change redrew the table */
 }
 // Renders BOTH the on-screen editor grid (#photoGrid) and the printed annex
 // (#photoAnnex) — called from renderItems() whenever items change (so the
@@ -8594,11 +8598,13 @@ function movePhotoUp(i){
   if(i<=0||!quotePhotos[i]) return;
   [quotePhotos[i-1],quotePhotos[i]]=[quotePhotos[i],quotePhotos[i-1]];
   saveToStorage(); renderQuotePhotos();
+  if(d7On()) renderItems();   // KC:L11 — the first photo of a line is the one its cell shows
 }
 function movePhotoDown(i){
   if(i>=quotePhotos.length-1||!quotePhotos[i]) return;
   [quotePhotos[i],quotePhotos[i+1]]=[quotePhotos[i+1],quotePhotos[i]];
   saveToStorage(); renderQuotePhotos();
+  if(d7On()) renderItems();   // KC:L11 — as above
 }
 // the annex header's right-hand text: company, the CURRENT quote number, the client
 function annexMetaHtml(){

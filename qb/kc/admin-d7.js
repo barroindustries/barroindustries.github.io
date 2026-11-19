@@ -315,7 +315,7 @@ function renderPrices(){
   const cat = S.plcat||'all';
   el.innerHTML = `<div class="section"><div class="sec-title"><span>Materials price list</span><span class="kc-sm" style="text-transform:none;letter-spacing:0">Quote builder › Materials price list</span></div>
     ${plBanner(can)}${msgHtml('pl')}${sourceMix()}
-    <div class="kc-plbar"><input type="search" class="search-input kc-adm-search" id="plSearch" placeholder="Search materials…" aria-label="Search materials" value="${esc(S.plq||'')}">
+    <div class="kc-plbar"><input type="search" class="search-input kc-adm-search" id="kcPlSearch" placeholder="Search materials…" aria-label="Search materials" value="${esc(S.plq||'')}">
       <div class="cat-tabs kc-adm-tabs" role="tablist" aria-label="Material categories" style="margin:0">${['all',...KC.PL_CATS].map(c => `<button type="button" role="tab" aria-selected="${cat===c}" aria-controls="plPanel" class="cat-tab${cat===c?' active':''}" data-plcat="${esc(c)}">${c==='all'?'All':esc(c)}</button>`).join('')}</div>
       ${missing ? `<button type="button" class="ms-chip bad${S.plmiss?' kc-adm-on':''}" data-plmiss aria-pressed="${!!S.plmiss}" title="${S.plmiss?'Showing only these. Click to show every material.':'Show only the materials without a price.'}">${missing} without a price</button>` : '<span class="ms-chip ok">Every item priced</span>'}
       <span class="kc-adm-count" id="plCount"></span>
@@ -675,7 +675,7 @@ document.addEventListener('change',e=>{
   if(d.set2) return editSetting(d.set2, el);
 });
 document.addEventListener('input',e=>{
-  if(e.target.id==='plSearch'){ S.plq = e.target.value; refreshRows(); }
+  if(e.target.id==='kcPlSearch'){ S.plq = e.target.value; refreshRows(); }
   else if(e.target.id==='lpSearch'){ S.lpq = e.target.value; refreshLp(); }
 });
 

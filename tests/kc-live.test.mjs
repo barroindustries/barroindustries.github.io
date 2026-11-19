@@ -1181,7 +1181,7 @@ describe('Download PDF: D7.doc.downloadPdf()', () => {
     env.run('var quoteStatus = "filed"; var doVerifyAndFile = function () { __verify++; }; var __verify = 0;');
     env.win.__verifyCalls = () => env.run('__verify');
     env.D7.doc.buildA4 = async () => (o.build ? o.build(calls) : { ok: true, node: { node: 'the A4 container' }, pages: 2, dispose() { calls.disposed++; } });      // the layout is checked in a browser (tests/a4: the real page); the bridge is checked here
-    if (o.engine !== null) env.win.FormsPdf = { download: o.engine || (async (node, name) => { calls.dl.push([node, name]); return { ok: true, fileName: name }; }) };
+    if (o.engine !== null) env.win.FormsPdf = { download: o.engine || (async (node, name, opts) => { calls.dl.push([node, name, opts]); return { ok: true, fileName: name }; }) };
     return { env, calls, toasts: () => plain(env.run('__toasts')).map(t => t[0]) };
   }
   it('a filed KC quote: FormsPdf.download gets the A4 container and "<quote number>.pdf"; the container is taken out again; no print dialog; "PDF saved" in plain words', async () => {
@@ -1191,6 +1191,18 @@ describe('Download PDF: D7.doc.downloadPdf()', () => {
     assert.equal(calls.dl.length, 1); assert.deepEqual(plain(calls.dl[0][0]), { node: 'the A4 container' }); assert.equal(calls.dl[0][1], 'BKTEST261119-001R1.pdf');
     assert.equal(calls.disposed, 1, 'the off-screen pages are removed once the engine has finished'); assert.equal(calls.print, 0);
     assert.ok(toasts().some(t => /^PDF saved: BKTEST261119-001R1\.pdf\.$/.test(t)), toasts().join(' | '));
+  });
+  it('the real form engine re-cuts whatever it is given at table rows unless told otherwise: the call names the A4 page containers as the only cut points and switches keep-with-next off (a mis-paginated PDF otherwise)', async () => {
+    const { env, calls } = pdfEnv();
+    await env.D7.doc.downloadPdf();
+    const opts = plain(calls.dl[0][2]);
+    assert.ok(opts && typeof opts === 'object', 'FormsPdf.download is called with options');
+    assert.equal(opts.cutSelector, '.d7-a4-page', 'the page containers are the cut points: the engine default (tr, .section, .sig-row ...) would cut inside a page');
+    assert.equal(typeof opts.keepNextSelector, 'string'); assert.ok(opts.keepNextSelector.length > 0, 'an empty selector would fall back to the engine default keep list');
+    assert.ok(!/\b(tr|thead|\.sec-title|\.cat-row|\.sig-row)\b/.test(opts.keepNextSelector), 'the keep-with-next selector names nothing the document contains');
+    // the class the selector names is the class buildA4 gives every page (one source file: the selector cannot drift from the pages)
+    const SRC = fs.readFileSync(new URL('../qb/d7/d7-doc.js', import.meta.url), 'utf8');
+    assert.ok(/page\.className = 'd7-a4-page'/.test(SRC), 'buildA4 still writes class d7-a4-page on every page');
   });
   it('without the form engine the print dialog opens instead, and a toast says so in plain words; it never throws', async () => {
     const { env, calls, toasts } = pdfEnv({ engine: null });

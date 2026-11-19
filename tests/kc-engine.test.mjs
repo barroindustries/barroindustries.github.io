@@ -759,3 +759,45 @@ describe('KC.pendingReview: the fabrication placeholders of "Pending Rene\'s rev
     }
   });
 });
+
+// ═════════════════════════════ QA: a table's length typed on a start that has a full-length upper shelf ═════════════════════════════
+// The Basic Prep Station is 122 cm with one upper shelf as long as the table.  Typing 120 cm left the shelf at 122 and put the red line "Upper units add up to 122 cm but the table is 120 cm" under
+// the form, which blocks "Add to Quote": a 1200 prep table with its undershelf could not be added from the start, the one the standard price list is made of.  The table's input handler
+// (product-table.js, on('input')) now moves a LONE upper that spans the side to the new length, and returns false so the host still sets the length itself.
+describe('QA: typing another length on the Basic Prep Station moves its full-length upper shelf with it', () => {
+  const typeLength = (KC, def, cfg, value, side = 0) => {
+    KC.S.cfg = cfg;
+    const handled = def.on('input', { value: String(value), tagName: 'INPUT', type: 'number' }, { k: 'sides.' + side + '.len', num: '' });
+    assert.equal(handled, false, 'the host still applies the length itself (its generic data-k rule)');
+    KC.setP('sides.' + side + '.len', Number(value));           // what the host does next
+    return def.validate(cfg);
+  };
+  it('122 -> 120: the shelf follows, nothing is red, the line can be added; the price list model is the 1200', () => {
+    const KC = priced.KC, def = KC.products.prep, cfg = def.startCfg('basic');
+    assert.equal(cfg.sides[0].uppers.length, 1); assert.equal(cfg.sides[0].uppers[0].w, cfg.sides[0].len, 'the start: one upper as long as the table');
+    const v = typeLength(KC, def, cfg, 120);
+    assert.deepEqual(plain(v.errors), [], 'no red line: ' + JSON.stringify(v.errors));
+    assert.equal(cfg.sides[0].uppers[0].w, 120);
+    const pr = KC.price('prep', cfg); assert.equal(pr.priced, true); assert.equal(pr.list.code, 'PS-PT-1200');
+  });
+  it('a longer table works the same way (122 -> 150), and a second change keeps following', () => {
+    const KC = priced.KC, def = KC.products.prep, cfg = def.startCfg('basic');
+    assert.deepEqual(plain(typeLength(KC, def, cfg, 150).errors), []); assert.equal(cfg.sides[0].uppers[0].w, 150);
+    assert.deepEqual(plain(typeLength(KC, def, cfg, 90).errors), []); assert.equal(cfg.sides[0].uppers[0].w, 90);
+  });
+  it('the preparer\'s own sizing is left alone: an upper that did not span the side, and two uppers, keep their widths (the red line then stays)', () => {
+    const KC = priced.KC, def = KC.products.prep;
+    const narrow = def.startCfg('basic'); narrow.sides[0].uppers[0].w = 60;
+    typeLength(KC, def, narrow, 120); assert.equal(narrow.sides[0].uppers[0].w, 60, 'a shelf shorter than the table is not touched');
+    const two = def.startCfg('basic'); two.sides[0].uppers.push(Object.assign(KC.clone(two.sides[0].uppers[0]), { w: 30 }));      // a layout of two, the first as long as the side (the sum is already too long)
+    typeLength(KC, def, two, 130); assert.deepEqual(plain(two.sides[0].uppers.map(u => u.w)), [122, 30], 'two uppers are the preparer\'s layout: neither follows');
+    const short = def.startCfg('basic'); short.sides[0].uppers[0].w = 100;                                    // 100 < 122 and the table goes to 90: too long a shelf is still an error, reported
+    assert.ok(typeLength(KC, def, short, 90).errors.length > 0);
+  });
+  it('a blank or a nonsense length does not change a shelf; the start without uppers is untouched', () => {
+    const KC = priced.KC, def = KC.products.prep, cfg = def.startCfg('basic');
+    KC.S.cfg = cfg; for (const bad of ['', '0', '-5', 'abc']) { def.on('input', { value: bad, tagName: 'INPUT', type: 'number' }, { k: 'sides.0.len', num: '' }); assert.equal(cfg.sides[0].uppers[0].w, 122, JSON.stringify(bad)); }
+    const blank = def.startCfg('blank'); assert.equal(blank.sides[0].uppers.length, 0);
+    assert.deepEqual(plain(typeLength(KC, def, blank, 120).errors), []);
+  });
+});

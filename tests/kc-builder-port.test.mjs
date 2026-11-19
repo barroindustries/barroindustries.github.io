@@ -570,3 +570,54 @@ describe('Addendum 1 (owner-approved): "Brilliance Steel" on screen, no prototyp
     for (const id of ['verifyModal', 'fileBtn', 'saveDraftBtn', 'd7LeadChip']) assert.ok(new RegExp(`id="${id}"`).test(HTML), `#${id} is in the page`);
   });
 });
+
+// ═══════════════════════════════════════════════ QA: one element id, one element ═══════════════
+// The Materials price list (qb/kc/admin-d7.js) wrote id="plSearch" for its search box, the id the page's own Pricelist picker (the old modal) already has.  Once the President or Purchasing had opened the
+// Materials list, document.getElementById('plSearch') (what the picker reads) answered the Materials screen's box, and typing in the picker no longer filtered it (549 rows stayed 549).
+describe('QA: no element id written by the qb/ files is also written by the page', () => {
+  const ids = (text) => { const out = new Set(); const re = /\bid=["']([A-Za-z][\w-]*)["']/g; let m; while ((m = re.exec(text))) out.add(m[1]); return out; };
+  const QB_FILES = ['qb/kc/admin-d7.js', 'qb/kc/host-d7.js', 'qb/kc-live.js', 'qb/d7/d7-adapter.js', 'qb/d7/d7-doc.js', 'qb/d7/d7-flow.js', 'qb/d7/d7-pricing.js', 'qb/d7/d7-core.js'];
+  it('every id the bridge and the screens write is theirs alone (the page and the qb/ files never share one)', () => {
+    const page = ids(HTML);
+    for (const f of QB_FILES) {
+      const mine = ids(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+      const both = [...mine].filter((x) => page.has(x));
+      assert.deepEqual(both, [], `${f} writes id(s) the page already has: ${both.join(', ')}`);
+    }
+  });
+  it('the Materials list search box has its own id and its handler listens for that one; the page\'s Pricelist picker keeps plSearch', () => {
+    const adm = fs.readFileSync(path.join(ROOT, 'qb/kc/admin-d7.js'), 'utf8');
+    assert.match(adm, /id="kcPlSearch"/); assert.match(adm, /e\.target\.id==='kcPlSearch'/);
+    assert.equal(/id="plSearch"/.test(adm), false);
+    assert.match(HTML, /<input id="plSearch" placeholder="Search the pricelist/);
+  });
+});
+
+// ═══════════════════════════════════════════════ QA: the approval reason is read as a sentence ═══════════════
+describe('QA: the Verify & File approval row (a whole sentence naming the lines and the reason) is not printed in capitals', () => {
+  it('in KC mode the labels of the Verify rows are sentence case; the rule is scoped to body.d7-on, so the old builder\'s modal is untouched', () => {
+    const at = HTML.indexOf('/* KC:L10');
+    const css = HTML.slice(at, HTML.indexOf('</style>', at)).replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] })).filter((r) => !r.sel.startsWith('@'));
+    const r = rules.find((x) => x.sel === 'body.d7-on #verifyModal .verify-val label');
+    assert.ok(r, 'a rule for the labels inside the Verify rows');
+    assert.match(r.body, /text-transform:none/); assert.match(r.body, /letter-spacing:normal/);
+    // the sentence really sits in such a label (buildVerifyModal writes it inside .verify-val > label)
+    assert.match(SCRIPT, /class="verify-val" style="margin-top:4px">\s*<label[^>]*>\s*<input type="checkbox" id="reqApprovalCheck"/);
+  });
+});
+
+// ═══════════════════════════════════════════════ QA: the Photo column follows the photo link ═══════════════
+describe('QA: linking, unlinking, deleting or reordering a photo redraws the Photo column of a new-rules quote (and only of one)', () => {
+  for (const name of ['updatePhotoLink', 'deletePhoto', 'movePhotoUp', 'movePhotoDown']) {
+    it(`${name}() redraws the items table when d7On(); the legacy path is unchanged (no extra call without d7On())`, () => {
+      const src = stripComments(fnSource(name));
+      assert.match(src, /if\(d7On\(\)\)\s*renderItems\(\)/, `${name} must call renderItems() for a quote that follows the new rules`);
+      assert.equal((src.match(/renderItems\(\)/g) || []).length, 1, 'one redraw, and only behind the d7On() test');
+    });
+  }
+  it('the Photo cell reads the quote\'s photos (so the redraw is what puts a linked photo in the cell)', () => {
+    const doc = fs.readFileSync(path.join(ROOT, 'qb/d7/d7-doc.js'), 'utf8');
+    assert.match(doc, /function photoCell\(/); assert.match(doc, /quotePhotos/);
+  });
+});

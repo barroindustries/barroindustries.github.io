@@ -754,7 +754,10 @@
       built = await D7.doc.buildA4();
       if (!built || !built.node) { printInstead('The pages of the PDF could not be laid out.'); return { ok: false, fileName: name, error: (built && built.error) || 'The pages could not be laid out.' }; }
       let res = null;
-      try { res = await window.FormsPdf.download(built.node, name); } catch (err) { res = { ok: false, error: msg(err) }; }
+      /* The engine cuts what it is given into A4 bands at the top edge of a table row or a block (its default cut list), which is its own page layout and not this one: the container already holds one exact
+         A4 page per .d7-a4-page, so the page tops are the ONLY cut points (cutSelector) and the keep-with-next rule is switched off (a selector that matches nothing).  Without this the real engine re-cut
+         the pages: a subtotal bar left alone at the top of a page, the running footer in the middle of a page, a seventh page, a photo cut in half. */
+      try { res = await window.FormsPdf.download(built.node, name, { cutSelector: '.d7-a4-page', keepNextSelector: '[data-pdf-no-keep]' }); } catch (err) { res = { ok: false, error: msg(err) }; }
       if (res && res.ok) { const saved = trim(res.fileName) || name; D7.toast('PDF saved: ' + saved + '.'); return { ok: true, fileName: saved }; }
       printInstead('The PDF file could not be made.');
       return { ok: false, fileName: name, error: trim(res && res.error) || 'The PDF maker did not finish.' };
