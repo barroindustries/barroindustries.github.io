@@ -14,7 +14,7 @@
    (no `then`, so it is not adopted again). After `await flowForms()` every method is safe to call. Direct calls to the async methods never need
    the wait: they load what they need themselves. (forms-core.js has to be there for the registry, hence the wait.)
 
-   THE FORMAT is the quote builder's printed Quotation (owner rulings 2026-11-19): the header (horizontal logo, company line, title/number/date, the
+   THE FORMAT is the quote builder's printed Quotation (owner rulings 2026-11-19): the header (Barro Kitchens mark + name on BK documents, else the horizontal logo; company line; title/number/date; the
    BK tile on Barro Kitchens documents), sections, signature dividers and footer come from FormsCore.compose(); the page is handed to
    window.openPrintableDoc (js/print-docs.js) with  downloadPdf:true  → Download PDF · Print · JPEG. The PDF itself is js/forms-pdf.js (window.FormsPdf),
    the one standalone PDF path — print-docs.js loads it on demand, and the quote builder uses the same file.  */

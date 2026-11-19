@@ -110,25 +110,35 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     .map((w) => (w === 'opc' ? 'OPC' : w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
 
   // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
-  //  HEADER — the final owner ruling. Every form, whatever the company, has the horizontal Barro Industries logo at the left with the company line
-  //  under it; the title, number and date at the right; and — on Barro Kitchens documents only — the small BK tile (~40px) above the title.
+  //  HEADER — owner rulings 2026-11-19 ("both") and 2026-11-20 (brand): "Barro Kitchens is the public name, it's the brand; Barro Industries OPC is
+  //  the company". The right column is the same on every form: title, number, date, reference lines.
+  //  · Barro Kitchens documents (BK): LEFT is the Barro Kitchens mark + BARRO KITCHENS, "By Barro Industries OPC" under it as the legal company line,
+  //    then address · phone · both emails (the quote builder's CO.BK letterhead). The horizontal Barro Industries logo is NOT used.
+  //  · Barro Industries documents (BI, and Brilliant Steel orders, whose form company is BI): the horizontal Barro Industries logo + HEADER_LINE.
+  //  Signatures, the creds footer and other legal lines keep Barro Industries OPC on both.
   // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
   FC.HEADER_LOGO = 'icons/barro-industries-horizontal.png';
   FC.HEADER_PARTS = Object.freeze(['Barro Industries OPC', '21 Capricorn St., Tandang Sora, Quezon City', 'hello@barroindustries.com', 'barroindustries@gmail.com', '0927 683 6300']);
   FC.HEADER_LINE = FC.HEADER_PARTS.join(' · ');
-  FC.TILES = Object.freeze({ BK: 'icons/barro-kitchens.png' });
+  FC.BRAND = Object.freeze({
+    BK: Object.freeze({ mark: 'icons/barro-kitchens.png', name: 'BARRO KITCHENS', legal: 'By Barro Industries OPC',
+      parts: Object.freeze(['21 Capricorn St., Tandang Sora, Quezon City', '0927 683 6300', 'hello@barroindustries.com', 'barroindustries@gmail.com']) }),
+  });
   // a site-relative asset URL that also resolves inside html2canvas's clone and the off-screen export host
   const asset = (path) => { try { return W().location.origin + W().location.pathname.replace(/[^/]*$/, '') + path; } catch (_) { return path; } };
-  // The header. Left: the logo (its PNG has transparent margins; the negative margins cancel them, as in the prototype) and the company line — each
-  // part is a no-wrap span with its dot attached, so the line only ever wraps between parts. Right: the BK tile (Barro Kitchens documents only), the
-  // title, the number, the date and the reference lines.
+  // each part is a no-wrap span with its dot attached, so the line only ever wraps between parts
+  const coLine = (parts) => parts.map((p, i) => `<span>${esc(p)}${i < parts.length - 1 ? ' ·' : ''}</span>`).join(' ');
   FC.headerHtml = function (prep) {
-    const tile = FC.TILES[prep.co.code]
-      ? `<img class="fh-tile" src="${esc(asset(FC.TILES[prep.co.code]))}" alt="Barro Kitchens" width="40" height="40" onerror="this.style.display='none'">` : '';
-    const parts = FC.HEADER_PARTS.map((p, i) => `<span>${esc(p)}${i < FC.HEADER_PARTS.length - 1 ? ' ·' : ''}</span>`).join(' ');
-    return `<div class="fh-header"><div class="fh-id"><img class="fh-logo" src="${esc(asset(FC.HEADER_LOGO))}" alt="Barro Industries OPC" width="168" height="56" onerror="this.style.display='none'">` +
-      `<div class="fh-co">${parts}</div></div>` +
-      `<div class="fh-doc">${tile}<div class="fh-title">${esc(prep.title)}</div><div class="fh-no">${esc(prep.numberText)}</div><div class="fh-date">${esc(prep.dateLabel)}</div>` +
+    const brand = FC.BRAND[prep.co.code];
+    const left = brand
+      ? `<div class="fh-brand"><img class="fh-mark" src="${esc(asset(brand.mark))}" alt="Barro Kitchens" width="48" height="48" onerror="this.style.display='none'">` +
+        `<div><div class="fh-name">${esc(brand.name)}</div><div class="fh-legal">${esc(brand.legal)}</div></div></div>` +
+        `<div class="fh-co">${coLine(brand.parts)}</div>`
+      // the logo's PNG has transparent margins; the negative margins cancel them, as in the prototype
+      : `<img class="fh-logo" src="${esc(asset(FC.HEADER_LOGO))}" alt="Barro Industries OPC" width="168" height="56" onerror="this.style.display='none'">` +
+        `<div class="fh-co">${coLine(FC.HEADER_PARTS)}</div>`;
+    return `<div class="fh-header"><div class="fh-id">${left}</div>` +
+      `<div class="fh-doc"><div class="fh-title">${esc(prep.title)}</div><div class="fh-no">${esc(prep.numberText)}</div><div class="fh-date">${esc(prep.dateLabel)}</div>` +
       arr(prep.extraMeta).map((m) => `<div class="fh-meta">${esc(m)}</div>`).join('') + `</div></div>`;
   };
 
@@ -436,7 +446,10 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
 .pd-print .frm .fh-co{margin-top:1.5mm;font-size:8pt;line-height:1.45;color:#444}
 .pd-print .frm .fh-co span{white-space:nowrap}
 .pd-print .frm .fh-doc{text-align:right;flex:none}
-.pd-print .frm .fh-tile{display:block;width:40px;height:40px;margin:0 0 4px auto}
+.pd-print .frm .fh-brand{display:flex;align-items:center;gap:9px}
+.pd-print .frm .fh-mark{display:block;width:48px;height:48px;flex:none}
+.pd-print .frm .fh-name{font-size:16pt;font-weight:900;color:#1F3A5F;letter-spacing:1.5px;line-height:1.1;white-space:nowrap}
+.pd-print .frm .fh-legal{font-size:8.5pt;font-weight:600;color:#444;margin-top:1px}
 .pd-print .frm .fh-title{font-size:14pt;font-weight:900;color:#1F3A5F;letter-spacing:1px;white-space:nowrap}
 .pd-print .frm .fh-no{font-size:11pt;font-weight:700;color:#333;margin-top:4px}
 .pd-print .frm .fh-date,.pd-print .frm .fh-meta{font-size:9.5pt;color:#555;margin-top:2px}

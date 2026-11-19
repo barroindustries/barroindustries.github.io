@@ -4,7 +4,7 @@
 // WHAT IT PINS
 //   1. NUMBERS      "SO-0012", the quote's R revision convention WITH a space ("SO-0012 R1", never "Rev. 1" — header and file name), the quotation
 //                   reference in the quote-number style, one SERIAL for the sales order and the job order (SO-0012 / JO-0012), Manila dates, pesos.
-//   2. HEADER       the horizontal Barro Industries logo + the company line exactly, the BK tile on Barro Kitchens documents ONLY, Brilliant Steel orders
+//   2. HEADER       the horizontal Barro Industries logo + the company line exactly, Barro Kitchens documents lead with the BK mark + BARRO KITCHENS / By Barro Industries OPC (owner 2026-11-20), Brilliant Steel orders
 //                   on the Barro Industries header; the company table is still the quote builder's own `const CO`; navy #1F3A5F.
 //   3. PESO WALL    an 'ops' entry cannot register a money field; build() copies only declared fields; assertNoPesos throws on a price in a key or in
 //                   ANY string (free text included) — a job order with "₱5,000" typed in its instructions is refused with a plain message.
@@ -95,36 +95,43 @@ describe('2. header, companies, logo', () => {
     return { p, html: FC.compose(p, FC.renderSections(p)).bodyHtml };
   };
 
-  it('LOGO: the horizontal Barro Industries logo and the BK tile exist on disk; the old -logo-horizontal path does not', () => {
+  it('LOGO: the horizontal Barro Industries logo and the Barro Kitchens mark exist on disk; the old -logo-horizontal path does not', () => {
     assert.equal(FC.HEADER_LOGO, 'icons/barro-industries-horizontal.png');
     assert.ok(fs.existsSync(path.join(ROOT, FC.HEADER_LOGO)), `${FC.HEADER_LOGO} is missing`);
-    assert.equal(FC.TILES.BK, 'icons/barro-kitchens.png');
-    assert.ok(fs.existsSync(path.join(ROOT, FC.TILES.BK)), `${FC.TILES.BK} is missing`);
-    assert.deepEqual(Object.keys(FC.TILES), ['BK'], 'only Barro Kitchens has a tile');
+    assert.equal(FC.BRAND.BK.mark, 'icons/barro-kitchens.png');
+    assert.ok(fs.existsSync(path.join(ROOT, FC.BRAND.BK.mark)), `${FC.BRAND.BK.mark} is missing`);
+    assert.deepEqual(Object.keys(FC.BRAND), ['BK'], 'only Barro Kitchens has a brand header');
     assert.ok(!fs.existsSync(path.join(ROOT, 'icons/barro-industries-logo-horizontal.png')), 'the superseded file name came back');
     const { size } = fs.statSync(path.join(ROOT, FC.HEADER_LOGO));
     assert.ok(size > 10_000 && size < 200_000, `logo is ${size} bytes`);
   });
-  it('the company line is exactly the owner\'s, and it is what the header prints under the logo (tags stripped)', () => {
+  const leftOf = (html) => { const h = html.slice(html.indexOf('<div class="fh-header">'), html.indexOf('<div class="fh-doc">')); return { raw: h, text: stripTags(h.replace(/<\/div>/g, ' ')).replace(/\s+/g, ' ').trim() }; };
+  it('BRAND (owner 2026-11-20): a Barro Kitchens document leads with the Barro Kitchens mark and BARRO KITCHENS, "By Barro Industries OPC" under it, then address, phone, both emails — and no Barro Industries logo', () => {
+    const { raw, text } = leftOf(headerOf('BK').html);
+    assert.match(raw, /^<div class="fh-header"><div class="fh-id"><div class="fh-brand"><img class="fh-mark" src="icons\/barro-kitchens\.png"[^>]*><div><div class="fh-name">BARRO KITCHENS<\/div><div class="fh-legal">By Barro Industries OPC<\/div>/);
+    assert.equal(text, 'BARRO KITCHENS By Barro Industries OPC 21 Capricorn St., Tandang Sora, Quezon City · 0927 683 6300 · hello@barroindustries.com · barroindustries@gmail.com');
+    assert.ok(!headerOf('BK').html.includes('barro-industries-horizontal'), 'no horizontal BI logo on a Barro Kitchens document');
+  });
+  it('Barro Industries documents (and Brilliant Steel orders, whose form company is BI) keep the horizontal logo and the owner\'s company line, with no Barro Kitchens mark', () => {
     assert.equal(FC.HEADER_LINE, 'Barro Industries OPC · 21 Capricorn St., Tandang Sora, Quezon City · hello@barroindustries.com · barroindustries@gmail.com · 0927 683 6300');
-    for (const co of ['BK', 'BI', 'BS']) {
-      const { html } = headerOf(co);
-      const header = html.slice(html.indexOf('<div class="fh-header">'), html.indexOf('<div class="bill-strip"'));
-      assert.ok(stripTags(header.slice(header.indexOf('<div class="fh-co">'), header.indexOf('</div></div>', header.indexOf('<div class="fh-co">')))).includes(FC.HEADER_LINE), co);
-      assert.match(header, /src="icons\/barro-industries-horizontal\.png"/);
+    for (const co of ['BI', 'BS', 'ZZ']) {
+      const { html } = headerOf(co); const { raw, text } = leftOf(html);
+      assert.match(raw, /src="icons\/barro-industries-horizontal\.png"/, co);
+      assert.equal(text, FC.HEADER_LINE, co);
+      assert.ok(!html.includes('barro-kitchens.png') && !html.includes('fh-brand') && !html.includes('BARRO KITCHENS'), `${co} carries the Barro Kitchens brand`);
     }
   });
-  it('the BK tile sits above the title on Barro Kitchens documents ONLY; Barro Industries and Brilliant Steel orders carry none and use the BI header', () => {
-    const bk = headerOf('BK').html, bi = headerOf('BI').html, bs = headerOf('BS').html, unknown = headerOf('ZZ').html;
-    assert.match(bk, /<div class="fh-doc"><img class="fh-tile" src="icons\/barro-kitchens\.png"[^>]*><div class="fh-title">SALES ORDER<\/div>/, 'tile directly above the title');
-    for (const [name, html] of [['BI', bi], ['BS', bs], ['unknown', unknown]]) {
-      assert.ok(!html.includes('fh-tile') && !html.includes('barro-kitchens.png'), `${name} carries a tile`);
-      assert.match(html, /<div class="fh-doc"><div class="fh-title">SALES ORDER<\/div>/, name);
+  it('the right column starts with the title on every form; legal lines keep Barro Industries OPC; nothing of Brilliant Steel on a form', () => {
+    const bk = headerOf('BK').html, bi = headerOf('BI').html, bs = headerOf('BS').html;
+    for (const html of [bk, bi, bs]) {
+      assert.match(html, /<div class="fh-doc"><div class="fh-title">SALES ORDER<\/div>/);
+      assert.ok(!html.includes('fh-tile'), 'the old BK tile is gone');
+      assert.ok(!html.includes('BRILLIANT STEEL') && !html.includes('Pasig'), 'nothing of Brilliant Steel on a form'); assert.ok(!html.includes('37474F'));
     }
-    for (const html of [bk, bi, bs]) { assert.ok(!html.includes('BRILLIANT STEEL') && !html.includes('Pasig'), 'nothing of Brilliant Steel on a form'); assert.ok(!html.includes('37474F')); }
-    // the footer of a BS order is the Barro Industries one (the form's company is BI)
     assert.match(bs, /Thank you for considering Barro Industries\./);
     assert.match(bk, /Thank you for considering Barro Kitchens\./);
+    assert.match(bk, /Barro Industries OPC  •  SEC Registered/, 'the creds footer keeps the legal company');
+    assert.equal(FC.COMPANIES.BK.sig.title, 'President, Barro Industries OPC', 'signatures keep the legal company');
   });
   it('title, number, date and the reference lines are in the right column, in that order', () => {
     const { html } = headerOf('BK');
@@ -137,7 +144,8 @@ describe('2. header, companies, logo', () => {
     assert.ok(FC.CSS.includes('#1F3A5F') && !/1E3A5F/i.test(FC.CSS));
     assert.match(FC.CSS, /\.sec-title\{[^}]*color:#1F3A5F;border-bottom:1\.5px solid #1F3A5F/);
     assert.match(FC.CSS, /\.fh-header\{[^}]*border-bottom:2\.5px solid #1F3A5F/);
-    assert.match(FC.CSS, /\.fh-tile\{[^}]*width:40px;height:40px/);
+    assert.match(FC.CSS, /\.fh-mark\{[^}]*width:48px;height:48px/);
+    assert.ok(!FC.CSS.includes('.fh-tile'));
     assert.match(FC.CSS, /@page\{size:A4 portrait;margin:11mm 10mm 7mm;\}/, 'letterhead\'s print geometry: A4, 11mm 10mm 7mm');
   });
   it('the header stays compact: logo 56 px, one reference line on a Sales Order, no Subject / Original line — what lets a six-line order fit ONE A4 page', () => {
