@@ -88,13 +88,23 @@ const PROJECT_CARDS = Object.freeze([
     features: ['Stainless steel construction', 'Made to your size and layout', 'Configuration agreed with you per project'],
   },
   {
-    id: 'exhaust', group: 'exhaust', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
+    id: 'exhaust', group: 'exhaust', photo: 'EX-004', name: 'Exhaust and fresh-air ventilation', tag: 'Per project',
     desc: 'Ducting, blowers and fresh air planned together with your range hood.',
     features: ['Exhaust ducting and fittings', 'Inline blowers', 'Fresh-air supply for the kitchen', 'Designed around your hood and your layout'],
     learn: { path: '/services/exhaust-and-fresh-air-systems/', about: 'exhaust and fresh-air systems' },
   },
   {
-    id: 'trolley', group: 'storage', name: 'Trolleys', tag: 'Made to order',
+    id: 'noodle_boiler', group: 'cooking', name: 'Noodle boiler', tag: 'Chef Mode',
+    desc: 'Gas noodle boiler with six cooking baskets.',
+    features: ['Six cooking baskets', 'Gas-fired', 'Stainless steel construction', 'Available with or without baskets'],
+  },
+  {
+    id: 'combi_stove', group: 'cooking', name: 'Combi stove', tag: 'Chef Mode',
+    desc: 'Two burners, a griddle and a fryer on one 1800 mm top.',
+    features: ['Two burners, a griddle and a fryer on one top', 'Oven under the burners', '1800 mm long', 'Stainless steel construction'],
+  },
+  {
+    id: 'trolley', group: 'storage', photo: 'PW-034', name: 'Trolleys', tag: 'Made to order',
     desc: 'Stainless steel trolleys for trays, pans and dishes.',
     features: ['Stainless steel construction', 'Caster wheels', 'Tray-slide trolleys and bakery pan-rack trolleys', 'Size and tray capacity agreed with you'],
   },

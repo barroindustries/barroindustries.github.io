@@ -209,7 +209,7 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
     for (const p of PLACES) assert.ok(txt.includes(p), `llms.txt lacks ${p}`);
     assert.deepEqual([...new Set([...txt.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
     assert.deepEqual([...new Set([...txt.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map((m) => m[0].replace(/\D/g, '').replace(/^63/, '0')))], ['09276836300']);
-    assert.ok(!/\b(Barangay|Brgy|Makati|Pasig|Taguig|Cebu|Davao)\b/.test(txt), 'another address');
+    assert.ok(!/\b(Barangay|Brgy|Makati|Pasig|Taguig|Cebu|Davao)\b/.test(txt.replace(/Makati and BGC/g, '')), 'another address');   // "Makati and BGC" is the name of an area guide (2026-11-19), not an address
   });
 
   it('states the standard construction as a key fact, right after Materials: made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving 1.2 mm; square-tube posts with adjustable bullet feet — scoped to made-to-order pieces, as on the website', () => {
@@ -269,6 +269,93 @@ const GUIDES = [
   { path: '/guides/custom-stainless-steel-fabrication-guide/', kind: 'article', h1: 'Custom Stainless Steel Fabrication in Manila: How to Order Work to Your Drawing', ogImage: 'og-fabrication.webp', published: '2026-11-19' },
   { path: '/guides/kitchen-exhaust-problems/', kind: 'article', h1: 'Kitchen Exhaust Problems: Why Smoke, Heat and Smells Escape, and How to Fix Them', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
   { path: '/guides/commercial-bakery-equipment-guide/', kind: 'article', h1: 'Commercial Bakery Equipment: Ovens, Proofing, Tables and Racks for a Bakery Kitchen', ogImage: 'og-services.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-kitchen-fabrication-luzon/', kind: 'article', h1: 'Commercial Kitchen Fabrication Across Luzon: How Out-of-Town Projects Work', ogImage: 'og-areas.webp', published: '2026-11-19' },
+  { path: '/guides/local-vs-imported-kitchen-equipment-philippines/', kind: 'article', h1: 'Locally Made vs Imported Commercial Kitchen Equipment in the Philippines: How to Choose', ogImage: 'og-fabrication.webp', published: '2026-11-19' },
+  { path: '/guides/how-to-choose-commercial-kitchen-contractor/', kind: 'article', h1: 'How to Choose a Commercial Kitchen Contractor in the Philippines: A Checklist', ogImage: 'og-services.webp', published: '2026-11-19' },
+  { path: '/guides/grease-trap-guide-restaurants/', kind: 'article', h1: 'Grease Trap Guide for Restaurants: Sizing, Placement and Cleaning', ogImage: 'og-services.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-gas-stove-guide/', kind: 'article', h1: 'Commercial Gas Stove Guide: Low-Pressure and High-Pressure Burners', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-wok-stove-guide/', kind: 'article', h1: 'Commercial Wok Stove Guide: Holes, Burners, Gas and Hood', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
+  { path: '/guides/griddle-vs-teppanyaki-grill/', kind: 'article', h1: 'Griddle vs Teppanyaki Grill: Which One Fits Your Menu?', ogImage: 'og-fit-out.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-deep-fryer-guide/', kind: 'article', h1: 'Commercial Deep Fryers: Vat Size, Drains and Safety', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/chicken-inasal-grill-guide/', kind: 'article', h1: 'Chicken Inasal Grills: What to Look for in a Commercial Charcoal Grill', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
+  { path: '/guides/lava-rock-vs-charcoal-grill/', kind: 'article', h1: 'Lava Rock Griller vs Charcoal Grill for Restaurants: Flavour, Control, Smoke and Cleaning', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/pandesal-oven-pugon-guide/', kind: 'article', h1: 'Pandesal Oven Guide: Pugon or Gas Deck Oven for a Small Bakery', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-storage-rack-guide/', kind: 'article', h1: 'Commercial Storage Rack Guide: Solid or Slotted Shelves, Tiers, Wheels and Layout', ogImage: 'og-institutional.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-trolley-guide/', kind: 'article', h1: 'Kitchen Trolleys: Types, Wheels, Shelves and Fit for Restaurants and Hotels', ogImage: 'og-institutional.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-steel-cabinet-guide/', kind: 'article', h1: 'Stainless Steel Cabinets for Commercial Kitchens: Choosing Type, Doors and Shelves', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
+  { path: '/guides/range-hood-types-compared/', kind: 'article', h1: 'Range Hood Types Compared: Wall, Island, Slim and Rear-Pitch Hoods', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
+  { path: '/guides/baffle-filter-vs-mesh-filter/', kind: 'article', h1: 'Baffle Filters vs Mesh Filters for Kitchen Hoods: How They Differ and Which to Choose', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
+  { path: '/guides/hospital-kitchen-equipment-planning/', kind: 'article', h1: 'Planning hospital kitchen equipment: zones, special diets and hygiene', ogImage: 'og-institutional.webp', published: '2026-11-19' },
+  { path: '/guides/school-university-kitchen-lab-fitout/', kind: 'article', h1: 'Stainless Steel for School Kitchens and Labs: Canteens, Training Kitchens and Science Rooms', ogImage: 'og-ispsc.webp', published: '2026-11-19' },
+  { path: '/guides/hotel-kitchen-equipment-checklist/', kind: 'article', h1: 'A hotel kitchen equipment checklist: the cooking line, banquets, room service, bakery and dishwashing', ogImage: 'og-fit-out.webp', published: '2026-11-19' },
+  { path: '/guides/cloud-kitchen-setup-philippines/', kind: 'article', h1: 'How to Set Up a Cloud Kitchen in the Philippines: Space, Layout, Equipment and Ventilation', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/small-restaurant-kitchen-setup/', kind: 'article', h1: 'Small Restaurant and Carinderia Kitchen Setup: What to Get First and How to Plan for Growth', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/cafe-back-of-house-equipment/', kind: 'article', h1: 'Coffee Shop Back-of-House: Stainless Counters, Sinks and Storage', ogImage: 'og-fit-out.webp', published: '2026-11-19' },
+  { path: '/guides/government-bidding-kitchen-equipment/', kind: 'article', h1: 'Buying Kitchen and Stainless Steel Equipment Through Government Bidding', ogImage: 'og-institutional.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-steel-thickness-guide/', kind: 'article', h1: 'Stainless Steel Thickness for Kitchen Equipment: A Simple Guide', ogImage: 'og-fabrication.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-kitchen-equipment-quezon-city/', kind: 'article', h1: 'Commercial Kitchen Equipment in Quezon City: Planning, Fabrication and Installation', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-steel-fabrication-pampanga/', kind: 'article', h1: 'Stainless Steel Fabrication and Kitchen Equipment in Pampanga', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-equipment-baguio-la-trinidad/', kind: 'article', h1: 'Commercial Kitchen Equipment in Baguio and La Trinidad: Planning for Cool Air, Slopes and Busy Days', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-fabrication-la-union-ilocos/', kind: 'article', h1: 'Kitchen Equipment and Stainless Steel Fabrication in La Union and Ilocos', ogImage: 'og-areas.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-kitchen-cavite-laguna/', kind: 'article', h1: 'Commercial Kitchen Fit-Outs in Cavite and Laguna: Planning With Your Building Contractor', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/stock-pot-burner-guide/', kind: 'article', h1: 'Stock Pot Burners for Soups, Bulalo and Big-Batch Cooking', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/salamander-broiler-guide/', kind: 'article', h1: 'Salamander Broilers: Uses, Mounting and Choosing One', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
+  { path: '/guides/bain-marie-guide/', kind: 'article', h1: 'Bain Marie Guide: Keeping Food Hot for Buffets, Canteens and Carinderias', ogImage: 'og-fabrication.webp', published: '2026-11-19' },
+  { path: '/guides/hot-holding-cabinet-guide/', kind: 'article', h1: 'Hot Holding Cabinets for Banquets, Hospitals and Delivery Kitchens', ogImage: 'og-institutional.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-rice-steamer-guide/', kind: 'article', h1: 'Commercial Rice Steamers for Canteens, Hotels and Restaurants', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/dimsum-steamer-guide/', kind: 'article', h1: 'Dimsum Steamers for Restaurants and Food Courts: Boilers, Baskets and Placement', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/noodle-boiler-guide/', kind: 'article', h1: 'Noodle Boilers for Lomi, Ramen and Pancit Shops: Baskets, Overflow and Drains', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/chicken-lechon-roaster-guide/', kind: 'article', h1: 'Lechon Manok Roasters: Capacity, Spits, Motors and Charcoal Safety', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/skewer-grill-barbecue-isaw/', kind: 'article', h1: 'Skewer Grills for Barbecue, Isaw and Street Food: Size, Fuel and Smoke', ogImage: 'og-fit-out.webp', published: '2026-11-19' },
+  { path: '/guides/dish-rack-guide/', kind: 'article', h1: 'Stainless Steel Dish Racks for Plates, Bowls and Cups: Types, Sizing and Drip Trays', ogImage: 'og-areas.webp', published: '2026-11-19' },
+  { path: '/guides/pot-rack-and-overshelf-guide/', kind: 'article', h1: 'Pot Racks and Overshelves: Using the Space Above Your Tables', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/hand-sink-guide-food-business/', kind: 'article', h1: 'Hand Sinks in Food Businesses: Where, How Many and What Type', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/pre-rinse-dishwashing-station/', kind: 'article', h1: 'Planning a Dishwashing Station: Pre-Rinse, Wash and Dry', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-exhaust-blower-guide/', kind: 'article', h1: 'Kitchen Exhaust Blowers: Types, Sizing and Placement', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-exhaust-ducting-guide/', kind: 'article', h1: 'Kitchen Exhaust Ducting: Materials, Routes and Cleaning Access', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-exhaust-cleaning-schedule/', kind: 'article', h1: 'Kitchen Exhaust Cleaning Schedule: How Often to Clean Filters, Hoods, Ducts and Blowers', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/lpg-regulator-high-vs-low-pressure/', kind: 'article', h1: 'LPG Regulators for Restaurants: High Pressure vs Low Pressure and How to Match Them', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/gas-leak-safety-commercial-kitchen/', kind: 'article', h1: 'Gas Leak Safety in Commercial Kitchens: How to Prevent, Detect and Respond to an LPG Leak', ogImage: 'og-exhaust.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-steel-finishes-guide/', kind: 'article', h1: 'Stainless Steel Finishes: Hairline, Brushed, Satin and Mirror, and How to Choose One', ogImage: 'og-ispsc.webp', published: '2026-11-19' },
+  { path: '/guides/how-stainless-kitchen-equipment-is-made/', kind: 'article', h1: 'How Stainless Steel Kitchen Equipment Is Made: From Drawing to Delivery', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
+  { path: '/guides/sanitary-welds-food-equipment/', kind: 'article', h1: 'Sanitary Welds: Why Weld Quality Matters in Food Equipment', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/custom-vs-standard-kitchen-equipment/', kind: 'article', h1: 'Custom Kitchen Equipment or Standard Sizes: How to Choose', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-steel-railings-and-gates/', kind: 'article', h1: 'Stainless Steel Railings and Gates in the Philippines: Design, Grade and Fabrication', ogImage: 'og-areas.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-steel-countertops/', kind: 'article', h1: 'Stainless Steel Countertops for Commercial and Home Kitchens: Pros, Cons and Build Details', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-laboratory-tables/', kind: 'article', h1: 'Stainless Steel Laboratory Tables and Sinks for Schools and Science Rooms: How to Choose', ogImage: 'og-ispsc.webp', published: '2026-11-19' },
+  { path: '/guides/food-processing-stainless-equipment/', kind: 'article', h1: 'Food Processing Equipment: Stainless Tables, Sinks and Racks for a Production Room', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
+  { path: '/guides/butchery-meat-prep-room-equipment/', kind: 'article', h1: 'Meat Prep Room Equipment: Tables, Sinks, Racks and Layout for a Butchery', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/seafood-prep-area-equipment/', kind: 'article', h1: 'Setting Up a Seafood Prep Area: Sinks, Tables, Drainage and Steel for Salt and Ice', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/central-kitchen-for-restaurant-chains/', kind: 'article', h1: 'Central Kitchen for Restaurant Chains: What to Centralise, Zones, Batch Cooking and Dispatch', ogImage: 'og-ispsc.webp', published: '2026-11-19' },
+  { path: '/guides/chicken-inasal-restaurant-setup/', kind: 'article', h1: 'Inasal Restaurant Equipment: A Kitchen Checklist for Starting a Chicken Inasal Restaurant', ogImage: 'og-services.webp', published: '2026-11-19' },
+  { path: '/guides/lechon-business-equipment/', kind: 'article', h1: 'Lechon Business Equipment: Roasters, Prep Tables, Chopping Counter and Display', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/milk-tea-shop-equipment/', kind: 'article', h1: 'Milk Tea Shop Equipment: Counters, Sinks and Storage for a Small Drinks Shop', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/ramen-shop-kitchen-equipment/', kind: 'article', h1: 'Ramen Shop Equipment in the Philippines: Broth, Noodles, Toppings and Steam', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/korean-bbq-samgyupsal-restaurant-equipment/', kind: 'article', h1: 'Samgyupsal Restaurant Equipment: Table Grills, Smoke Control and the Kitchen Behind Them', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/food-court-stall-equipment/', kind: 'article', h1: 'Food Court Stall Equipment: How to Fit a Compact Kitchen into a Stall or Food Park Unit', ogImage: 'og-fit-out.webp', published: '2026-11-19' },
+  { path: '/guides/catering-business-equipment/', kind: 'article', h1: 'Catering Equipment: Cooking, Holding and Transporting Food to the Venue', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
+  { path: '/guides/resort-kitchen-equipment/', kind: 'article', h1: 'Resort Kitchen Equipment: Planning for Buffets, Events, Salt Air and Remote Sites', ogImage: 'og-areas.webp', published: '2026-11-19' },
+  { path: '/guides/factory-canteen-kitchen-equipment/', kind: 'article', h1: 'Factory Canteen Equipment: Batch Cooking, Serving Lines and Dishwashing for Shift Meals', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/community-kitchen-lgu/', kind: 'article', h1: 'Community Kitchen Equipment for LGUs, Parishes and Evacuation Centres', ogImage: 'og-institutional.webp', published: '2026-11-19' },
+  { path: '/guides/buffet-restaurant-equipment/', kind: 'article', h1: 'Buffet Restaurant Equipment: Back-of-House Cooking, Holding, Counters and Refills', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/pizza-restaurant-kitchen/', kind: 'article', h1: 'Pizza Kitchen Equipment: Dough, Make Line, Oven and Storage', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/fried-chicken-shop-setup/', kind: 'article', h1: 'Fried Chicken Kitchen Setup: Breading, Frying, Holding and Oil', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/bar-and-pub-back-of-house/', kind: 'article', h1: 'Bar Counter Fabrication and Pub Back of House: Stainless Counters, Sinks and Storage', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/mall-kitchen-fit-out-requirements/', kind: 'article', h1: 'The mall restaurant fit-out: kitchen requirements to settle before you design', ogImage: 'og-fit-out.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-flooring-and-drainage/', kind: 'article', h1: 'Commercial Kitchen Flooring and Drainage: Floors, Slope, Drains and Trenches', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
+  { path: '/guides/raw-and-cooked-food-separation/', kind: 'article', h1: 'Separating Raw and Cooked Food in a Commercial Kitchen', ogImage: 'og-ispsc.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-renovation-without-closing/', kind: 'article', h1: 'Kitchen Renovation Without Closing for Long: How to Phase the Work', ogImage: 'og-institutional.webp', published: '2026-11-19' },
+  { path: '/guides/preventive-maintenance-commercial-kitchen/', kind: 'article', h1: 'Preventive Maintenance for Commercial Kitchen Equipment: A Daily to Yearly Plan', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/common-kitchen-equipment-problems/', kind: 'article', h1: 'Common Commercial Kitchen Equipment Problems and How to Fix Them', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/save-gas-commercial-kitchen/', kind: 'article', h1: 'How to Save Gas in a Commercial Kitchen: Burners, Lids, Heat and Habits', ogImage: 'og-services.webp', published: '2026-11-19' },
+  { path: '/guides/small-kitchen-design-tips/', kind: 'article', h1: 'Small Commercial Kitchen Design: How to Fit a Working Kitchen into Less Space', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/open-kitchen-design/', kind: 'article', h1: 'Open Kitchen Design for Restaurants: Showing Your Cooking to Guests', ogImage: 'og-services.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-equipment-warranty-after-sales/', kind: 'article', h1: 'Kitchen Equipment Warranty and After-Sales Service: What to Expect and What to Ask', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-equipment-batangas/', kind: 'article', h1: 'Commercial Kitchen Equipment for Batangas Restaurants and Resorts', ogImage: 'og-fire.webp', published: '2026-11-19' },
+  { path: '/guides/stainless-steel-fabrication-bulacan/', kind: 'article', h1: 'Stainless Steel Fabrication and Kitchen Equipment in Bulacan', ogImage: 'og-dmmmsu.webp', published: '2026-11-19' },
+  { path: '/guides/kitchen-equipment-tarlac/', kind: 'article', h1: 'Commercial Kitchen Equipment in Tarlac: Planning Schools, Hospitals and Restaurants', ogImage: 'og-work.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-kitchen-zambales-subic/', kind: 'article', h1: 'Commercial Kitchen Equipment in Zambales and Subic: Planning for the Coast', ogImage: 'og-faq.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-kitchen-makati-bgc/', kind: 'article', h1: 'Restaurant Kitchen Fit-Outs in Makati and BGC: Building Rules, Exhaust and Tight Spaces', ogImage: 'og-lpg.webp', published: '2026-11-19' },
 ];
 // the owner's own sentence, the one answer to the price question that the product pages give (CHECK 9 takes it out of the product pages and of the equipment list before it scans for the word "price")
 const PRICE_SENTENCE = 'Prices depend on size and options.';
@@ -679,7 +766,7 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
       assert.ok(digits.length >= 1 && digits.every((d) => d === '09276836300'), `${p.path}: phone numbers ${digits}`);
       assert.deepEqual([...new Set([...p.html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
       assert.equal((p.body.match(/Capricorn/g) || []).length, 1, `${p.path}: the street address appears once (the footer)`);
-      assert.ok(!/\b(Barangay|Brgy|Poblacion|Makati|Pasig|Taguig|Cebu|Davao)\b/.test(p.body), `${p.path}: another address`);
+      assert.ok(!/\b(Barangay|Brgy|Poblacion|Makati|Pasig|Taguig|Cebu|Davao)\b/.test((p.path === '/guides/commercial-kitchen-makati-bgc/' ? p.body.replace(/\bMakati\b/g, '') : p.body).replace(/Makati and BGC/g, '')), `${p.path}: another address`);   // the Makati/BGC area guide (owner's 100-guide plan, 2026-11-19) names the place, never an address there
       assert.ok(!/La\s*Union/i.test(p.footer + p.header), `${p.path}: La Union in the header or footer`);
     });
   });
@@ -757,7 +844,7 @@ describe('guides: the articles — length, structure, and what each one says (an
     for (const p of articles) {
       const n = words(p.article), m = words(p.main.replace(/<script[\s\S]*?<\/script>/g, ''));
       assert.ok(n >= 900 && n <= 1600, `${p.path}: the article is ${n} words`);
-      assert.ok(m >= 900 && m <= 1600, `${p.path}: <main> is ${m} words`);
+      assert.ok(m >= 900 && m <= 1650, `${p.path}: <main> is ${m} words`);   // <main> also carries the section kicker and the reading time (2026-11-19); the article limit above is the real one
     }
   });
 
@@ -831,12 +918,12 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       assert.equal(p.published, '2026-10-28');
       assert.ok(lastmodOf(p.url) >= '2026-10-28', `${p.path}: its sitemap entry, or its lastmod (${lastmodOf(p.url) || 'missing'})`);
       assert.ok(llms.includes(`](${p.url}):`), `${p.path}: llms.txt does not list it`);
-      const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
+      const card = hub.html.match(new RegExp(`<article class="pg-card[^"]*">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
       assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${p.path}: its card on the hub`);
     }
     assert.ok(lastmodOf(`${BASE}/guides/`) >= '2026-10-29', `the hub changed on 2026-10-29 (three more guides), so its lastmod is that day or later (${lastmodOf(`${BASE}/guides/`) || 'missing'})`);
     const order = hub.node('CollectionPage')[0].mainEntity.itemListElement.map((i) => i.url.replace(BASE, ''));
-    assert.deepEqual(order, ['/guides/commissary-kitchen-requirements-philippines/', '/guides/ss304-vs-ss316-stainless-steel/', layout.path, list.path, '/guides/commercial-kitchen-exhaust-hood-guide/', '/guides/lpg-gas-line-for-restaurants/', '/guides/how-to-clean-and-care-for-stainless-steel/', '/guides/kitchen-ventilation-requirements-philippines/', '/guides/stainless-steel-work-table-guide/', '/guides/commercial-kitchen-design-and-build-process/', '/guides/commercial-kitchen-sink-guide/', '/guides/kitchen-fresh-air-system-guide/', '/guides/custom-stainless-steel-fabrication-guide/', '/guides/kitchen-exhaust-problems/', '/guides/commercial-bakery-equipment-guide/']);
+    assert.deepEqual(order, articles.map((a) => a.path), 'the hub ItemList lists every guide in registration order');   // was a hard-coded list; 100+ guides since 2026-11-19
     assert.ok(/layout/i.test(hub.meta('description')) && /equipment/i.test(hub.meta('description')), 'the hub description names the two new guides');
   });
 
@@ -1082,7 +1169,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       };
       const LAYOUT = 'guides/how-to-plan-a-commercial-kitchen-layout/index.html', LIST = 'guides/commercial-kitchen-equipment-checklist/index.html', SS = 'guides/ss304-vs-ss316-stainless-steel/index.html', HUB = 'guides/index.html';
       tryIt('the owner\'s sentence on the layout guide', LAYOUT, (h) => h.replace('<p>Whichever you choose,', `<p>${PRICE_SENTENCE} Whichever you choose,`), /FAIL: guides\/how-to-plan-a-commercial-kitchen-layout\/index\.html matches the pricing-token list/);
-      tryIt('the owner\'s sentence on the hub', HUB, (h) => h.replace('<h2 id="guides-list-h">', `<h2 id="guides-list-h">${PRICE_SENTENCE} `), /FAIL: guides\/index\.html matches the pricing-token list/);
+      tryIt('the owner\'s sentence on the hub', HUB, (h) => h.replace('<h2 id="featured-h">', `<h2 id="featured-h">${PRICE_SENTENCE} `), /FAIL: guides\/index\.html matches the pricing-token list/);
       tryIt('the owner\'s sentence on the SS304 guide', SS, (h) => h.replace('<h2 id="difference-h">', `<h2 id="difference-h">${PRICE_SENTENCE} `), /FAIL: guides\/ss304-vs-ss316-stainless-steel\/index\.html matches the pricing-token list/);
       tryIt('another use of "price" on the equipment list', LIST, (h) => h.replace('<p>Food arrives, is checked', '<p>Compare the price of each item. Food arrives, is checked'), /FAIL: guides\/commercial-kitchen-equipment-checklist\/index\.html matches the pricing-token list/);
       tryIt('"pricing" on the equipment list', LIST, (h) => h.replace('<p>Food arrives, is checked', '<p>Ask about pricing. Food arrives, is checked'), /matches the pricing-token list/);
@@ -1123,7 +1210,7 @@ describe('guides: the exhaust hood, LPG gas line and stainless steel care guides
       assert.equal(p.published, '2026-10-29');
       assert.ok(lastmodOf(p.url) >= '2026-10-29', `${p.path}: its sitemap entry, or its lastmod (${lastmodOf(p.url) || 'missing'})`);
       assert.ok(llms.includes(`](${p.url}):`), `${p.path}: llms.txt does not list it`);
-      const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
+      const card = hub.html.match(new RegExp(`<article class="pg-card[^"]*">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
       assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${p.path}: its card on the hub`);
     }
     assert.ok(/exhaust/i.test(hub.meta('description')) && /LPG/.test(hub.meta('description')) && /stainless steel care/i.test(hub.meta('description')), 'the hub description names the three new guides');
@@ -1241,7 +1328,7 @@ describe('guides: the kitchen ventilation requirements guide (2026-11-19) — th
     const lm = (new RegExp(`<loc>${vent.url}</loc>\\s*<lastmod>(\\d{4}-\\d{2}-\\d{2})</lastmod>`).exec(sm) || [])[1] || '';
     assert.ok(lm >= '2026-11-19', `its sitemap entry or lastmod (${lm || 'missing'})`);
     assert.ok(llms.includes(`](${vent.url}):`), 'llms.txt does not list it');
-    const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${vent.path}"[\\s\\S]*?</article>`));
+    const card = hub.html.match(new RegExp(`<article class="pg-card[^"]*">(?:(?!</article>)[\\s\\S])*?href="${vent.path}"[\\s\\S]*?</article>`));
     assert.ok(card && card[0].includes(`>${vent.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), 'its card on the hub');
   });
 
@@ -1311,7 +1398,7 @@ describe('guides: the seven guides of 2026-11-19 — dates, keywords, structure,
       assert.equal(p.published, '2026-11-19', path);
       assert.ok(new RegExp(`<loc>${p.url}</loc>\\s*<lastmod>2026-1[12]-\\d{2}</lastmod>`).test(sm), `${path}: sitemap`);
       assert.ok(llms.includes(`](${p.url}):`), `${path}: llms.txt`);
-      const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${path}"[\\s\\S]*?</article>`));
+      const card = hub.html.match(new RegExp(`<article class="pg-card[^"]*">(?:(?!</article>)[\\s\\S])*?href="${path}"[\\s\\S]*?</article>`));
       assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${path}: hub card`);
     }
   });
@@ -1445,7 +1532,7 @@ const DOCS = [
   { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [22, 25], title: 'Product catalogue | Barro Industries',
     must: ['Stainless-steel kitchen equipment, made to order.', 'Preparation table', 'Sink', 'Dish table', 'Stove', 'Wok range', 'Griddle, griller or fryer', 'Gas deck oven', 'Range hood', 'Cabinet', 'Wall shelving', 'Rack', 'Layouts at a glance', 'Ventilation', 'Eleven products you set up yourself', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Default sizes are in millimetres', 'food-grade SS304', 'laboratory-grade SS316', 'Our standard finish is hairline', HUB_CONSTRUCTION] },
   { key: 'portfolio', file: 'downloads/barro-industries-portfolio.pdf', pages: [8, 12], title: 'Portfolio | Barro Industries',
-    must: ['Completed kitchens and stainless-steel installations.', 'ISPSC 2026', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026).', 'DMMMSU 2022–2023', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).', 'Restaurant kitchen, Bulacan', 'Shown without the client’s name', 'La Union', 'Bulacan', 'KitchenShield™'] },
+    must: ['Completed kitchens and stainless-steel installations.', 'ISPSC 2026', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026).', 'DMMMSU 2022–2023', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).', 'Restaurant kitchen, Bulacan', 'Shown without the client’s name', 'La Union', 'Bulacan', 'KitchenShield™'] },
 ];
 
 for (const d of DOCS) {

@@ -625,7 +625,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
       assert.ok(!/San\s*Fernando|purok|carlatan/i.test(p.html), `${p.path}: an old address`);
       assert.equal((p.body.match(/Capricorn/g) || []).length, p.kind === 'areas' || p.kind === 'faq' ? 2 : 1, `${p.path}: the street address appears the expected number of times`);
       assert.ok(p.footer.includes(`<p>${ADDRESS}</p>`), `${p.path}: the footer address`);
-      assert.ok(!/\b(Barangay|Brgy|Poblacion|Sampaloc|Makati|Pasig|Taguig|Mandaluyong|Cebu|Davao)\b/.test(p.body), `${p.path}: another address`);
+      assert.ok(!/\b(Barangay|Brgy|Poblacion|Sampaloc|Makati|Pasig|Taguig|Mandaluyong|Cebu|Davao)\b/.test(p.body.replace(/Makati and BGC/g, '')), `${p.path}: another address`);   // the link to the "Makati and BGC" area guide is a name, not an address
     });
   });
 
@@ -888,7 +888,7 @@ describe('header and footer: the same on every page, "Get a quote" top right and
     each((p) => {
       assert.ok(p.header.includes('<a href="/" id="site-brand">'));
       assert.deepEqual([...p.header.matchAll(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/g)][0][1].match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), [
-        '<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">Guides</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
+        '<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/guides/">The Kitchen Guide</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(p.header.includes('<button type="button" id="site-menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">'));
@@ -908,13 +908,13 @@ describe('header and footer: the same on every page, "Get a quote" top right and
 
   it('has the footer links to Home, the hubs, the FAQ, the catalogue, Facebook, "Message us" (Messenger), "Get a quote" and the discreet "Team portal"', () => {
     const f = byPath('/faq/').footer;
-    assert.ok(f.includes(`<p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">Guides</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a>${msgLink('', 'Message us')}<a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>`));
+    assert.ok(f.includes(`<p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a>${msgLink('', 'Message us')}<a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>`));
   });
 });
 
 describe('the owner\'s answers of 2026-10-21: Barro supplied the ISPSC hoods and ranges too, and DMMMSU is in La Union', () => {
   const ISPSC_SCOPE = 'Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026).';
-  const DMMMSU_SCOPE = 'Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).';
+  const DMMMSU_SCOPE = 'Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).';
   const projectText = (id) => visibleText(home.match(new RegExp(`<article class="proj[^"]*" id="${id}">[\\s\\S]*?</article>`))[0].match(/<div class="proj-head">[\s\S]*?<p>([\s\S]*?)<\/p>\s*<\/div>/)[1]);
 
   it('describes the ISPSC scope as work tables, sinks, gas ranges and exhaust hoods — the owner\'s wording, in one sentence, on the homepage and on every page that shows the project — and states no material grade', () => {
@@ -949,7 +949,7 @@ describe('the owner\'s answers of 2026-10-21: Barro supplied the ISPSC hoods and
     for (const slug of ['/work/', '/work/dmmmsu-2022-2023/', '/work/ispsc-2026/', '/services/', '/services/institutional-and-government-supply/']) assert.ok(byPath(slug).body.includes(DMMMSU_SCOPE), `${slug}: the DMMMSU description`);
     const p = byPath('/work/dmmmsu-2022-2023/');
     assert.ok(/La Union/.test(p.title) && p.title === 'DMMMSU Stainless-Steel Equipment, La Union | Barro Industries');
-    for (const key of ['description', 'og:description', 'twitter:description']) assert.ok(/\(DMMMSU\) in La Union, March 2023 to December 2025\.$/.test(p.meta(key)), key);
+    for (const key of ['description', 'og:description', 'twitter:description']) assert.ok(/\(DMMMSU\) in La Union, 2022 to 2023\.$/.test(p.meta(key)), key);
     assert.ok(p.html.includes('<div><dt>Location</dt><dd>La Union</dd></div>'));
     assert.equal(visibleText(p.html.match(/<h1>([\s\S]*?)<\/h1>/)[1]), 'Don Mariano Marcos Memorial State University (DMMMSU)');
     assert.equal(p.node('CreativeWork')[0].description, DMMMSU_SCOPE);
@@ -977,7 +977,7 @@ describe('the homepage and the catalogue are wired to the 12 pages (the pages li
   const nav = (html) => html.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
   const footLinks = (html) => html.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
   const hrefsIn = (html) => [...html.matchAll(/<a\b[^>]*\shref="([^"]+)"/g)].map((m) => m[1]);
-  const NAV = [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'Guides'], ['/faq/', 'FAQ']];
+  const NAV = [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/guides/', 'The Kitchen Guide'], ['/faq/', 'FAQ']];
 
   it('has the same eight header links on the homepage, the catalogue and the 12 pages: Services, Products, Our work, Areas we serve, Catalogue, Guides, FAQ, Contact (an in-page anchor on the homepage, /#contact elsewhere), and "Get a quote" before the menu button', () => {
     const labels = (html) => [...nav(html).matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
@@ -994,7 +994,7 @@ describe('the homepage and the catalogue are wired to the 12 pages (the pages li
   it('has one footer link row on the catalogue and the 12 pages (Home, Services, Products, Our work, Areas we serve, FAQ, Catalogue, Facebook, Message us, Get a quote, Team portal) and the homepage\'s without Home — "Team portal" last everywhere', () => {
     // the Message us link carries an inline icon: take the <svg> out so the row reads as its words
     const rows = (html) => [...footLinks(html).replace(/<svg[\s\S]*?<\/svg>/g, '').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    const FULL = [['/', 'Home'], ['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/guides/', 'Guides'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']];
+    const FULL = [['/', 'Home'], ['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/guides/', 'The Kitchen Guide'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']];
     assert.deepEqual(rows(catalogue), FULL);
     assert.deepEqual(rows(homeHtml), FULL.slice(1));
     for (const p of PAGES) assert.deepEqual(rows(p.html), FULL, p.path);
@@ -1161,11 +1161,11 @@ describe('scripts and styles: only the shared /js/site.js and /js/late-fonts.js,
     // the header is css/site.css's (one design for every public page): its rule for the narrowest phone, and the 900-1099px squeeze that keeps six links, the button and the whole wordmark on one row
     const site = read('css/site.css').replace(/\/\*[\s\S]*?\*\//g, '');
     assert.match(site, /@media \(max-width:359px\)\{[^@]*#site \.site-brand-name\{[^}]*white-space:normal/);
-    // 2026-11-19 (Guides joined the header, eight links): the links show from 1100px, never wrap, and sit a little closer up to 1280px; below 1100px the menu button keeps them, so "Barro Industries" stays whole
-    assert.match(site, /@media \(min-width:900px\) and \(max-width:1099px\)\{[^}]*#site \.site-brand-name\{font-size:20px\}\s*\}/);
-    assert.match(site, /@media \(min-width:1100px\)\{\s*#site #site-menu-btn\{display:none\}\s*#site #site-nav\{display:flex;[^}]*\}\s*#site #site-nav a\{[^}]*white-space:nowrap\}/);
-    assert.match(site, /@media \(min-width:1100px\) and \(max-width:1279px\)\{[^}]*#site #site-nav\{gap:20px;margin-right:6px\}\s*\}/);
-    assert.ok(read('js/site.js').includes('if (window.innerWidth >= 1100) menu(false);'), 'site.js closes the phone menu at the width the links appear');
+    // 2026-11-19 (Guides joined the header, eight links): the links show from 1280px, never wrap, and sit a little closer up to 1440px; below 1280px the menu button keeps them, so "Barro Industries" stays whole
+    assert.match(site, /@media \(min-width:900px\) and \(max-width:1279px\)\{[^}]*#site \.site-brand-name\{font-size:20px\}\s*\}/);
+    assert.match(site, /@media \(min-width:1280px\)\{\s*#site #site-menu-btn\{display:none\}\s*#site #site-nav\{display:flex;[^}]*\}\s*#site #site-nav a\{[^}]*white-space:nowrap\}/);
+    assert.match(site, /@media \(min-width:1280px\) and \(max-width:1439px\)\{[^}]*#site #site-nav\{gap:22px;margin-right:6px\}\s*\}/);
+    assert.ok(read('js/site.js').includes('if (window.innerWidth >= 1280) menu(false);'), 'site.js closes the phone menu at the width the links appear');
     // the footer: its eleven links wrap inside the right half from 900px at every width (so the address and the badges keep their room): there is no one-row layout any more
     assert.match(site, /@media \(min-width:900px\)\{[^@]*#site \.foot-in\{grid-template-columns:minmax\(0,1fr\) minmax\(0,1\.1fr\);[^}]*\}\s*#site \.foot-links\{justify-content:flex-end\}/);
     assert.ok(!/@media \(min-width:1100px\)\{\s*#site \.foot-in\{/.test(site), 'the footer has a one-row layout again: eleven links no longer fit beside the address');
@@ -1188,7 +1188,7 @@ describe('the homepage\'s own words, kept: the projects, the process, the warran
   for (const [slug, id] of [['/work/ispsc-2026/', 'proj-ispsc-2026'], ['/work/dmmmsu-2022-2023/', 'proj-dmmmsu-2022-2023']]) {
     it(`${slug} says what the homepage says about the project — the tag, the name, the description with its dates — and shows the same photos with the same alt text, in the same order`, () => {
       const hp = homeProject(id), p = byPath(slug);
-      assert.ok(hp.desc.includes('(March') && hp.photos.length >= 6);
+      assert.ok(/\((?:March \d{4}|\d{4}–\d{4})\)/.test(hp.desc) && hp.photos.length >= 6);   // a date in brackets: ISPSC (March 2026), DMMMSU (2022–2023, owner 2026-11-19)
       assert.equal(visibleText(p.html.match(/<p class="eyebrow">([\s\S]*?)<\/p>/)[1]), hp.tag);
       assert.equal(visibleText(p.html.match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \(([A-Z]+)\)$/, ''), hp.name);
       assert.equal(visibleText(p.html.match(/<h1>[\s\S]*?<\/h1>\s*<p class="site-lead">([\s\S]*?)<\/p>/)[1]), hp.desc);

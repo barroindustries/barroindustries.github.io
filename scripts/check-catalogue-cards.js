@@ -1,5 +1,5 @@
 'use strict';
-// scripts/check-catalogue-cards.js — ci-invariants CHECK 9 helper (owner ruling 2026-11-19): every catalogue card is plain text (no image, figure or tile) and carries
+// scripts/check-catalogue-cards.js — ci-invariants CHECK 9 helper (owner ruling 2026-11-19): every catalogue card is text plus at most its captioned product photo (no drawing or tile) and carries
 // EXACTLY ONE price line, which is the generator's exact form and agrees with scripts/public-from-prices.json. Prints one problem per line (never an amount); no output = pass.
 const fs = require('fs');
 const out = [];
@@ -7,7 +7,9 @@ try {
   const page = fs.readFileSync('catalogue/index.html', 'utf8');
   const a = page.indexOf('<!-- CATALOGUE:START'), b = page.indexOf('<!-- CATALOGUE:END -->');
   const block = page.slice(a, b);
-  if (/<img\b|<figure\b|class="cat-(photo|tile)"/.test(block)) out.push('the catalogue block carries an image, figure or tile: cards are plain text');
+  // the product photo is back (owner 2026-11-19 later): only the exact captioned figure, first in its card; never a tile or a drawing
+  const bare = block.replace(/<figure class="cat-photo"><img src="\/site\/img\/products\/[a-z0-9-]+-thumb\.webp" [^>]*><figcaption>Representative image<\/figcaption><\/figure>/g, '');
+  if (/<img\b|<figure\b|class="cat-(photo|tile)"/.test(bare)) out.push('the catalogue block carries an image, figure or tile other than the captioned product photo');
   const prices = JSON.parse(fs.readFileSync('scripts/public-from-prices.json', 'utf8')).prices;
   const cards = block.split('<li class="cat-card').slice(1);
   const seen = new Set();

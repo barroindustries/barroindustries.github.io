@@ -140,8 +140,8 @@
          CSS beside new JS and a shipped CSS change looked like it never landed.
          A new version = a new cache key, so even a stale SW must hit the network.
          Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-    <link rel="stylesheet" href="css/tokens.css?v=14.0.367"/>
-    <link rel="stylesheet" href="css/styles.css?v=14.0.367"/>
+    <link rel="stylesheet" href="css/tokens.css?v=14.0.375"/>
+    <link rel="stylesheet" href="css/styles.css?v=14.0.375"/>
 
     <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
          Every local js/ src carries the same ?v= CACHE-BUST as the stylesheets above
@@ -187,42 +187,42 @@
   <!-- v12 WS16 — Chart.js loads on demand via window.ensureChart() (config.js), not eagerly here.
        The CDN URL stays in sw.js's PRECACHE list so the on-demand fetch is instant/offline-safe. -->
   <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
-  <script defer src="js/firebase-config.js?v=14.0.367"></script>
+  <script defer src="js/firebase-config.js?v=14.0.375"></script>
   <!-- v13 Phase 8 — client error logging. Loads right after firebase-config.js
        so window.onerror/onunhandledrejection catch boot errors too. -->
-  <script defer src="js/errlog.js?v=14.0.367"></script>
-  <script defer src="js/config.js?v=14.0.367"></script>
+  <script defer src="js/errlog.js?v=14.0.375"></script>
+  <script defer src="js/config.js?v=14.0.375"></script>
   <!-- v13 WS-H Phase 121-122 — renderEmptyState/withLoadingAndError. Uses window.emojiIcon/
        window.escHtml only at CALL time; placed right after config.js for clarity. -->
-  <script defer src="js/ui-states.js?v=14.0.367"></script>
+  <script defer src="js/ui-states.js?v=14.0.375"></script>
   <!-- v13 Part E Phase 40/115/116 — statusBadge2()/STATUS_META. Needs window.escHtml
        (config.js) only; must load before departments.js, the first consumer. -->
-  <script defer src="js/ui-status-meta.js?v=14.0.367"></script>
-  <script defer src="js/statutory-tables.js?v=14.0.367"></script>
-  <script defer src="js/print-docs.js?v=14.0.367"></script>
-  <script defer src="js/finance-ledger.js?v=14.0.367"></script>
-  <script defer src="js/drive.js?v=14.0.367"></script>
-  <script defer src="js/notifications.js?v=14.0.367"></script>
+  <script defer src="js/ui-status-meta.js?v=14.0.375"></script>
+  <script defer src="js/statutory-tables.js?v=14.0.375"></script>
+  <script defer src="js/print-docs.js?v=14.0.375"></script>
+  <script defer src="js/finance-ledger.js?v=14.0.375"></script>
+  <script defer src="js/drive.js?v=14.0.375"></script>
+  <script defer src="js/notifications.js?v=14.0.375"></script>
   <!-- Meetings + in-system calendar (owner request). MUST load after
        notifications.js: window.Meetings sends invites through Notifs.send at
        RUN time. Everything it touches is a runtime reference, never parse-time,
        so this position is about intent, not a hard parse dependency. -->
-  <script defer src="js/meetings.js?v=14.0.367"></script>
+  <script defer src="js/meetings.js?v=14.0.375"></script>
   <!-- COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2 — window.CalendarFeed, the ONE
        calendar data source for both the dashboard mini calendar and the drawer
        Calendar page. Must load right after meetings.js: it consumes
        window.Meetings._h (the Manila date helpers) at call time. -->
-  <script defer src="js/calendar-feed.js?v=14.0.367"></script>
+  <script defer src="js/calendar-feed.js?v=14.0.375"></script>
   <!-- v13 Phase 35 — Approvals write-path registry (window.Approvals). Must load
        before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
-  <script defer src="js/svc-approvals.js?v=14.0.367"></script>
+  <script defer src="js/svc-approvals.js?v=14.0.375"></script>
   <!-- v13 Phase 45 — generic finance CRUD table component; departments.js's
        Taxes/Records tabs call window.renderFinanceCrudTable. -->
-  <script defer src="js/ui-crud-table.js?v=14.0.367"></script>
+  <script defer src="js/ui-crud-table.js?v=14.0.375"></script>
   <!-- v14 Wave 2 Batch A — pure money-math (vatSplit, computePayLine), split out
        of departments.js so it's independently unit-tested (tests/money.test.mjs).
        Must load before departments.js, which calls these via window.*. -->
-  <script defer src="js/money-core.js?v=14.0.367"></script>
+  <script defer src="js/money-core.js?v=14.0.375"></script>
   <!-- PERF-WAVE1 WP1 — js/pay-policy.js and js/statutory-status.js (formerly
        here, load-bearing before js/payroll.js/js/departments.js/js/screens/*)
        are now lazy-loaded as part of the payroll compute-engine bundle
@@ -233,8 +233,8 @@
   <!-- Type-B (Production, weekly) self-service attendance — pure geofencing
        math (haversineMeters/siteMatch), independently unit-tested
        (tests/geo.test.mjs). No dependencies; loads early like money-core.js. -->
-  <script defer src="js/geo-core.js?v=14.0.367"></script>
-  <script defer src="js/departments.js?v=14.0.367"></script>
+  <script defer src="js/geo-core.js?v=14.0.375"></script>
+  <script defer src="js/departments.js?v=14.0.375"></script>
   <!-- PERF-WAVE1 WP1 (2026-08-24) — js/screens/design.js, tasks.js, sales.js,
        crm.js, ventures.js, hr.js, employee-profile.js, js/payroll-weekly.js,
        js/payroll.js, js/screens/payroll.js, js/screens/payroll-backfill.js,
@@ -264,9 +264,9 @@
        departments' "Budgeting" subtab — bundling this file into all nine
        PAGE_SCRIPTS entries individually was strictly worse than its ~62KB
        eager cost. See js/config.js's PAGE_SCRIPTS comment. -->
-  <script defer src="js/screens/dept-budgets.js?v=14.0.367"></script>
-  <script defer src="js/app.js?v=14.0.367"></script>
-  <script defer src="js/modules.js?v=14.0.367"></script>
+  <script defer src="js/screens/dept-budgets.js?v=14.0.375"></script>
+  <script defer src="js/app.js?v=14.0.375"></script>
+  <script defer src="js/modules.js?v=14.0.375"></script>
   <!-- v14 Wave 7 Pass 9 — Dashboard + core-page screens (the 6 role dashboards,
        System Health, Audit Log, Product Database, SOPs, Personal Finance +
        the KPI/attendance-score cluster, Progress Reports, Company, Departments,
@@ -285,8 +285,8 @@
        file (dashboards.js) and js/chat.js below stay eager: dashboards.js's
        own performance fixes are PERF-WAVE1 WP3's package, not this one's, and
        chat.js's one lazy-file reach (openTaskDetail, tasks.js) is WP4's. -->
-  <script defer src="js/screens/dashboards.js?v=14.0.367"></script>
-  <script defer src="js/chat.js?v=14.0.367"></script>
+  <script defer src="js/screens/dashboards.js?v=14.0.375"></script>
+  <script defer src="js/chat.js?v=14.0.375"></script>
   </template>
   <script>(function(){
     var root = document.documentElement;
@@ -812,19 +812,19 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .foot-links{justify-content:flex-end}
   #site .foot-legal{grid-column:1/-1}
 }
-@media (min-width:900px) and (max-width:1099px){
-  /* below 1100px the eight header links (Guides added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
+@media (min-width:900px) and (max-width:1279px){
+  /* below 1280px the eight header links ("The Kitchen Guide" added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
   #site .site-brand-name{font-size:20px}
 }
-@media (min-width:1100px){
+@media (min-width:1280px){
   #site #site-menu-btn{display:none}
   #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
   #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px;white-space:nowrap}
   #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
 }
-@media (min-width:1100px) and (max-width:1279px){
+@media (min-width:1280px) and (max-width:1439px){
   /* eight links, the button and the wordmark share one row: a little less room between the links keeps them on one line */
-  #site #site-nav{gap:20px;margin-right:6px}
+  #site #site-nav{gap:22px;margin-right:6px}
 }
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -934,7 +934,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       <a href="/work/">Our work</a>
       <a href="/areas-we-serve/">Areas we serve</a>
       <a href="/catalogue/">Catalogue</a>
-      <a href="/guides/">Guides</a>
+      <a href="/guides/">The Kitchen Guide</a>
       <a href="/faq/">FAQ</a>
       <a href="#contact">Contact</a>
     </nav>
@@ -1188,7 +1188,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       <div class="proj-head">
         <p class="proj-tag">DMMMSU 2022–2023</p>
         <h3>Don Mariano Marcos Memorial State University</h3>
-        <p>Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).</p>
+        <p>Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).</p>
       </div>
       <ul class="proj-gallery">
         <li class="is-lead"><a href="site/img/projects/dmmmsu/02.webp" data-lightbox><img src="site/img/projects/dmmmsu/02.webp" srcset="site/img/projects/dmmmsu/02-thumb.webp 600w, site/img/projects/dmmmsu/02.webp 1600w" sizes="(min-width:1180px) 1148px, 100vw" alt="DMMMSU — room installed with stainless-steel tables, racks and shelving" loading="lazy" decoding="async" width="1600" height="1200"></a></li>
@@ -1323,7 +1323,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">Guides</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1" data-qr-start>Get a quote</a><a class="foot-portal" href="/#login" id="site-team-portal">Team portal</a></p>
+    <p class="foot-links"><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1" data-qr-start>Get a quote</a><a class="foot-portal" href="/#login" id="site-team-portal">Team portal</a></p>
     <p class="foot-legal" id="copyright">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission. <span data-brand>Barro Kitchens</span> is a brand of Barro Industries OPC.</p>
   </div>
 </footer>
@@ -1466,7 +1466,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.367 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.375 · Barro Industries</div>
   </div>
 </div>
 

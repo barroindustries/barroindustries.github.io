@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-gRa7Fh3GLqFhDKKHRih9wgafN2qMZVcGmBr2S8E3IdY=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-XLW3MXgn+Utun3WUId/fH3s2rh3SIeSaQHjzUTibxwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Commercial Bakery Equipment Guide, Philippines | Barro Industries</title>
 <meta name="description" content="Commercial bakery equipment guide from Barro Kitchens (Barro Industries): the bakery workflow, gas deck ovens, proofing, tables, racks, ventilation and gas.">
 <link rel="canonical" href="https://barroindustries.com/guides/commercial-bakery-equipment-guide/">
@@ -121,7 +121,7 @@
         {
           "@type": "ListItem",
           "position": 2,
-          "name": "Guides",
+          "name": "The Kitchen Guide",
           "item": "https://barroindustries.com/guides/"
         },
         {
@@ -638,19 +638,19 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .foot-links{justify-content:flex-end}
   #site .foot-legal{grid-column:1/-1}
 }
-@media (min-width:900px) and (max-width:1099px){
-  /* below 1100px the eight header links (Guides added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
+@media (min-width:900px) and (max-width:1279px){
+  /* below 1280px the eight header links ("The Kitchen Guide" added 2026-11-19) stay behind the menu button: in one row they wrapped and cut "Barro Industries" short */
   #site .site-brand-name{font-size:20px}
 }
-@media (min-width:1100px){
+@media (min-width:1280px){
   #site #site-menu-btn{display:none}
   #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
   #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px;white-space:nowrap}
   #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
 }
-@media (min-width:1100px) and (max-width:1279px){
+@media (min-width:1280px) and (max-width:1439px){
   /* eight links, the button and the wordmark share one row: a little less room between the links keeps them on one line */
-  #site #site-nav{gap:20px;margin-right:6px}
+  #site #site-nav{gap:22px;margin-right:6px}
 }
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -1017,6 +1017,74 @@ body{margin:0;background:#fff;color:#0E1116}
 /* ── the copyright notice at the foot of an article (and of the index) ── */
 #site .art .art-copy{margin-top:22px;color:var(--site-muted);font-size:13.5px;line-height:1.6}   /* the last question above it already ends in a hairline */
 #site .art-copy-index{margin-top:clamp(32px,4vw,48px);padding-top:18px;border-top:1px solid var(--site-line);color:var(--site-muted);font-size:13.5px;line-height:1.6;max-width:44rem}
+
+/* ══ The Kitchen Guide (2026-11-19, owner: "make it look like an online magazine or guide") ═════════════════════════════════════════════
+   The index is a magazine front: a masthead, a section bar that stays under the header while you scroll, a featured spread, then one
+   block per section — three lead stories with a picture, the rest as a compact two-column list with a small thumbnail. Every entry is
+   still one <article class="pg-card"> with one link, so the cards, the ItemList and the tests read it the same way. */
+#site .kg-mast .pg-hero-copy{max-width:46rem}
+#site .kg-mast h1{font-size:clamp(2.6rem,4.2vw + 1rem,4.4rem);letter-spacing:-.01em}
+#site .kg-count{margin-top:16px;color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+
+/* the section bar: chips that scroll sideways on a phone, sticky under the header */
+#site .kg-nav{position:sticky;top:var(--site-head);z-index:5;border-bottom:1px solid var(--site-line);background:rgba(255,255,255,.96);backdrop-filter:saturate(1.2) blur(6px)}
+#site .kg-nav ul{display:flex;gap:8px;overflow-x:auto;padding:12px 0;list-style:none;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#site .kg-nav ul::-webkit-scrollbar{display:none}
+#site .kg-nav li{flex:none}
+#site .kg-nav a{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--site-line);border-radius:999px;background:#fff;color:var(--site-navy);font:500 14px/1.2 var(--site-sans);text-decoration:none;white-space:nowrap}
+#site .kg-nav a:hover{border-color:var(--site-navy)}
+#site .kg-nav a span{color:var(--site-gold-ink);font-weight:600;font-size:12px}
+#site .kg-sec{scroll-margin-top:calc(var(--site-head) + 64px)}
+#site .kg-sec+.kg-sec{border-top:1px solid var(--site-line)}
+#site .kg-sec-head{display:grid;gap:8px;margin-bottom:clamp(22px,3vw,32px)}
+#site .kg-sec-head h2{font-size:clamp(1.9rem,1.8vw + 1.2rem,2.6rem)}
+#site .kg-sec-head p{max-width:40rem;color:var(--site-muted);font-size:1.0625rem}
+#site .kg-sec-head .eyebrow{margin-bottom:0}
+
+/* a story card: picture, kicker, serif headline, one line of standfirst */
+#site .kg-card .pg-card-media{aspect-ratio:16/10}
+#site .kg-card .pg-card-body{padding:18px 20px 20px}
+#site .kg-card h3{font-size:clamp(1.25rem,.5vw + 1.1rem,1.45rem)}
+#site .kg-card p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#site .kg-kicker{display:block;margin-bottom:8px;color:var(--site-gold-ink);font:600 11.5px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
+#site .kg-lead{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+
+/* the featured spread: one large story beside four smaller ones */
+#site .kg-feature{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+#site .kg-feature .kg-big h3{font-size:clamp(1.6rem,1.4vw + 1.1rem,2.2rem)}
+#site .kg-feature .kg-big p{-webkit-line-clamp:4;font-size:1.0625rem}
+#site .kg-side{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+
+/* the compact list: a small square thumbnail beside the headline */
+#site .kg-list{display:grid;grid-template-columns:minmax(0,1fr);gap:0 32px;margin-top:clamp(20px,3vw,28px);border-top:1px solid var(--site-line)}
+#site .kg-list .pg-card{flex-direction:row;align-items:flex-start;gap:14px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;background:none;box-shadow:none}
+#site .kg-list .pg-card:hover{box-shadow:none}
+#site .kg-list .pg-card:hover h3 a{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+#site .kg-list .pg-card-media{flex:none;width:88px;aspect-ratio:1;border-radius:4px}
+#site .kg-list .pg-card-body{padding:0}
+#site .kg-list h3{margin-bottom:4px;font-size:1.1rem;line-height:1.3}
+#site .kg-list p{margin-bottom:0;font-size:.95rem;line-height:1.5;-webkit-line-clamp:2}
+#site .kg-list .link-arrow{display:none}
+
+@media (min-width:720px){
+  #site .kg-lead,#site .kg-side{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .kg-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (min-width:1024px){
+  #site .kg-lead{grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
+  #site .kg-feature{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:24px}
+  #site .kg-feature .kg-big .pg-card-media{aspect-ratio:4/3}
+  #site .kg-side{grid-template-columns:minmax(0,1fr);gap:0;border-top:1px solid var(--site-line)}
+  #site .kg-side .pg-card{flex-direction:row;align-items:flex-start;gap:16px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;box-shadow:none}
+  #site .kg-side .pg-card-media{flex:none;width:132px;aspect-ratio:4/3;border-radius:4px}
+  #site .kg-side .pg-card-body{padding:0}
+  #site .kg-side .link-arrow{display:none}
+}
+@media (prefers-reduced-motion:reduce){#site .kg-nav{backdrop-filter:none}}
+
+/* an article's kicker (its section) and reading time */
+#site .art-hero .kg-kicker a{color:inherit;text-decoration:none}
+#site .art-hero .kg-kicker a:hover{text-decoration:underline;text-underline-offset:4px}
 </style>
 <!-- PAGE-CSS:END -->
 </head>
@@ -1033,7 +1101,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <a href="/work/">Our work</a>
       <a href="/areas-we-serve/">Areas we serve</a>
       <a href="/catalogue/">Catalogue</a>
-      <a href="/guides/" aria-current="true">Guides</a>
+      <a href="/guides/" aria-current="true">The Kitchen Guide</a>
       <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
@@ -1046,11 +1114,11 @@ body{margin:0;background:#fff;color:#0E1116}
 <section class="pg-hero art-hero">
   <div class="site-wrap pg-hero-in">
     <div class="pg-hero-copy">
-      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li><span aria-current="page">Commercial bakery equipment guide</span></li></ol></nav>
-      <p class="eyebrow">Guide</p>
+      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">The Kitchen Guide</a></li><li><span aria-current="page">Commercial bakery equipment guide</span></li></ol></nav>
+      <p class="eyebrow kg-kicker"><a href="/guides/#business">By type of business</a></p>
       <h1>Commercial Bakery Equipment: Ovens, Proofing, Tables and Racks for a Bakery Kitchen</h1>
       <p class="site-lead">A bakeshop only works when dough moves in one line, from the mixer to the oven to the packing table. This guide follows that line and shows the commercial bakery equipment each step needs.</p>
-      <p class="art-meta"><span>By Barro Industries</span><span aria-hidden="true">·</span><time datetime="2026-11-19">19 November 2026</time></p>
+      <p class="art-meta"><span>By Barro Industries</span><span aria-hidden="true">·</span><time datetime="2026-11-19">19 November 2026</time><span aria-hidden="true">·</span><span>6 min read</span></p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?quote=1">Get a quote</a><a class="site-btn site-btn-outline" href="#flow">Start with the bakery workflow</a></p>
     </div>
     <figure class="pg-hero-media">
@@ -1213,7 +1281,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="related" class="site-sec site-sec-paper" aria-labelledby="related-h">
   <div class="site-wrap">
     <header class="sec-head">
-      <p class="eyebrow">Keep reading</p>
+      <p class="eyebrow kg-kicker"><a href="/guides/#business">By type of business</a></p>
       <h2 id="related-h">Related reading</h2>
     </header>
     <div class="pg-cards pg-cards-3 pg-cards-text">
@@ -1245,7 +1313,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section class="pg-cta" id="get-a-quote" aria-labelledby="cta-h">
   <div class="site-wrap pg-cta-in">
     <div>
-      <p class="eyebrow">Get started</p>
+      <p class="eyebrow kg-kicker"><a href="/guides/#business">By type of business</a></p>
       <h2 id="cta-h">Tell us about your project</h2>
       <p class="site-lead">Tell us what you need and we will come back with a quotation. No account needed.</p>
     </div>
@@ -1271,7 +1339,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">Guides</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

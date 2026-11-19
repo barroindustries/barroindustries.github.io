@@ -212,8 +212,8 @@ function build() {
     <div class="mt4">
       ${fig('dmmmsu-01.jpg', 'DMMMSU — finished commercial kitchen with range, hood and work tables', '', 66)}
       <div class="cols c23 gap8 mt2 top">
-        <div><p class="h4">DMMMSU 2022–2023</p><div class="h2 mt1">Don Mariano Marcos Memorial State University</div><p class="sm mt1">Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).</p></div>
-        <dl class="facts"><div><dt>Dates</dt><dd>March 2023 – December 2025</dd></div><div><dt>Location</dt><dd>La Union</dd></div><div><dt>Work</dt><dd>Equipment delivered and installed on campus</dd></div></dl>
+        <div><p class="h4">DMMMSU 2022–2023</p><div class="h2 mt1">Don Mariano Marcos Memorial State University</div><p class="sm mt1">Stainless-steel equipment delivered and installed on campus in La Union (2022–2023).</p></div>
+        <dl class="facts"><div><dt>Dates</dt><dd>2022–2023</dd></div><div><dt>Location</dt><dd>La Union</dd></div><div><dt>Work</dt><dd>Equipment delivered and installed on campus</dd></div></dl>
       </div>
     </div>
     <p class="xs muted mta">More photographs and details are in our portfolio: ${CO.site}/downloads/barro-industries-portfolio.pdf</p>` }));

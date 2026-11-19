@@ -40,10 +40,19 @@
     };
   }
 
+  // `db` is a top-level const in firebase-config.js — a global binding but NOT
+  // a property of window, so `window.db` is always undefined and every
+  // window.db guard here silently disabled error logging. Same accessor as
+  // payroll.js / payroll-weekly.js _db().
+  function getDb() {
+    return (typeof db !== 'undefined' && db) ? db : (window.db || null);
+  }
+
   function writeToFirestore(payload) {
     try {
-      if (!window.db || !payload.ts) return false;
-      window.db.collection('error_log').add(payload).catch(function () {
+      var _d = getDb();
+      if (!_d || !payload.ts) return false;
+      _d.collection('error_log').add(payload).catch(function () {
         // silent — logging must never surface a secondary error
       });
       return true;
@@ -54,7 +63,7 @@
 
   function tryFlushBuffer() {
     if (!buffered.length) return;
-    if (!window.db) return;
+    if (!getDb()) return;
     try {
       var toFlush = buffered.splice(0, buffered.length);
       for (var i = 0; i < toFlush.length; i++) {
@@ -75,7 +84,7 @@
       if (seenHashes[key]) return;
       seenHashes[key] = true;
 
-      if (!window.db) {
+      if (!getDb()) {
         // Too early — buffer it (capped) and try again once db shows up.
         if (buffered.length < BUFFER_CAP) {
           buffered.push({ message: message, stack: stack });
@@ -127,7 +136,7 @@
   var pollTries = 0;
   var pollId = setInterval(function () {
     pollTries++;
-    if (window.db) {
+    if (getDb()) {
       tryFlushBuffer();
       clearInterval(pollId);
     } else if (pollTries > 20) { // ~20s cap

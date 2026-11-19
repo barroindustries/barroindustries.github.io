@@ -40,7 +40,7 @@ Key facts:
 ## Projects
 - [Our work](https://barroindustries.com/work/): completed projects with photographs
 - [ISPSC 2026](https://barroindustries.com/work/ispsc-2026/): Ilocos Sur Polytechnic State College, stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026)
-- [DMMMSU 2022-2023](https://barroindustries.com/work/dmmmsu-2022-2023/): Don Mariano Marcos Memorial State University, stainless-steel equipment delivered and installed on campus in La Union (March 2023 to December 2025)
+- [DMMMSU 2022-2023](https://barroindustries.com/work/dmmmsu-2022-2023/): Don Mariano Marcos Memorial State University, stainless-steel equipment delivered and installed on campus in La Union (2022 to 2023)
 
 ## Areas served
 Based in Quezon City, with completed projects across Luzon, from Ilocos Sur in the north to Batangas in the south: Ilocos Sur, La Union, Baguio, La Trinidad, Tarlac, Pampanga, Bulacan, Iba (Zambales), Subic, Manila, Cavite, Laguna and Batangas.
@@ -75,6 +75,11 @@ Based in Quezon City, with completed projects across Luzon, from Ilocos Sur in t
 - [Custom stainless steel fabrication](https://barroindustries.com/guides/custom-stainless-steel-fabrication-guide/): what to send a fabricator, how to measure and draw, choosing SS304 or SS316 and a finish, what good welding and finishing look like, and the steps from drawing to installation
 - [Kitchen exhaust problems](https://barroindustries.com/guides/kitchen-exhaust-problems/): why smoke spills past the hood, why a kitchen runs hot or smells reach the dining area, what makes grease drip or a blower noisy, and when to clean, repair or redesign
 - [Commercial bakery equipment guide](https://barroindustries.com/guides/commercial-bakery-equipment-guide/): the bakery workflow, gas deck oven options, proofing cabinets, baking tables, racks and sinks, and the hood, exhaust and gas planning around the oven
+- [The Kitchen Guide: areas we serve](https://barroindustries.com/guides/#areas): local guides for Quezon City, Makati and BGC, Bulacan, Pampanga, Tarlac, Zambales and Subic, Baguio and La Trinidad, La Union and Ilocos, Cavite and Laguna, and Batangas
+- [The Kitchen Guide: equipment guides](https://barroindustries.com/guides/#equipment): stoves, wok ranges, griddles, fryers, grillers, steamers, sinks, racks, cabinets, stainless steel grades, thickness and finishes
+- [The Kitchen Guide: ventilation and gas](https://barroindustries.com/guides/#ventilation-gas): hoods, filters, blowers, ducting, exhaust cleaning, LPG regulators and gas leak safety
+- [The Kitchen Guide: by type of business](https://barroindustries.com/guides/#business): restaurants, carinderias, cloud kitchens, hotels, resorts, hospitals, schools, canteens, bakeries, cafés and more
+- [The Kitchen Guide: planning and operations](https://barroindustries.com/guides/#planning): choosing a contractor, mall fit-outs, floors and drains, renovation, maintenance and warranty
 
 ## Downloads
 - [Barro Industries company profile (PDF)](https://barroindustries.com/downloads/barro-industries-company-profile.pdf)

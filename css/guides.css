@@ -101,3 +101,71 @@
 /* ── the copyright notice at the foot of an article (and of the index) ── */
 #site .art .art-copy{margin-top:22px;color:var(--site-muted);font-size:13.5px;line-height:1.6}   /* the last question above it already ends in a hairline */
 #site .art-copy-index{margin-top:clamp(32px,4vw,48px);padding-top:18px;border-top:1px solid var(--site-line);color:var(--site-muted);font-size:13.5px;line-height:1.6;max-width:44rem}
+
+/* ══ The Kitchen Guide (2026-11-19, owner: "make it look like an online magazine or guide") ═════════════════════════════════════════════
+   The index is a magazine front: a masthead, a section bar that stays under the header while you scroll, a featured spread, then one
+   block per section — three lead stories with a picture, the rest as a compact two-column list with a small thumbnail. Every entry is
+   still one <article class="pg-card"> with one link, so the cards, the ItemList and the tests read it the same way. */
+#site .kg-mast .pg-hero-copy{max-width:46rem}
+#site .kg-mast h1{font-size:clamp(2.6rem,4.2vw + 1rem,4.4rem);letter-spacing:-.01em}
+#site .kg-count{margin-top:16px;color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+
+/* the section bar: chips that scroll sideways on a phone, sticky under the header */
+#site .kg-nav{position:sticky;top:var(--site-head);z-index:5;border-bottom:1px solid var(--site-line);background:rgba(255,255,255,.96);backdrop-filter:saturate(1.2) blur(6px)}
+#site .kg-nav ul{display:flex;gap:8px;overflow-x:auto;padding:12px 0;list-style:none;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#site .kg-nav ul::-webkit-scrollbar{display:none}
+#site .kg-nav li{flex:none}
+#site .kg-nav a{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--site-line);border-radius:999px;background:#fff;color:var(--site-navy);font:500 14px/1.2 var(--site-sans);text-decoration:none;white-space:nowrap}
+#site .kg-nav a:hover{border-color:var(--site-navy)}
+#site .kg-nav a span{color:var(--site-gold-ink);font-weight:600;font-size:12px}
+#site .kg-sec{scroll-margin-top:calc(var(--site-head) + 64px)}
+#site .kg-sec+.kg-sec{border-top:1px solid var(--site-line)}
+#site .kg-sec-head{display:grid;gap:8px;margin-bottom:clamp(22px,3vw,32px)}
+#site .kg-sec-head h2{font-size:clamp(1.9rem,1.8vw + 1.2rem,2.6rem)}
+#site .kg-sec-head p{max-width:40rem;color:var(--site-muted);font-size:1.0625rem}
+#site .kg-sec-head .eyebrow{margin-bottom:0}
+
+/* a story card: picture, kicker, serif headline, one line of standfirst */
+#site .kg-card .pg-card-media{aspect-ratio:16/10}
+#site .kg-card .pg-card-body{padding:18px 20px 20px}
+#site .kg-card h3{font-size:clamp(1.25rem,.5vw + 1.1rem,1.45rem)}
+#site .kg-card p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#site .kg-kicker{display:block;margin-bottom:8px;color:var(--site-gold-ink);font:600 11.5px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
+#site .kg-lead{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+
+/* the featured spread: one large story beside four smaller ones */
+#site .kg-feature{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+#site .kg-feature .kg-big h3{font-size:clamp(1.6rem,1.4vw + 1.1rem,2.2rem)}
+#site .kg-feature .kg-big p{-webkit-line-clamp:4;font-size:1.0625rem}
+#site .kg-side{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+
+/* the compact list: a small square thumbnail beside the headline */
+#site .kg-list{display:grid;grid-template-columns:minmax(0,1fr);gap:0 32px;margin-top:clamp(20px,3vw,28px);border-top:1px solid var(--site-line)}
+#site .kg-list .pg-card{flex-direction:row;align-items:flex-start;gap:14px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;background:none;box-shadow:none}
+#site .kg-list .pg-card:hover{box-shadow:none}
+#site .kg-list .pg-card:hover h3 a{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+#site .kg-list .pg-card-media{flex:none;width:88px;aspect-ratio:1;border-radius:4px}
+#site .kg-list .pg-card-body{padding:0}
+#site .kg-list h3{margin-bottom:4px;font-size:1.1rem;line-height:1.3}
+#site .kg-list p{margin-bottom:0;font-size:.95rem;line-height:1.5;-webkit-line-clamp:2}
+#site .kg-list .link-arrow{display:none}
+
+@media (min-width:720px){
+  #site .kg-lead,#site .kg-side{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .kg-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (min-width:1024px){
+  #site .kg-lead{grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
+  #site .kg-feature{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:24px}
+  #site .kg-feature .kg-big .pg-card-media{aspect-ratio:4/3}
+  #site .kg-side{grid-template-columns:minmax(0,1fr);gap:0;border-top:1px solid var(--site-line)}
+  #site .kg-side .pg-card{flex-direction:row;align-items:flex-start;gap:16px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;box-shadow:none}
+  #site .kg-side .pg-card-media{flex:none;width:132px;aspect-ratio:4/3;border-radius:4px}
+  #site .kg-side .pg-card-body{padding:0}
+  #site .kg-side .link-arrow{display:none}
+}
+@media (prefers-reduced-motion:reduce){#site .kg-nav{backdrop-filter:none}}
+
+/* an article's kicker (its section) and reading time */
+#site .art-hero .kg-kicker a{color:inherit;text-decoration:none}
+#site .art-hero .kg-kicker a:hover{text-decoration:underline;text-underline-offset:4px}

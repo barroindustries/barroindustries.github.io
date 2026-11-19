@@ -1017,7 +1017,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
    is otherwise untouched, still hidden inside #internalWorkspace whenever
    Client view is active — display:none on that ancestor already wins
    regardless of this rule). */
-.body-quick #internalWorkspace .section, .body-quick #btnAdmin { display:none!important; }
+.body-quick #internalWorkspace .section, .body-quick #btnAdmin, .body-quick #clientFormBar { display:none!important; }
 .body-quick #qqWizard { display:block!important; }
 .qq-steps{display:flex;gap:8px;margin:10px 0 14px}
 .qq-step{padding:6px 14px;border-radius:20px;background:var(--gray-light,#eee);font-size:13px;font-weight:700;opacity:.55}
@@ -1353,16 +1353,19 @@ body:not(.co-bs) .qb-doc-sheet .items-table th:nth-child(6){width:16%!important;
      view. #qbDocSheet (its sibling, right before /main) is the read-only
      Client-tab document preview shown in its place — see the CSS block above
      and renderClientPreview() in the script for how the swap works. ── -->
-<div id="internalWorkspace">
-<!-- Internal-deals-with-the-numbers toggle (owner ruling 2026-08-31): the
-     document sections tuck behind #docDetailsBar below. -->
 <!-- Client-tab form bar (owner ruling 2026-08-31): the Client tab is the
      document FORM; this bar carries the 👁 Preview toggle. Visible only in
-     client view (CSS above hides it elsewhere via .client-only). -->
+     client view (CSS above hides it elsewhere via .client-only). Q70 (owner,
+     2026-11-19): lives OUTSIDE #internalWorkspace — that container is
+     display:none while previewing, which used to hide this very button the
+     moment it read "✎ Back to the form". -->
 <div class="section no-print client-only" id="clientFormBar" style="padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
   <button type="button" class="btn btn-green btn-sm" id="clientPreviewBtn" onclick="toggleClientPreview()">👁 Preview document</button>
   <span style="font-size:11px;color:var(--gray-dark);">This is the document form — everything here prints on the quotation. Preview shows it exactly as the client will see it; the numbers live in the Estimator, the terms in the Terms tab.</span>
 </div>
+<div id="internalWorkspace">
+<!-- Internal-deals-with-the-numbers toggle (owner ruling 2026-08-31): the
+     document sections tuck behind #docDetailsBar below. -->
 <div class="section no-print" id="docDetailsBar" style="padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
   <button type="button" class="btn btn-outline btn-sm" id="docDetailsToggle" style="background:var(--dark-blue);" onclick="toggleDocDetails()">📄 Quote details ▸</button>
   <span style="font-size:11px;color:var(--gray-dark);">The Estimator deals with the numbers — open this to edit the document fields without leaving it: quote number · client · photos · delivery &amp; timeline · payment · remarks.</span>
@@ -3527,7 +3530,7 @@ let _autoCust=null, _autoRev=null, _autoCustTimer=null;
 function scheduleAutoCustRev(){ clearTimeout(_autoCustTimer); _autoCustTimer=setTimeout(autoComputeCustRev, 350); }
 async function autoComputeCustRev(){
   if(qnoMode!=='auto') return;
-  if(typeof db==='undefined' || !(window.auth&&auth.currentUser)) return;
+  if(typeof db==='undefined' || typeof auth==='undefined' || !auth.currentUser) return; // bare `auth` — a top-level const in firebase-config.js is NOT window.auth
   const name=(document.getElementById('clientName')?.value||'').trim().toLowerCase();
   const coll=quoteCollFor(currentCo);
   const today=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
@@ -9107,7 +9110,7 @@ function setFileMode(m){ fileMode=m; } // Wave 3 Q4 — 'revision' | 'update'
 // entirely self-contained here — no app.js change needed.
 async function reserveAtomicQnoSeq(){
   if(qnoMode!=='auto' || reopenSourceDocId) return; // reopened/revision numbers are untouched
-  if(typeof db==='undefined' || !(window.auth&&auth.currentUser)) return;
+  if(typeof db==='undefined' || typeof auth==='undefined' || !auth.currentUser) return; // bare `auth` — a top-level const in firebase-config.js is NOT window.auth
   const co=document.getElementById('qnoCo')?.value||'BK';
   const loc=document.getElementById('qnoLoc')?.value||'XX';
   const mth=document.getElementById('qnoMethod')?.value||'XX';
@@ -9827,12 +9830,15 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 49;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 50;   // integer; bump on every user-visible quote-builder change
 // CONFIGURATOR §7 — what the Verify & File modal does when the quote's total sits outside the estimate range the client saw online.
 // 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
 // them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
 const ESTIMATE_RANGE_MODE = 'warn';
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:50, date:'2026-11-19', items:[
+    'Client tab: after 👁 Preview document, the ✎ Back to the form button now stays on screen above the preview, so you can return to the form without switching tabs.'
+  ]},
   { ver:49, date:'2026-11-05', items:[
     'Lead time is now at least 25 working days (Sundays not counted) on Barro Kitchens and Barro Industries quotations — or 12 working days plus 3 for every ₱20,000 of materials, if that is longer. The Project Timeline, the estimated completion date and the ⚡ priority-order threshold (cut the timeline by more than a third and +2% applies) all follow it, and the printed timeline note says so. Brilliant Steel is unchanged.',
     'A quotation filed before the warranty plan existed keeps the warranty and site-requirements wording and the timeline it was issued with when you reopen or revise it — the Terms tab shows “As issued”. Pick a Warranty plan there to bring it onto the current terms.',

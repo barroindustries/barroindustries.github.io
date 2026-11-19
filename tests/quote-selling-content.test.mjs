@@ -322,9 +322,11 @@ describe('the banned words — in every string this phase adds, and in the whole
 
   it('the What\'s New entry of this phase is clean (the old warranty sentence is not quoted back, even to say it is gone)', () => {
     const wn = new Function(`${sliceBetween(BUILDER, 'const WHATS_NEW = [', '\n];', 'quote-builder-v2.html')}\nreturn WHATS_NEW;`)();
-    assert.deepEqual(wn.slice(0, 2).map((e) => e.ver), [49, 48]);
-    assertClean('What\'s New 49', wn[0].items.join(' | '));
-    assertClean('What\'s New 48', wn[1].items.join(' | '));
+    // 50 (owner Q70, Back to the form) sits on top since 2026-11-19; this phase's entries are 49 and 48
+    assert.deepEqual(wn.slice(0, 3).map((e) => e.ver), [50, 49, 48]);
+    assertClean('What\'s New 50', wn[0].items.join(' | '));
+    assertClean('What\'s New 49', wn[1].items.join(' | '));
+    assertClean('What\'s New 48', wn[2].items.join(' | '));
   });
 
   it('Vesta, a project count ("500+") and the old 0960 number appear in NO line of the builder, js/config.js, js/screens/sales.js, q/index.html or the new helper', () => {
