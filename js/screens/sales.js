@@ -2460,9 +2460,9 @@ window.QUOTE_BRANDS = {
     thanks: 'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
   },
   BS: {
-    name: 'BRILLIANT STEEL CORPORATION', sub: '',
-    creds: 'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300',
-    thanks: 'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
+    name: 'BRILLIANCE STEEL CORPORATION', sub: '',
+    creds: 'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300',
+    thanks: 'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.',
   },
 };
 

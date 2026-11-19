@@ -486,12 +486,12 @@ describe('Phase 3: the public quote brand has no generic-partner branch (js/scre
   it('BK, BI and BS keep their own letterhead', async () => {
     assert.deepEqual(await brandOf('BK'), { co: 'BK', name: 'BARRO KITCHENS' });
     assert.deepEqual(await brandOf('BI'), { co: 'BI', name: 'BARRO INDUSTRIES OPC' });
-    assert.deepEqual(await brandOf('BS'), { co: 'BS', name: 'BRILLIANT STEEL CORPORATION' });
+    assert.deepEqual(await brandOf('BS'), { co: 'BS', name: 'BRILLIANCE STEEL CORPORATION' });
     for (const c of ['BK', 'BI', 'BS']) assert.equal(docOf(c), c);
   });
   it("any other code — the retired 'PT', a missing company, an unknown one — falls back to Brilliant Steel (and never reads Firestore for a creator's company)", async () => {
     for (const c of ['PT', undefined, null, '', 'XX', 'bk']) {
-      assert.deepEqual(await brandOf(c), { co: 'BS', name: 'BRILLIANT STEEL CORPORATION' }, String(c));
+      assert.deepEqual(await brandOf(c), { co: 'BS', name: 'BRILLIANCE STEEL CORPORATION' }, String(c));
       assert.equal(docOf(c), 'BS', `buildPublicQuoteDoc(${String(c)})`);
     }
   });

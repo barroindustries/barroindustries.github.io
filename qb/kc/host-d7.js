@@ -172,8 +172,11 @@ function tabOf(D){
 }
 KC.tabOf = tabOf;
 
-/* "from PHP x": the lowest unit price among a product's starts (a start that is not fully priced is left out). Cached per price list + settings. */
-const sigOf = () => JSON.stringify(KC.SET) + '|' + Object.keys(KC.P).map(k=>KC.P[k].p).join(',');
+/* "from PHP x": what a product's card says it starts at.  Addendum 1 A1 rule 5 (D4): the LIST price of the smallest standard model of the product (KC.startsAt: the cheapest of its standard models that the Standard Price List prices),
+   so a card never shows a price that already includes default options.  A product with no standard model on the list (the kitchen station, ventilation, a list that is not loaded) falls back to the lowest unit price among
+   its starts (a start that is not fully priced is left out; the Sink's card used to read its default package, see cardStart).  Start prices are cached per price list + settings. */
+const listSig = () => { const m=KC.LISTP; return m && typeof m==='object' ? Object.keys(m).map(k => { const r=KC.listRow(k); return k+':'+(r ? r.price+'/'+(r.perMetre||'') : ''); }).join(',') : ''; };
+const sigOf = () => JSON.stringify(KC.SET) + '|' + Object.keys(KC.P).map(k=>KC.P[k].p).join(',') + '|' + listSig();
 let pcache = {sig:'', v:{}};
 function startPrice(D, id){
   const sig=sigOf(); if(pcache.sig!==sig) pcache={sig, v:{}};
@@ -183,7 +186,8 @@ function startPrice(D, id){
   return pcache.v[key]=p;
 }
 function fromOf(D){
-  if(D.cardStart){ const p=startPrice(D, D.cardStart); if(p!=null) return p; }       // owner Q37 (the Sink): the card shows ONE named start's price (its default package), not the cheapest
+  const sa = KC.startsAt ? KC.startsAt(D.id) : null; if(sa && typeof sa.price==='number' && sa.price>0) return sa.price;      // the list price of the smallest standard model (A1 rule 5)
+  if(D.cardStart){ const p=startPrice(D, D.cardStart); if(p!=null) return p; }       // no list price for this product: owner Q37 (the Sink): the card shows ONE named start's price (its default package), not the cheapest
   const ids = (D.starts && D.starts.length) ? D.starts.map(s=>s.id) : [undefined];
   const ps = ids.map(id=>startPrice(D,id)).filter(p=>p!=null);
   return ps.length ? Math.min(...ps) : null;
@@ -481,7 +485,7 @@ function renderPanel(){
   document.body.classList.toggle('kc-sheet-open', sheetLocked());
   renderChips();
   if(!S.open || !D) return;
-  $('kcPanelTitle').innerHTML = D.custom ? `${S.edit!=null?'⚙ Edit':'➕ Add'} custom item` : `⚙ Configure: ${esc(D.title)} <span class="kc-code">${esc(D.code)}</span>`;
+  $('kcPanelTitle').innerHTML = D.custom ? `${S.edit!=null?'⚙ Edit':'➕ Add'} custom item` : `⚙ Configure: ${esc(D.title)}`;      // no internal id chip (KC-PREP, KC-SINK ...): owner A10, no prototype labels (D14)
   const c=S.cfg;
   let g; try{ g = startGroup(D) + D.form(c) + (D.custom?'':customPartGroup(c)); }
   catch(err){ console.error('KC host: the form of "'+S.kind+'" failed', err); g=`<div class="cfg-group cfg-wide"><div class="cfg-errbox">The form for “${esc(D.title)}” could not be built: ${esc(err.message)}. See the console.</div></div>`; }

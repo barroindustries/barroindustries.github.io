@@ -399,10 +399,10 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
   });
 
   it('CO.BS is byte-identical to what it was: no e-mail invented for Brilliant Steel (open owner ruling #11)', () => {
-    const BS_LITERAL = `  BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
-    sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS',
-    thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
-    creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},`;
+    const BS_LITERAL = `  BS:{name:'BRILLIANCE STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
+    sig:{name:'GERALD CHAN',title:'President, Brilliance Steel Corporation'},nav:'<span>BRILLIANCE</span> STEEL',code:'BS',
+    thanks:'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.',
+    creds:'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},`;
     assert.ok(HTML.includes(BS_LITERAL), 'the CO.BS literal changed');
   });
 });

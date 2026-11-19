@@ -106,6 +106,7 @@ html body.d7-on .items-table.d7-cols td.c-qty > .print-only{font-weight:600;whit
 
 /* ───────── 3. the D5 block ───────── */
 .d7-blk{min-width:0;font-size:12px;line-height:1.4;color:var(--text,#1A1F2E);overflow-wrap:anywhere;text-align:left;}
+.d7-blk .kc-d-code{font-size:9.5px;font-weight:600;letter-spacing:.4px;line-height:1.25;margin-bottom:1px;color:#8a8a8a;}   /* Addendum 2 B2: the item code, small and grey, no column of its own */
 .d7-blk .kc-d-mat{font-size:10.5px;font-weight:700;letter-spacing:.5px;color:var(--mid-blue,#2E5F8A);}
 .d7-blk .kc-d-title{font-size:14px;font-weight:800;line-height:1.3;margin-top:1px;color:var(--text,#1A1F2E);}
 .d7-blk .kc-d-sub{font-size:12px;line-height:1.4;margin-top:1px;color:var(--gray-dark,#6B7280);}
@@ -116,6 +117,7 @@ html body.d7-on .items-table.d7-cols td.c-qty > .print-only{font-weight:600;whit
 .d7-screen .d7-blk{padding:2px 0 4px;}
 @media print{
   .d7-blk{font-size:8.5pt;line-height:1.35;color:#000;}
+  .d7-blk .kc-d-code{font-size:6.5pt;letter-spacing:.3px;color:#808080;}
   .d7-blk .kc-d-mat{font-size:7.5pt;letter-spacing:.5px;color:#1F3A5F;}   /* Forms Standard navy (was a shade off) */
   .d7-blk .kc-d-title{font-size:10pt;color:#000;}
   .d7-blk .kc-d-sub{font-size:8.5pt;color:#333;}
@@ -384,6 +386,7 @@ html body.d7-on .d7-a4-body .items-table th.c-qty{font-size:7.5pt!important;}
 
 /* the line block and the Photo cell: the print look */
 html body.d7-on .d7-a4-body .d7-blk{font-size:8.5pt;line-height:1.35;color:#000;}
+html body.d7-on .d7-a4-body .d7-blk .kc-d-code{font-size:6.5pt;letter-spacing:.3px;color:#808080;}
 html body.d7-on .d7-a4-body .d7-blk .kc-d-mat{font-size:7.5pt;letter-spacing:.5px;color:#1F3A5F;}
 html body.d7-on .d7-a4-body .d7-blk .kc-d-title{font-size:10pt;color:#000;}
 html body.d7-on .d7-a4-body .d7-blk .kc-d-sub{font-size:8.5pt;color:#333;}

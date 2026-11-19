@@ -24,9 +24,8 @@
 //   32/33. d7-doc.js    paginate ignores keepPrev / keep (signatures and headings drift)  -> "a heading goes with the unit after it; a signature row ..."
 //   34. d7-doc.js       paginate ignores the table's heading row                          -> "a table that runs over pages pays for its heading row ..." and the property test
 //   35. d7-doc.js       the Standard page does not start a page of its own                -> "the Standard page and the photo annex start a page of their own"
-//   36. d7-adapter.js   no blower reason from the bridge (a sirocco line has no row)      -> "a ventilation line ... needs review with both reasons"
-//   37. d7-adapter.js   Operations may clear a blower line                                -> "only the President clears a blower line ..."
-//   38. d7-flow.js      the reason sentences are not said once after the list              -> "flow.approvalReason names the blower sentence ..."
+//   36-37. (Addendum 2 B1 removed the blower reason and the President-only lock: mutants 36 and 37 are replaced by 50 and 51 below)
+//   38. d7-flow.js      the reason sentences are not said once after the list              -> "flow.approvalReason names the ducting sentence once ..."
 //   39. d7-pricing.js   the formula-low note for every role                               -> "floor mode "formula": the President sees it ..."
 //   40. d7-pricing.js   the formula-low note without the floor-mode test                  -> EQUIVALENT: KCRules.formulaBelowList applies the same gate (the bridge's test is a second lock)
 //   41. d7-doc.js       the file name carries " Rev. 1" again                             -> "the file is named by the quote number and nothing else"
@@ -37,6 +36,17 @@
 //   47. kc-live.js      a material document without v 1                                   -> "a changed price appends one history entry ..." and "a rating change is its own history entry ..."
 //   48. d7-doc.css      the Q66 phone cards reach the A4 pages                            -> "Q66: every rule that stacks the preview into cards ... leaves the A4 pages alone"
 //   49. d7-adapter.js   the price status leaves the cost sidecar                          -> "a line row of the sidecar ..." and "it is in the cost sidecar and in the chip of the line ..."
+// ADDENDUM 2 ROUND (owner answers B1 to B9, QA D4 / D7 / D14): the same procedure in a scratch copy (a mutant of a private source is re-bundled with the pinned esbuild first); 55 mutants in all (the page ones are in tests/kc-builder-port.test.mjs), every one KILLED:
+//   50. d7-adapter.js   the bridge adds the old blower reason to a ventilation line again    -> "a ventilation line (...) needs review for the ducting only ...", "flow.approvalReason names the ducting sentence once ...", "the chip says why ..."
+//   51. d7-adapter.js   only the President may clear a ventilation line again                -> "Operations clears a ventilation line like any other reason ..."
+//   52. engine source   the engine check puts the old blower reason back (and: the ducting reason dropped from engine and bridge)  -> tests/kc-list.test.mjs "every ventilation line is reviewed for its ducting ..." and these
+//   53. engine source   B9: the Recommended tag back on "None" / on Flat, the default start without its pre-selection, no 15 GPM trap, the 15 GPM pill untagged  -> the five "Addendum 2 B9" tests (and the golden for the trap)
+//   54. seed builder, admin-d7.js   B6: the seed builder refuses Approved; the Standard price list screen does not know it or gives it no colour; the status printed in a block  -> the four "Addendum 2 B6" tests
+//   55. d7-doc.js, d7-adapter.js, d7-doc.css   B2: no code row; the row after the material row; no code in the snapshot; a non-list catalogue SKU printing; an old snapshot printing no code; a code that is not cleaned or
+//                       not escaped; no print rule; a large black code on the A4 pages; the custom item with a code  -> the seven "Addendum 2 B2" tests
+//   56. host-d7.js      D4: the card shows the cheapest start / the dearest standard model; the start cache ignores the list; D14: the id chip back  -> the "D4 / D14" tests
+//   57. d7-doc.js       D7: the client's box stays first / is not put back when the quote stops being a KC one  -> "Prepared by: one box added ..." and "the order is also set when the page asks for the header ..."
+//   58. kc-live.js      D7: the approver's name is never looked up / falls back to the signed-in user / overwrites a stored name / overwrites a carry set meanwhile / holds the carry back until the lookup answers  -> the six "D7" afterLoad tests
 //
 // Run with: node --test tests/kc-live.test.mjs        (or  KC_QB_DIR=/path/to/scratch/qb node --test tests/kc-live.test.mjs)
 
@@ -46,6 +56,7 @@ import vm from 'node:vm';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { loadEngine, loadFixture, applyFixture } from './helpers/kc-vm.mjs';        // packet B's loader of the engine (the bundle qb/kc.min.js) and its SYNTHETIC price fixture
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -696,6 +707,57 @@ describe('KCLive.afterLoad', () => {
     await load(env);
     assert.equal(env.KCLive.carry().lastApprovedNet, 5000); assert.equal(env.KCLive.carry().approvedByName, 'Neil Barro');
   });
+  // QA D7: js/screens/approvals.js writes approvedBy (a uid) and no name, so the carry's approvedByName was empty: it is filled from the approver's own user record (one get of users/<uid>)
+  const spyReads = env => { const reads = [], col = env.win.db.collection.bind(env.win.db); env.win.db.collection = c => { const o = col(c), doc = o.doc.bind(o); o.doc = id => { const d = doc(id), get = d.get.bind(d); d.get = () => { reads.push(c + '/' + id); return get(); }; return d; }; return o; }; return reads; };
+  it('D7: the approver\'s name comes from the approver\'s user record when the quote only has the uid (another user than the one signed in); one read of users/<uid>, nothing else new', async () => {
+    const env = await setup({ 'bk_quotes/q1': approvedDoc(), 'quote_costs/bk_quotes_q1': sidecar(), 'users/u-pres': { name: 'Neil Barro', role: 'president' } });
+    const reads = spyReads(env); await load(env);
+    assert.equal(env.KCLive.carry().approvedByName, 'Neil Barro'); assert.equal(env.KCLive.carry().approvedBy, 'u-pres'); assert.equal(env.KCLive.carry().lastApprovedNet, 5000, 'the rest of the carry is as it was');
+    assert.deepEqual(reads, ['bk_quotes/q1', 'quote_costs/bk_quotes_q1', 'users/u-pres'], 'the quote, its sidecar, and the approver: three gets');
+    assert.equal(plain(env.KCLive.sidecarExtras().approval).approvedByName, 'Neil Barro', 'it goes to the sidecar with the rest of the approval');
+    const dn = await setup({ 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { displayName: 'N. Barro' } }); await load(dn); assert.equal(dn.KCLive.carry().approvedByName, 'N. Barro', 'displayName when there is no name');
+    const ful = await setup({ 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { fullName: 'Neil A. Barro' } }); await load(ful); assert.equal(ful.KCLive.carry().approvedByName, 'Neil A. Barro', 'fullName last');
+  });
+  it('D7: a name the quote already has is not read again; the person signed in who is the approver needs no read; the name of another user is never the signed-in user\'s', async () => {
+    const own = await setup({ 'bk_quotes/q1': approvedDoc({ approvedByName: 'Neil Barro' }), 'users/u-pres': { name: 'Someone Else' } }); const r1 = spyReads(own); await load(own);
+    assert.equal(own.KCLive.carry().approvedByName, 'Neil Barro'); assert.equal(r1.includes('users/u-pres'), false, 'the stored name wins: no read');
+    const me = await setup({ 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { name: 'Someone Else' } }); me.win.auth.currentUser.uid = 'u-pres'; me.KCLive.userName = 'Neil Barro'; const r2 = spyReads(me); await load(me);
+    assert.equal(me.KCLive.carry().approvedByName, 'Neil Barro'); assert.equal(r2.includes('users/u-pres'), false, 'the signed-in approver is known without a read');
+    const other = await setup({ 'bk_quotes/q1': approvedDoc({ approvedBy: 'u-other' }), 'users/u-other': { name: 'Delfin Purchasing' } }); other.win.auth.currentUser.displayName = 'Uriel Sales'; await load(other);
+    assert.equal(other.KCLive.carry().approvedByName, 'Delfin Purchasing', 'the approver\'s record, never the signed-in user\'s display name');
+  });
+  it('D7: a user record that cannot be read, has no name, or is missing leaves the name blank, as before; the carry itself is still built', async () => {
+    for (const [label, docs, opt] of [['missing', { 'bk_quotes/q1': approvedDoc() }, {}], ['no name', { 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { role: 'president' } }, {}], ['blank name', { 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { name: '   ' } }, {}],
+      ['denied', { 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { name: 'Neil Barro' } }, { deny: ['users'] }], ['unavailable', { 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { name: 'Neil Barro' } }, { fail: ['users'] }]]) {
+      const env = await setup(docs); env.win.db = makeFakeDb(docs, opt); await load(env);
+      assert.equal(env.KCLive.carry().approvedByName, '', label); assert.equal(env.KCLive.carry().lastApprovedNet, 5000, label + ': the carry is built'); assert.equal(env.KCLive.carry().approvedBy, 'u-pres', label);
+    }
+    const none = await setup({ 'bk_quotes/q1': approvedDoc({ approvedBy: undefined }), 'users/u-pres': { name: 'Neil Barro' } }); const r = spyReads(none); await load(none);
+    assert.equal(none.KCLive.carry().approvedByName, '', 'no approver uid: nothing to look up'); assert.equal(r.some(x => x.startsWith('users/')), false);
+  });
+  it('D7: the carry does not wait for the lookup (it is there, without a name, while the user read is pending), and a carry set by another load meanwhile is not overwritten when the lookup answers', async () => {
+    const docs = { 'bk_quotes/q1': approvedDoc(), 'users/u-pres': { name: 'Neil Barro' } };
+    const slow = await setup(docs); slow.win.db = makeFakeDb(docs, { hang: ['users'] });
+    void load(slow); await new Promise(r => setTimeout(r, 25));
+    assert.equal(slow.KCLive.carry().lastApprovedNet, 5000, 'the approval is carried'); assert.equal(slow.KCLive.carry().approvedByName, '', 'the name has not come yet');
+    const env = await setup(docs); let release; const gate = new Promise(r => { release = r; }), col = env.win.db.collection.bind(env.win.db);
+    env.win.db.collection = c => { const o = col(c); if (c !== 'users') return o; const doc = o.doc.bind(o); o.doc = id => { const d = doc(id), get = d.get.bind(d); d.get = () => gate.then(() => get()); return d; }; return o; };
+    const done = load(env); await new Promise(r => setTimeout(r, 25));
+    assert.equal(env.KCLive.carry().approvedByName, '');
+    env.KCLive.setCarry({ lastApprovedNet: 123 });                                                        // another quote was loaded meanwhile
+    release(); await done;
+    assert.equal(env.KCLive.carry().lastApprovedNet, 123); assert.equal(env.KCLive.carry().approvedByName, '', 'the new carry is left alone');
+    const ok = await setup(docs); await load(ok); assert.equal(ok.KCLive.carry().approvedByName, 'Neil Barro', 'and without a rival load the name joins the carry');
+  });
+  it('D7: the sidecar\'s own approval gets its approver\'s name too (an approval carried over from an older revision that never had one)', async () => {
+    const approval = { lastApprovedNet: 4200, lastApprovedGrand: 4704, approvedAt: '2026-11-18T01:00:00.000Z', approvedBy: 'u-pres', approvedByName: '', sourceColl: 'bk_quotes', sourceDocId: 'q0' };
+    const env = await setup({ 'bk_quotes/q1': { approvalStatus: 'filed' }, 'quote_costs/bk_quotes_q1': sidecar({ approval }), 'users/u-pres': { name: 'Neil Barro' } }); await load(env);
+    assert.equal(env.KCLive.carry().approvedByName, 'Neil Barro'); assert.equal(env.KCLive.carry().lastApprovedNet, 4200);
+  });
+  it('D7 needs no rules change: any signed-in profile may get another user\'s document (users/<uid>), which is all the lookup does', () => {
+    const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8'), at = rules.indexOf('match /users/{uid} {');
+    assert.ok(at > 0); assert.match(rules.slice(at, at + 900), /allow get:\s*if isAuth\(\);/);
+  });
   it('a quote that is not approved: the sidecar\'s own approval is carried (an approved quote revised once already); neither is nothing', async () => {
     const approval = { lastApprovedNet: 4200, lastApprovedGrand: 4704, approvedAt: '2026-11-18T01:00:00.000Z', approvedBy: 'u-pres', approvedByName: 'Neil Barro', sourceColl: 'bk_quotes', sourceDocId: 'q0' };
     const env = await setup({ 'bk_quotes/q1': { approvalStatus: 'filed' }, 'quote_costs/bk_quotes_q1': sidecar({ approval }) });
@@ -927,6 +989,59 @@ describe('the Standard Price List rows are objects (Addendum 1 A1): { code, pric
   });
 });
 
+describe('Addendum 2 B6: the price status "Approved" (staff only, never printed) is a status like the other five, in the seed builder, the engine rows and the Standard price list screen', () => {
+  const requireCjs = createRequire(import.meta.url), SEEDER = requireCjs('../scripts/kc-seed-build.js');
+  const SIX = ['Data', 'Smoothed', 'Estimate', 'After review', 'Supplier price', 'Approved'];
+  // the smallest inputs the builder accepts: one material, one list code from the sheet and one the sheet lacks (the owner approved it)
+  const mk = (extra, sheetStatus) => {
+    const ref = { P: { sh12: { l: 'Sheet 1.2', u: 'sheet', p: 1 } }, INFO: {}, CATS: ['Sheet'], SET: { br: { simple: 30, medium: 50, complex: 70 }, misc: 10, markup: 2, corner: 5, hood: {}, duct: {} } };
+    const ov = { v: 1, materials: {}, blowers: {}, newRows: {}, listPrices: { effective: '2026-11-19', csv: 'x.csv', docPrices: { 'T-NEW': 150 }, extra: { 'T-NEW': extra } }, renamed: {}, products: [], settings: {} };
+    const sheet = new Map([['T-OLD', { label: 'Made-up old', std: '1 pc', price: 100, perMetre: null, status: sheetStatus || 'Data' }]]);
+    return SEEDER.build(ref, ov, [], null, sheet);
+  };
+  it('the seed builder accepts Approved on a row the sheet lacks and on a sheet row, keeps it in the seed, and counts it', () => {
+    const out = mk({ status: 'Approved', label: 'Made-up new', std: '2 pc' });
+    assert.deepEqual(out.errors, []); assert.equal(out.seed.listPrices.rows['T-NEW'].status, 'Approved'); assert.equal(out.counts.byStatus.Approved, 1);
+    const sheetRow = mk({ status: 'Data', label: 'Made-up new', std: '2 pc' }, 'Approved'); assert.deepEqual(sheetRow.errors, []); assert.equal(sheetRow.seed.listPrices.rows['T-OLD'].status, 'Approved');
+    for (const st of SIX) assert.deepEqual(mk({ status: st, label: 'x', std: '' }).errors, [], st);
+  });
+  it('the seed builder still refuses a status that is not one of the six, and its message names all six', () => {
+    for (const bad of ['Final', 'approved', 'APPROVED', 'Confirmed', '']) {
+      const out = mk({ status: bad, label: 'x', std: '' }), msg = out.errors.find(e => /list price status is not one of/.test(e));
+      assert.ok(msg, JSON.stringify(bad) + ' is refused: ' + out.errors.join(' | '));
+      for (const st of SIX) assert.ok(msg.includes(st), st + ' is named: ' + msg);
+    }
+  });
+  it('a row of the list document carries the status through KCLive (the engine row) and keeps it when only its price changes', async () => {
+    const rows = { 'T-001': LROW('T-001', 100, { status: 'Approved', label: 'Made-up one', std: '1 pc' }) };
+    const env = await writerEnv('president', { 'kc_config/list_prices': { v: 1, effective: '2026-11-19', rows }, 'kc_materials/sh12': { key: 'sh12', p: 321, hist: [] } });
+    await env.KCLive.load();
+    assert.equal(env.KC.listRow('T-001').status, 'Approved');
+    await env.KCLive.saveListPrices({ 'T-001': 120 });
+    assert.equal(env.win.db.store.get('kc_config/list_prices').rows['T-001'].status, 'Approved'); assert.equal(env.KC.listRow('T-001').price, 120);
+  });
+  it('the Standard price list screen shows Approved: its own colour, its own count button that filters by it, its tooltip, and the status is on no printed block', async () => {
+    const env = readyEnv('president');
+    env.KC.LISTP['T-001'] = { price: 100, perMetre: null, status: 'Approved', label: 'Made-up one', std: '1 pc' };
+    env.KC.LISTP['T-002'] = { price: 200, perMetre: null, status: 'Data', label: 'Made-up two', std: '2 pc' };
+    env.KC.LISTP['T-003'] = { price: 300, perMetre: null, status: 'Approved', label: 'Made-up three', std: '3 pc' };
+    const host = { innerHTML: '', style: {}, dataset: {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false }, hidden: false, querySelector: () => null, querySelectorAll: () => [], contains: () => false };
+    env.els.set('scrSettings', host);
+    vm.runInContext(fs.readFileSync(path.join(QB, 'kc/admin-d7.js'), 'utf8'), env.ctx, { filename: 'kc/admin-d7.js' });
+    env.KC.renderSettings();
+    const html = host.innerHTML;
+    assert.match(html, /<span class="kc-adm-st kc-adm-st-appr" title="The owner has confirmed this price\.">Approved<\/span>/, 'the row chip');
+    assert.equal((html.match(/kc-adm-st kc-adm-st-appr" title="[^"]*">Approved</g) || []).length, 2, 'one chip for each of the two approved rows');
+    assert.match(html, /<button type="button" class="kc-adm-st kc-adm-st-appr kc-adm-stbtn" data-lpst="Approved"[^>]*>Approved 2<\/button>/, 'the count button of the filter');
+    assert.match(html, /<span class="kc-adm-st kc-adm-st-data" title="[^"]*">Data<\/span>/, 'the other statuses are as they were');
+    assert.match(fs.readFileSync(path.join(QB, 'kc/admin-d7.js'), 'utf8'), /\.kc-adm-st-appr\{background:#[0-9a-f]{6};color:#[0-9a-f]{6};border-color:#[0-9a-f]{6};\}/, 'the chip has its colours');
+    // never printed: a list-priced line prints no status word, whatever the row says
+    const line = addChef(env); const it = itemsOf(env)[0]; env.KC.LISTP['CK-HP-4'] = { price: 50000, perMetre: null, status: 'Approved', label: 'x', std: '' }; env.D7.adapter.repriceAll(); void line;
+    const printed = env.D7.h('doc.printBlock', it, 0) + env.D7.h('doc.workforceBlock', it, 0) + JSON.stringify(plain(env.D7.h('adapter.publicItem', it)));
+    assert.doesNotMatch(printed, /Approved/, 'the status is staff only');
+  });
+});
+
 describe('KCLive.saveMaterial / saveSettings / saveListPrices / saveSwitch', () => {
   it('a changed price appends one history entry (newest last, at most 20) and updates the row in memory', async () => {
     const hist = Array.from({ length: 20 }, (_, i) => ({ d: '2026-11-0' + (i % 9 + 1), p: i + 1, by: 'x' }));
@@ -1074,15 +1189,18 @@ describe('the bridge files: no prototype leftovers, no price, the service worker
 // ═════════════════════════════ the Forms Standard (spec 3.7, Addendum 1 A5, the header ruling) ═════════════════════════════
 describe('Forms Standard: the header, the Prepared by box, the file name', () => {
   const field = (env, id, value) => env.els.set(id, { value, innerHTML: '', style: {}, dataset: {} });
-  // a very small DOM for the signature row: just what the bridge touches (document.querySelector('#termsSection > .sig-row'), createElement('template'), insertBefore, classList)
+  // a very small DOM for the signature row: just what the bridge touches (document.querySelector('#termsSection > .sig-row'), getElementById('sigClientName'), createElement('template'), insertBefore, appendChild, classList)
   const classList = () => { const s = new Set(); return { add: c => s.add(c), remove: c => s.delete(c), contains: c => s.has(c) }; };
   function sigRow(env) {
-    const row = { children: [], classList: classList(), get firstChild() { return this.children[0] || null; }, insertBefore(n) { this.children.unshift(n); } };
-    const own = () => ({ classList: { contains: () => false }, own: true });
-    row.children.push(own(), own());                                                              // today's two boxes (Conforme, Reviewed and Approved by)
+    const row = { children: [], classList: classList(), get firstChild() { return this.children[0] || null; },
+      insertBefore(n, ref) { const i = this.children.indexOf(n); if (i >= 0) this.children.splice(i, 1); this.children.splice(ref ? this.children.indexOf(ref) : this.children.length, 0, n); n.parentNode = this; return n; },
+      appendChild(n) { return this.insertBefore(n, null); } };
+    const own = name => ({ classList: { contains: () => false }, own: name, parentNode: row });
+    row.children.push(own('conforme'), own('approved'));                                          // today's two boxes (Conforme — Accepted by Client, Reviewed and Approved by)
+    env.els.set('sigClientName', { parentNode: row.children[0] });                                // #sigClientName sits inside the Conforme box
     const mkBox = html => {
       const m = /<div class="sig-name">([^<]*)<\/div>/.exec(html), nm = { textContent: m ? m[1] : '' };
-      const box = { html, nm, classList: { contains: c => c === 'd7-sig-prep' || c === 'sig-box' }, querySelector: s => (s === '.sig-name' ? nm : null), remove() { row.children.splice(row.children.indexOf(box), 1); } };
+      const box = { html, nm, parentNode: row, classList: { contains: c => c === 'd7-sig-prep' || c === 'sig-box' }, querySelector: s => (s === '.sig-name' ? nm : null), remove() { row.children.splice(row.children.indexOf(box), 1); box.parentNode = null; } };
       return box;
     };
     const d = env.win.document, makeEl = d.createElement;
@@ -1131,17 +1249,30 @@ describe('Forms Standard: the header, the Prepared by box, the file name', () =>
     env.run('quoteEngine = "legacy"'); assert.equal(env.D7.h('doc.header', { docNumber: 'X' }), '');
     env.run('quoteEngine = "kc1"; currentCo = "BS"'); assert.equal(env.D7.h('doc.header', { docNumber: 'X' }), '', 'Brilliance Steel keeps its own letterhead');
   });
-  it('Prepared by: one box added to today\'s signature row, first, with the salesperson; the row\'s own two boxes are not touched; it follows the field and goes away with the mode', () => {
-    const env = readyEnv('sales'); field(env, 'salesperson', 'Rene Cruz'); const row = sigRow(env); const own = row.children.slice();
+  it('Prepared by: one box added to today\'s signature row, first, with the salesperson; the order is Prepared by, Approved by, Client conforme (the client\'s box goes last); the two boxes of the page are the same nodes; it follows the field and goes away with the mode', () => {
+    const env = readyEnv('sales'); field(env, 'salesperson', 'Rene Cruz'); const row = sigRow(env); const own = row.children.slice(), [conforme, approved] = own;
+    const order = () => row.children.map(b => b === conforme ? 'conforme' : b === approved ? 'approved' : b.classList.contains('d7-sig-prep') ? 'prepared' : '?');
     env.D7.doc.sync();
     assert.equal(row.children.length, 3); assert.equal(row.children[0].classList.contains('d7-sig-prep'), true, 'first');
     assert.match(row.children[0].html, /^<div class="sig-box d7-sig-prep"><div class="sig-role">Prepared by<\/div><div style="height:34px;"><\/div><div class="sig-name">Rene Cruz<\/div><small>Sales<\/small><\/div>$/, 'the same look as the page\'s own boxes');
-    assert.deepEqual(row.children.slice(1), own, 'today\'s two boxes: the same nodes, in the same order'); assert.equal(row.classList.contains('d7-sig3'), true, 'three boxes on a row');
-    field(env, 'salesperson', 'Rene <b>'); env.D7.doc.sync(); assert.equal(row.children.length, 3, 'not added twice'); assert.equal(row.children[0].nm.textContent, 'Rene <b>', 'the name follows the field, as text');
+    assert.deepEqual(order(), ['prepared', 'approved', 'conforme'], 'QA D7 / A5: Prepared by, Approved by, Client conforme');
+    assert.deepEqual(row.children.slice(1), [approved, conforme], 'today\'s two boxes: the same nodes, the client\'s now last'); assert.equal(row.classList.contains('d7-sig3'), true, 'three boxes on a row');
+    env.D7.doc.sync(); assert.deepEqual(order(), ['prepared', 'approved', 'conforme'], 'idempotent: nothing is moved twice'); assert.equal(row.children.length, 3);
+    field(env, 'salesperson', 'Rene <b>'); env.D7.doc.sync(); assert.equal(row.children.length, 3, 'not added twice'); assert.equal(row.children[0].nm.textContent, 'Rene <b>', 'the name follows the field, as text'); assert.deepEqual(order(), ['prepared', 'approved', 'conforme']);
     field(env, 'salesperson', ''); env.D7.doc.sync(); assert.equal(row.children[0].nm.textContent, '', 'an unknown name leaves the line empty: no placeholder');
     env.run('quoteEngine = "legacy"'); env.D7.doc.sync();
-    assert.deepEqual(row.children, own, 'a legacy quote: the row is as the page made it'); assert.equal(row.classList.contains('d7-sig3'), false);
+    assert.deepEqual(row.children, own, 'a legacy quote: the row is as the page made it, Conforme first again'); assert.equal(row.classList.contains('d7-sig3'), false);
+    env.run('quoteEngine = "kc1"'); env.D7.doc.sync(); assert.deepEqual(order(), ['prepared', 'approved', 'conforme'], 'back to a KC quote');
+    env.run('currentCo = "BS"'); env.D7.doc.sync(); assert.deepEqual(row.children, own, 'Brilliance Steel: the page\'s own row, in the page\'s own order');
+    const bs = readyEnv('sales'); const bsRow = sigRow(bs); bs.run('currentCo = "BS"'); bs.D7.doc.sync(); assert.deepEqual(bsRow.children.map(b => b.own), ['conforme', 'approved'], 'a Brilliance Steel quote never gets a Prepared by box or a new order');
     assert.equal(sigRow(env).children.length, 2, 'Brilliance Steel: untouched');
+  });
+  it('the order is also set when the page asks for the header (print, preview, company switch): doc.header runs the same sync, and a row whose client box cannot be told is left as the page made it', () => {
+    const env = readyEnv('sales'); field(env, 'salesperson', 'Rene Cruz'); field(env, 'quoteNo', 'BKTEST261119-001R1'); const row = sigRow(env); const [conforme, approved] = row.children.slice();
+    env.D7.h('doc.header', { docNumber: 'BKTEST261119-001R1', co: 'BK' });
+    assert.equal(row.children.length, 3); assert.deepEqual(row.children.slice(1), [approved, conforme]);
+    const blind = readyEnv('sales'); field(blind, 'salesperson', 'Rene Cruz'); const r2 = sigRow(blind); blind.els.delete('sigClientName'); const orig = r2.children.slice();
+    blind.D7.doc.sync(); assert.equal(r2.children.length, 3, 'Prepared by is still added'); assert.deepEqual(r2.children.slice(1), orig, 'the two boxes keep the page\'s order when the client box is not found');
   });
   it('the name in the print dialog is the quote number; agent and workforce copies, legacy quotes and Brilliance Steel keep their names', () => {
     const seen = [];
@@ -1315,44 +1446,57 @@ describe('the document stylesheet (d7-doc.css)', () => {
   });
 });
 
-// ═════════════════════════════ Addendum 1: blowers and ducting need review; the formula-low warning; the price status ═════════════════════════════
-describe('Addendum 1 A4: a blower line needs review until Neil confirms the price; ducting is priced per job', () => {
+// ═════════════════════════════ Addendum 2 B1 (blowers are a cost) and Addendum 1 A1 (ducting is per job); the formula-low warning; the price status ══════════════════
+describe('Addendum 2 B1: a blower is a cost and needs no review; ducting is priced per job and keeps its review', () => {
   const BLOWER = 'Blower price to be confirmed by Neil.', DUCT = 'Ducting is priced per job; check before sending.';
   const addVent = (env, scope) => { const D = env.KC.products.vent, c = D.startCfg('ex1'); if (scope) c.scope = scope; return env.KC.addLine('vent', c, { render: false }); };
-  it('a ventilation line (the whole system, or the blower alone) needs review with both reasons; ducts for a blower by others carry the ducting reason only; no other line carries either', () => {
-    for (const scope of ['full', 'blower']) {
+  it('a ventilation line (the whole system, the blower alone, or the ducts for a blower by others) needs review for the ducting only; no line carries the old blower reason; no other line carries either', () => {
+    for (const scope of ['full', 'blower', 'duct']) {
       const env = readyEnv('sales'); addVent(env, scope); const it = itemsOf(env)[0];
-      assert.equal(it.needsReview, true, scope); assert.ok(it.reviewReasons.includes(BLOWER), scope); assert.ok(it.reviewReasons.includes(DUCT), scope);
+      assert.equal(it.needsReview, true, scope); assert.ok(it.reviewReasons.includes(DUCT), scope); assert.equal(it.reviewReasons.includes(BLOWER), false, scope + ': no blower reason');
+      assert.ok(it.reviewReasons.every(r => !/blower/i.test(r)), scope + ': ' + it.reviewReasons.join(' | '));
     }
-    // a sirocco blower is never picked automatically (the engineer has not confirmed its ratings), so the engine's own check sees no blower row to flag: the bridge still knows the line holds one
-    const sir = readyEnv('sales'); { const c = sir.KC.products.vent.startCfg('ex1'); c.exFam = 'sir'; c.scope = 'full'; assert.equal(sir.KC.products.vent.validate(c).review.includes(BLOWER), false, 'the engine\'s check alone'); sir.KC.addLine('vent', c, { render: false }); }
-    assert.ok(itemsOf(sir)[0].reviewReasons.includes(BLOWER), 'the bridge\'s second lock'); assert.equal(itemsOf(sir)[0].needsReview, true);
-    const duct = readyEnv('sales'); addVent(duct, 'duct'); const d = itemsOf(duct)[0];
-    assert.equal(d.needsReview, true); assert.ok(d.reviewReasons.includes(DUCT)); assert.equal(d.reviewReasons.includes(BLOWER), false, 'no blower in the line');
+    // a sirocco blower is picked by hand: the engine's check sees a blower row and the bridge no longer has a second lock for one either
+    const sir = readyEnv('sales'); { const c = sir.KC.products.vent.startCfg('ex1'); c.exFam = 'sir'; c.scope = 'full'; c.needsReview = false; sir.KC.addLine('vent', c, { render: false }); }
+    assert.deepEqual(plain(itemsOf(sir)[0].reviewReasons), [DUCT], 'the ducting reason only'); assert.equal(itemsOf(sir)[0].needsReview, true);
     const other = readyEnv('sales'); addSink(other); addChef(other);
     for (const it of itemsOf(other)) { assert.equal(it.reviewReasons.includes(BLOWER) || it.reviewReasons.includes(DUCT), false); assert.equal(it.needsReview, false); }
+    assert.equal(sir.D7.adapter.BLOWER_REASON, undefined, 'the reason is gone from the bridge');
+    assert.equal(sir.D7.adapter.hasBlower, undefined); assert.equal(sir.D7.adapter.blowerLocked, undefined);
   });
-  it('flow.approvalReason names the blower sentence (and the ducting one), once each, after the list of lines', () => {
+  it('flow.approvalReason names the ducting sentence once and never a blower one', () => {
     const env = readyEnv('sales'); addVent(env, 'full'); addVent(env, 'full');
     const t = env.D7.h('flow.approvalReason');
-    assert.equal(env.D7.flow.approvalRequired().required, true); assert.ok(t.includes(BLOWER), t); assert.ok(t.includes(DUCT), t);
-    assert.equal(t.split(BLOWER).length - 1, 1, 'said once for two lines'); assert.match(t, /^2 line\(s\) need review: #1 .*, #2 .*\./);
+    assert.equal(env.D7.flow.approvalRequired().required, true); assert.ok(t.includes(DUCT), t); assert.equal(t.includes(BLOWER), false, t); assert.doesNotMatch(t, /blower/i);
+    assert.equal(t.split(DUCT).length - 1, 1, 'said once for two lines'); assert.match(t, /^2 line\(s\) need review: #1 .*, #2 .*\./);
   });
-  it('only the President clears a blower line: Operations cannot mark it reviewed (one by one, or with "Mark all reviewed"); the other reasons stay Operations\' to clear', () => {
+  it('Operations clears a ventilation line like any other reason: one by one and with "Mark all reviewed" (the President-only lock on a blower line is gone)', () => {
     const ops = readyEnv('manager'); addVent(ops, 'full'); ops.KC.addLine('custom', { cat: 'prep', name: 'Cart', desc: '', dims: '', rows: [{ k: 'sh12', q: 1 }], m: null, lab: 50 }, { render: false });
-    assert.equal(ops.D7.h('adapter.markReviewed', 0, true), false); assert.equal(itemsOf(ops)[0].reviewed, false);
-    assert.ok(plain(ops.run('__toasts')).some(t => /Only the President can clear the blower price/.test(t[0])));
+    assert.equal(ops.D7.h('adapter.markReviewed', 0, true), true); assert.ok(itemsOf(ops)[0].reviewed, 'the ventilation line is cleared by Operations');
+    assert.equal(plain(ops.run('__toasts')).some(t => /President can clear the blower/.test(t[0])), false, 'no toast about a blower');
+    ops.D7.h('adapter.markReviewed', 0, false); assert.equal(itemsOf(ops)[0].reviewed, false);
     ops.D7.h('flow.markAllReviewed');
-    assert.equal(itemsOf(ops)[0].reviewed, false, 'the blower line is still open'); assert.ok(itemsOf(ops)[1].reviewed, 'the custom item is cleared'); assert.equal(ops.D7.flow.approvalRequired().required, true);
+    assert.ok(itemsOf(ops)[0].reviewed, 'the ventilation line is cleared with the others'); assert.ok(itemsOf(ops)[1].reviewed, 'the custom item is cleared');
+    assert.equal(ops.D7.flow.approvalRequired().required, false, 'nothing is left to review');
+    // a review that Operations gave is kept when the line is checked again (it used to be dropped for a blower line)
+    const again = readyEnv('manager'); addVent(again, 'full'); itemsOf(again)[0].reviewed = 'Operations'; again.D7.adapter.refresh(itemsOf(again)[0]); assert.equal(itemsOf(again)[0].reviewed, 'Operations');
     const pres = readyEnv('president'); addVent(pres, 'full');
     assert.equal(pres.D7.h('adapter.markReviewed', 0, true), true); assert.ok(itemsOf(pres)[0].reviewed);
-    // a review that a non-President gave is not kept: the reviewed flag of a blower line is cleared when the line is checked again as that role
-    const sales = readyEnv('manager'); addVent(sales, 'full'); itemsOf(sales)[0].reviewed = 'Operations'; sales.D7.adapter.refresh(itemsOf(sales)[0]); assert.equal(itemsOf(sales)[0].reviewed, false);
   });
-  it('the chip says why, and who can clear it', () => {
+  it('the chip says why and who reviews it: the ducting sentence, "The President or Operations reviews it", no blower sentence and no President-only note', () => {
     const ops = readyEnv('manager'); addVent(ops, 'full'); const html = ops.D7.h('adapter.lineRow', itemsOf(ops)[0], 0);
-    assert.match(html, /needs review/); assert.ok(html.includes(BLOWER) && html.includes(DUCT)); assert.match(html, /Only the President can clear the blower price/);
+    assert.match(html, /needs review/); assert.ok(html.includes(DUCT)); assert.equal(html.includes(BLOWER), false); assert.match(html, /The President or Operations reviews it/);
+    assert.doesNotMatch(html, /blower|Only the President can clear/i);
     assert.doesNotMatch(html, /\.\./, 'no doubled full stop');
+  });
+  it('a blower line prices by the normal formula: the unit on the line is the project cost x the markup to the nearest 10 (the same for every role), and it is not "priced after review"', () => {
+    for (const role of ['sales', 'manager', 'president']) {
+      const env = readyEnv(role); addVent(env, 'full'); const it = itemsOf(env)[0];
+      const pr = env.KC.priceOf('vent', it.cfg);
+      assert.equal(pr.priced, true, role); assert.ok(pr.lines.some(l => l.q > 0 && env.KC.isBlower(l.k)), role + ': the line holds a blower');
+      assert.equal(it.unitPrice, Math.round(pr.projectCost * env.KC.SET.markup / 10) * 10, role + ': the formula'); assert.equal(it.unitPrice, pr.unit, role);
+      assert.notEqual(it.needsPrice, true, role); assert.equal(it.priceBasis, 'configured', role);
+    }
   });
 });
 
@@ -1460,5 +1604,198 @@ describe('Q67: the list price of a material on a custom item is for every role; 
 describe('Q68: the grilling and bakery placeholder cards are gone, the refrigeration ones stay', () => {
   it('KC.TAB_PLACEHOLDERS has no cooking entry', () => {
     const env = makeEnv(); assert.equal(env.KC.TAB_PLACEHOLDERS.cook, undefined); assert.deepEqual(plain(env.KC.TAB_PLACEHOLDERS.cold), ['Chiller', 'Ice container', 'Ice bin']);
+  });
+});
+
+// ═════════════════════════════ Addendum 2 B9: the "Recommended" tag is on the choice that is pre-selected ═════════════════════════════
+describe('Addendum 2 B9: the Recommended tag sits on the pre-selected choice (prep backsplash, station edge, sink grease trap)', () => {
+  const pillsOf = html => [...html.matchAll(/<button type="button" class="cfg-pill" data-set="([^"]+)" data-val="([^"]*)" aria-pressed="(true|false)"[^>]*>([\s\S]*?)<\/button>/g)]
+    .map(m => ({ path: m[1], val: m[2], on: m[3] === 'true', rec: /class="kc-rec">Recommended</.test(m[4]) }));
+  const formOf = (env, id) => { const D = env.KC.products[id], c = D.startCfg(D.defaultStart); env.KC.S.cfg = c; env.KC.S.kind = id; return { c, pills: pillsOf(D.form(c)) }; };
+  const groupOf = (pills, path) => pills.filter(p => p.path === path);
+  const chosen = g => g.filter(p => p.on).map(p => p.val), tagged = g => g.filter(p => p.rec).map(p => p.val);
+  it('the prep table: the 150 mm backsplash is pre-selected and is the one that carries the tag ("None" no longer does); the Flat edge keeps both', () => {
+    const { pills } = formOf(readyEnv('sales'), 'prep');
+    const bs = groupOf(pills, 'top.splash'); assert.equal(bs.length, 3, 'None, 150 mm, Full height');
+    assert.deepEqual(chosen(bs), ['150']); assert.deepEqual(tagged(bs), ['150']);
+    const edge = groupOf(pills, 'top.edge'); assert.deepEqual(chosen(edge), ['flat']); assert.deepEqual(tagged(edge), ['flat']);
+  });
+  it('the station: the Marine edge is pre-selected and carries the tag (Flat does not); the 150 mm backsplash keeps both', () => {
+    const { pills } = formOf(readyEnv('sales'), 'station');
+    const edge = groupOf(pills, 'top.edge'); assert.equal(edge.length, 2, 'Flat, Marine edge');
+    assert.deepEqual(chosen(edge), ['marine']); assert.deepEqual(tagged(edge), ['marine']);
+    const bs = groupOf(pills, 'top.splash'); assert.deepEqual(chosen(bs), ['150']); assert.deepEqual(tagged(bs), ['150']);
+  });
+  it('the sink: the 15 GPM grease trap is pre-selected and keeps the tag; None and 10 GPM are not tagged', () => {
+    const env = readyEnv('sales'), { c, pills } = formOf(env, 'sink');
+    assert.equal(c.trap, 15, 'the default package starts with the 15 GPM trap');
+    const gt = groupOf(pills, 'trap'); assert.equal(gt.length, 3, 'None, 10 GPM, 15 GPM');
+    assert.deepEqual(chosen(gt), ['15']); assert.deepEqual(tagged(gt), ['15']);
+    // the other packages are as they were: no trap until the person picks one (the owner ruled on the default package)
+    for (const id of ['hand', 'pot', 'blank']) assert.equal(env.KC.products.sink.startCfg(id).trap, 0, id);
+    // and the line the package adds carries the trap in its text and its materials
+    const line = env.KC.addLine('sink', c, { render: false }); const it = itemsOf(env)[itemsOf(env).length - 1]; void line;
+    assert.match(it.specEdit + ' ' + JSON.stringify(plain(it.doc)), /grease trap 15 GPM/i);
+  });
+  it('no product contradicts itself: in the default form of every product, every pill that carries the tag is the one that is pre-selected', () => {
+    const env = readyEnv('sales'); let tags = 0;
+    for (const D of env.KC.productList()) {
+      const { pills } = formOf(env, D.id), by = {};
+      pills.forEach(p => { (by[p.path] = by[p.path] || []).push(p); });
+      for (const [path, g] of Object.entries(by)) for (const p of g.filter(x => x.rec)) { tags++; assert.equal(p.on, true, `${D.id}: ${path} = ${p.val} carries the tag but is not pre-selected`); }
+    }
+    assert.ok(tags >= 20, 'the scan really found the tags: ' + tags);
+  });
+});
+
+// ═════════════════════════════ Addendum 2 B2: the item code on the printed quotation ═════════════════════════════
+describe('Addendum 2 B2: the item code is small grey text at the start of each line\'s description (no column), for KC quotes only', () => {
+  const CODE = /<div class="kc-d-code">([^<]*)<\/div>/g;
+  const codesIn = html => [...html.matchAll(CODE)].map(m => m[1]);
+  const addKc = (env, kind, start) => { env.KC.addLine(kind, env.KC.products[kind].startCfg(start), { render: false }); const its = itemsOf(env); return its[its.length - 1]; };
+  // [kind, start, the list code the line is built from, or '' when the line has none]
+  const LINES = [['chef_hp', '4', 'CK-HP-4'], ['chef_lp', '2', 'CK-LP-2'], ['chef_wok', '2', 'CK-WK-2'], ['prep', 'basic', 'PS-PT-1200'], ['sink', 'dish2', 'WS-SK2-1200'], ['sink', 'hand', 'WS-HS-400'],
+    ['hood', 'wall', 'VN-HD-1800'], ['rack', 'rack', 'PS-RK-1200'], ['cabinet', 'cabinet', 'PS-CB-1200'], ['chef_hold', 'std', 'CK-HH'], ['trolley', 'dish', 'PS-TR-DC'], ['dishrack', 'std', 'PS-DR-PL'],
+    ['caddy', 'std', 'PS-CD-4'], ['chef_noodle', '6', 'CK-NB-6B'], ['chef_sal', 'wall', 'CK-SL'], ['chef_bain', '3', 'CK-BM-3'],
+    ['station', 'stall', ''], ['vent', 'ex1', ''], ['chef_bain', '4', '']];
+  it('a kc product line prints the price-list code of its model first, above the material and the title; the snapshot the adapter stores carries it; a line with no code prints nothing extra', () => {
+    const env = readyEnv('sales');
+    for (const [kind, start, code] of LINES) {
+      const it = addKc(env, kind, start), html = env.D7.doc.printBlock(it, 0);
+      assert.equal(it.doc.code, code, kind + '/' + start + ': the snapshot');
+      if (!code) { assert.equal(html.includes('kc-d-code'), false, kind + '/' + start + ': no code row'); assert.match(html, /^<div class="kc-d d7-blk"><div class="kc-d-mat">/, kind + ': the block starts with the material row'); continue; }
+      assert.deepEqual(codesIn(html), [code], kind + '/' + start + ': exactly one code row');
+      assert.match(html, new RegExp('^<div class="kc-d d7-blk"><div class="kc-d-code">' + code + '</div><div class="kc-d-mat">'), kind + '/' + start + ': first, then the material row, then the title');
+      assert.ok(html.indexOf('kc-d-code') < html.indexOf('kc-d-mat') && html.indexOf('kc-d-mat') < html.indexOf('kc-d-title'), kind + ': above the product name');
+    }
+  });
+  it('the custom item has no code; a Chef Mode model that is not on the list has none; every code is a Standard Price List code', () => {
+    const env = readyEnv('sales'); customLineOf(env);
+    assert.equal(itemsOf(env)[0].doc.code, ''); assert.equal(env.D7.doc.printBlock(itemsOf(env)[0], 0).includes('kc-d-code'), false);
+    for (const [kind, start, code] of LINES) if (code) assert.match(code, /^(?:PS|WS|CK|GR|BK|VN)-[A-Z0-9-]+$/, kind);
+  });
+  it('the same block is drawn on screen (the preparer sees what prints), in the plain-text lines, and in every copy that prints the block: the code is on every one of them', () => {
+    const env = readyEnv('sales'); const it = addKc(env, 'chef_hp', '4');
+    assert.deepEqual(codesIn(env.D7.doc.screenBlock(it, 0)), ['CK-HP-4'], 'the on-screen block (class no-print)');
+    assert.equal(env.D7.doc.lines(env.D7.doc.parts(it))[0], 'CK-HP-4', 'the plain text lines start with it');
+    assert.equal(env.D7.doc.parts(it).code, 'CK-HP-4');
+    assert.deepEqual(codesIn(env.D7.h('doc.printBlock', it, 0)), ['CK-HP-4'], 'the hook the page calls for the sheet slot (client preview, PDF pages, agent and workforce copies all clone the slot)');
+    const wf = env.D7.doc.workforceBlock(it, 0); assert.equal(wf.includes('kc-d-code'), false, 'the workforce detail is a separate block (drawing and build detail); the description cell holds the code, with no prices anywhere');
+  });
+  it('the code is stored with the line: it survives a save and a reload of the quote (publicItem keeps it), and a stored snapshot that has none gets it from the configuration', () => {
+    const env = readyEnv('sales'); const it = addKc(env, 'chef_hp', '4');
+    const pub = plain(env.D7.h('adapter.publicItem', it)); assert.equal(pub.doc.code, 'CK-HP-4');
+    const old = JSON.parse(JSON.stringify(pub)); delete old.doc.code;                                        // made before the field existed
+    assert.equal(env.D7.doc.parts(old).code, 'CK-HP-4', 'derived from the configuration');
+    old.doc.code = ''; assert.equal(env.D7.doc.parts(old).code, '', 'a snapshot that says "no code" has none');
+    const noDoc = JSON.parse(JSON.stringify(pub)); delete noDoc.doc; assert.equal(env.D7.doc.parts(noDoc).code, 'CK-HP-4', 'no snapshot at all: built from the product file');
+  });
+  it('a catalogue line whose SKU is a Standard Price List code prints it (GR-, BK-, CK-TP-); an older catalogue SKU, a custom line and a fee print none', () => {
+    const doc = readyEnv('sales').D7.doc, line = id => ({ id, name: 'A catalogue item', qty: 1, unit: 'pc', specs: [], unitPrice: 1, amount: 1 });
+    for (const sku of ['GR-LR-900', 'BK-PG-2', 'CK-TP-1200', 'PS-PT-900', 'WS-GT-15', 'VN-HD-1200']) assert.deepEqual(codesIn(doc.printBlock(line(sku), 0)), [sku], sku);
+    for (const sku of ['PW-001', 'CE-004', 'GL-001', 'EX-001', 'FA-001', 'MS-001', 'RF-001', 'BA-001', 'CUSTOM', 'KC', 'gr-lr-900', 'GR-', 'GR LR 900', '']) assert.equal(doc.printBlock(line(sku), 0).includes('kc-d-code'), false, JSON.stringify(sku));
+    assert.equal(doc.printBlock({ id: 'MISCFEE', name: 'Delivery' }, 0), '', 'a fee prints nothing at all');
+  });
+  it('the code is plain text, escaped and refused when odd: letters, digits and hyphens only', () => {
+    const doc = readyEnv('sales').D7.doc;
+    assert.match(doc.blockHtml({ code: '<b>CK-1</b>', material: 'M', use: 'U', title: 'T' }), /<div class="kc-d-code">&lt;b&gt;CK-1&lt;\/b&gt;<\/div>/, 'blockHtml escapes whatever it is handed');
+    for (const bad of ['<b>x</b>', 'CK 4', 'CK-4;', '"x"', '-CK', 'a'.repeat(60), 7, null, {}]) assert.equal(doc.parts({ kcKind: 'chef_hp', cfg: {}, name: 'x', doc: { code: bad, title: 'T' } }).code, '', JSON.stringify(bad));
+    assert.equal(doc.parts({ kcKind: 'chef_hp', cfg: {}, name: 'x', doc: { code: 'CK-HP-4', title: 'T' } }).code, 'CK-HP-4');
+    assert.equal(doc.parts({ id: 'GR-LR-900', name: 'x', specs: [] }).code, 'GR-LR-900');
+  });
+  it('the code looks small and grey wherever the block is drawn: on screen, on paper, in the Client preview and on the A4 pages of the PDF (no column, no new table cell)', () => {
+    const css = fs.readFileSync(path.join(QB, 'd7/d7-doc.css'), 'utf8');
+    const rules = [...css.matchAll(/([^{}]*\.kc-d-code[^{}]*)\{([^}]*)\}/g)].map(m => ({ sel: m[1].trim().replace(/\s+/g, ' '), body: m[2] }));
+    const selectors = rules.map(r => r.sel);
+    assert.ok(selectors.includes('.d7-blk .kc-d-code'), 'on screen and in the Client preview');
+    assert.ok(selectors.includes('html body.d7-on .d7-a4-body .d7-blk .kc-d-code'), 'on the A4 pages of the PDF');
+    assert.equal(rules.length, 3, 'screen, paper (@media print) and the A4 pages');
+    for (const r of rules) {
+      const size = /font-size:([0-9.]+)(px|pt)/.exec(r.body), grey = /color:#([0-9a-f]{6});/.exec(r.body);
+      assert.ok(size && ((size[2] === 'px' && +size[1] <= 10) || (size[2] === 'pt' && +size[1] <= 7)), 'small: ' + r.body);
+      assert.ok(grey && grey[1][0] === grey[1][2] && grey[1][2] === grey[1][4] && parseInt(grey[1].slice(0, 2), 16) >= 0x70 && parseInt(grey[1].slice(0, 2), 16) <= 0xa0, 'a mid grey (the three channels equal): ' + r.body);
+    }
+    assert.equal(/<th[^>]*>\s*(?:Item )?Code\s*<\/th>/i.test(fs.readFileSync(path.join(ROOT, 'quote-builder-v2.html'), 'utf8')), false, 'no code column in the page\'s table heads');
+  });
+});
+
+// ═════════════════════════════ D4 (the cards say "from" the list price of the smallest standard model) and D14 (no internal id chip) ═════════════════════════════
+describe('D4 (Addendum 1 A1 rule 5): a product card\'s "from" price is the list price of the smallest standard model; D14: the panel header has no internal id chip', () => {
+  const stubEl = () => ({ innerHTML: '', style: {}, dataset: {}, hidden: false, scrollTop: 0, scrollLeft: 0, value: '', classList: { toggle() {}, add() {}, remove() {}, contains: () => false }, querySelector: () => null, querySelectorAll: () => [], setAttribute() {}, getAttribute: () => null, appendChild() {}, scrollIntoView() {}, focus() {}, addEventListener() {} });
+  const cardsEnv = (role = 'sales') => {
+    const env = readyEnv(role); env.D7.ready = true;
+    for (const id of ['catTabs', 'd7Cards', 'kcPanel', 'kcPanelTitle', 'kcPanelScroll', 'kcPanelFoot', 'kcName', 'kcMsgs', 'kcAside', 'kcPrintPrev', 'kcCostSum']) env.els.set(id, stubEl());
+    env.els.get('catTabs').querySelector = sel => (sel === '.kc-tabs' ? stubEl() : null);
+    env.ctx.NodeFilter = { SHOW_TEXT: 4 }; env.ctx.document.createTreeWalker = () => ({ nextNode: () => null });        // the sink's read-outs walk the text nodes of the panel: there are none in this stand-in
+    return env;
+  };
+  const fromOf = (env, id) => { const m = new RegExp('data-card="' + id + '"[^>]*><div class="kc-card-hd"><div class="kc-card-t">[^<]*</div><div class="kc-card-from">([^<]*)</div>').exec(env.els.get('d7Cards').innerHTML); return m ? m[1] : null; };
+  const SEVEN = ['prep', 'sink', 'hood', 'rack', 'cabinet', 'dishrack', 'chef_noodle'];       // the cards that showed the cheapest START, default options included (QA D4)
+  const cheapestStart = (env, id) => { const D = env.KC.products[id]; return Math.min(...D.starts.map(st => env.KC.price(id, D.startCfg(st.id), { skipHood: true })).filter(r => r.priced).map(r => r.unit)); };
+  it('the seven cards that used to show the cheapest START (default options included) show the LIST price of the smallest standard model', () => {
+    const env = cardsEnv(); env.KC.renderChips(true);
+    for (const id of SEVEN) {
+      const sa = env.KC.startsAt(id), models = env.KC.stdModels(id).map(m => env.KC.listRow(m.code).price);
+      assert.ok(sa && sa.code, id + ': the product has standard models on the list');
+      assert.equal(sa.price, Math.min(...models), id + ': the cheapest of its standard models'); assert.equal(sa.price, env.KC.listRow(sa.code).price, id + ': a list price, not a formula price');
+      assert.equal(fromOf(env, id), 'from ' + env.KC.peso(sa.price), id + ': the card says the list price of ' + sa.code);
+    }
+    // under the synthetic prices these five differ from what their cheapest start costs once its default options are in: the card no longer follows the start
+    for (const id of ['prep', 'hood', 'rack', 'cabinet', 'chef_noodle']) assert.notEqual(fromOf(env, id), 'from ' + env.KC.peso(cheapestStart(env, id)), id + ': not the cheapest start');
+  });
+  it('the card does not follow the materials or the options: material prices tripled, the "from" of a list-covered product stays the list price (the start pills and the panel still follow them)', () => {
+    const env = cardsEnv(); env.KC.renderChips(true);
+    const before = Object.fromEntries(SEVEN.map(id => [id, fromOf(env, id)]));
+    Object.keys(env.KC.P).forEach(k => { if (env.KC.P[k].p != null) env.KC.P[k].p *= 3; });
+    env.KC.renderChips(true);
+    for (const id of SEVEN) assert.equal(fromOf(env, id), before[id], id + ': a list price');
+    assert.notEqual(env.KC.price('prep', env.KC.products.prep.startCfg('basic')).unit, env.KC.price('prep', env.KC.products.prep.startCfg('basic'), { noList: true }).unit, 'the start is still list based');
+  });
+  it('every card of a product the list covers says exactly KC.startsAt; the cards of the Chef Mode products too', () => {
+    const env = cardsEnv(); env.KC.renderChips(true);
+    for (const D of env.KC.productList()) {
+      const sa = env.KC.startsAt(D.id), shown = fromOf(env, D.id);
+      assert.notEqual(shown, null, D.id + ' has a card');
+      if (sa) assert.equal(shown, 'from ' + env.KC.peso(sa.price), D.id);
+    }
+    assert.equal(env.KC.cardFrom('sink'), env.KC.startsAt('sink').price, 'the exported cardFrom is the same figure');
+  });
+  it('a product with no standard model on the list (the kitchen station, ventilation) keeps the lowest of its start prices; with no list loaded at all every card falls back to its starts (the Sink to its default package)', () => {
+    const env = cardsEnv(); env.KC.renderChips(true);
+    for (const id of ['station', 'vent']) {
+      const D = env.KC.products[id], units = D.starts.map(s => env.KC.price(id, D.startCfg(s.id), { skipHood: true })).filter(r => r.priced).map(r => r.unit);
+      assert.equal(env.KC.startsAt(id), null, id + ' has no standard model');
+      assert.equal(fromOf(env, id), 'from ' + env.KC.peso(Math.min(...units)), id + ': the cheapest start');
+    }
+    const bare = cardsEnv(); Object.keys(bare.KC.LISTP).forEach(k => { delete bare.KC.LISTP[k]; }); bare.KC.renderChips(true);
+    const sink = bare.KC.products.sink, pr = bare.KC.price('sink', sink.startCfg('dish2'), { skipHood: true });
+    assert.equal(fromOf(bare, 'sink'), 'from ' + bare.KC.peso(pr.unit), 'no list: the Sink card reads its default package (owner Q37), the formula price');
+    assert.notEqual(fromOf(bare, 'prep'), null);
+  });
+  it('the cards follow the price list: a changed list price changes the figure on the next draw (the cache is keyed by the list too)', () => {
+    const env = cardsEnv(); env.KC.renderChips(true);
+    const code = env.KC.startsAt('prep').code, before = fromOf(env, 'prep'); assert.equal(before, 'from ' + env.KC.peso(env.KC.listRow(code).price));
+    const row = env.KC.LISTP[code]; env.KC.LISTP[code] = typeof row === 'object' ? Object.assign({}, row, { price: (row.price || 0) - 1000 }) : row - 1000;
+    env.KC.renderChips(true); assert.notEqual(fromOf(env, 'prep'), before); assert.equal(fromOf(env, 'prep'), 'from ' + env.KC.peso(env.KC.listRow(code).price));
+  });
+  it('the Chef Mode model pills follow the price list too: a changed list price shows on the pill on the next draw (the start-price cache is keyed by the list as well as by the materials)', () => {
+    const env = cardsEnv(); env.KC.renderChips(true);
+    const pillOf = model => { const m = new RegExp('data-kind="chef_hp" data-model="' + model + '"[^>]*><span>[^<]*</span><b>([^<]*)</b>').exec(env.els.get('d7Cards').innerHTML); return m && m[1]; };
+    const before = pillOf('4'); assert.equal(before, env.KC.peso(env.KC.price('chef_hp', env.KC.products.chef_hp.startCfg('4')).unit), 'the model pill is the list based unit of that model');
+    const row = env.KC.LISTP['CK-HP-4']; env.KC.LISTP['CK-HP-4'] = typeof row === 'object' ? Object.assign({}, row, { price: (row.price || 0) + 1000 }) : row + 1000;
+    env.KC.renderChips(true); const after = pillOf('4');
+    assert.notEqual(after, before, 'the pill moved with the list'); assert.equal(after, env.KC.peso(env.KC.price('chef_hp', env.KC.products.chef_hp.startCfg('4')).unit));
+  });
+  it('D14: the configurator panel header says "Configure: <title>" and no internal id chip (KC-PREP, KC-SINK, KC-HOOD, KC-VENT, KC-RACK, KC-STN, KC-CHEF-HP ...); the custom item header is as it was', () => {
+    for (const [kind, title] of [['prep', 'SS Prep Table'], ['sink', 'SS Sink'], ['hood', 'SS Range Hood'], ['vent', 'Ventilation'], ['rack', 'SS Rack'], ['station', 'Multi-Purpose Kitchen Station'], ['chef_hp', 'Chef Mode High Pressure Stove']]) {
+      const env = cardsEnv(); const D = env.KC.products[kind]; assert.ok(D, kind);
+      env.KC.openKind(kind);
+      const head = env.els.get('kcPanelTitle').innerHTML;
+      assert.match(head, /^⚙ Configure: /, kind); assert.equal(/kc-code|KC-[A-Z]/.test(head), false, kind + ': no id chip in ' + head);
+      assert.equal(head.includes(D.code), false, kind + ': the internal id ' + D.code + ' is not shown');
+      assert.equal(head, '⚙ Configure: ' + D.title.replace(/&/g, '&amp;'), kind + ': just the title');
+      void title;
+    }
+    const env = cardsEnv(); env.KC.openCustom('prep'); assert.equal(env.els.get('kcPanelTitle').innerHTML, '➕ Add custom item');
   });
 });

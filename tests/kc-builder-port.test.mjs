@@ -15,6 +15,9 @@
 // Mutation-tested in a scratch copy of the page (each must fail here): the shim moved after `const CO`; d7On() without its D7.live / quoteEngine / BS / as-issued condition; the engine missing from
 // getPricingFields / applyPricingFields / the clearForm defaults / kept by stripTemplateState; the early stamp missing from a loader; `engine` deleted from a template; the Brilliant Steel guard removed;
 // kcAdoptEngineIfBlank adopting over lines / a reopen source; a direct D7.pricing call without d7On() &&; formatPeso in centavos for legacy; the thead rewritten in legacy; D7.post back in.
+// Addendum 2 (owner answers B4 and B5, 2026-11-19 night), each killed in a scratch copy of the page: B4 the letterhead name, the signature title, the footer line or the top-bar logo of Brilliance Steel back to the old
+// spelling; B5 the What's New list not filtered, the version constant recorded instead of the visible version, initUI not measuring the tutorial again, a seen version that can go down, a Help list that is not redrawn,
+// kcWhatsNewOn() always true, a dismissal that records the constant, a banner left showing when the tutorial boot runs again.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -515,15 +518,29 @@ describe('the guided tour and Help in both modes; the per-device switch', () => 
 describe('Addendum 1 (owner-approved): "Brilliance Steel" on screen, no prototype wording, the new-quote defaults', () => {
   const visibleSource = () => stripComments(HTML.replace(/<!--[\s\S]*?-->/g, ''));
 
-  it('A7: "Brilliance Steel", not "Brilliant Steel", in every user-visible string of the page — the two company pills, the commission hint, the toast, Help, What\'s New, the guided tour; the printed letterhead of a Brilliant Steel quotation (CO.BS, pinned byte for byte by other tests and an owner ruling) is the one exception', () => {
-    const noLetterhead = visibleSource().replace(/ {2}BS:\{name:'BRILLIANT STEEL CORPORATION'[\s\S]*?creds:'Brilliant Steel Corporation[^\n]*\},\n/, '');
-    assert.ok(noLetterhead.length < visibleSource().length, 'CO.BS was found and set aside');
-    assert.equal(/Brilliant Steel/i.test(noLetterhead), false, 'a user-visible "Brilliant Steel" is left: ' + (noLetterhead.match(/.{40}Brilliant Steel.{40}/i) || [''])[0]);
+  it('A7 and Addendum 2 B4: "Brilliance Steel", not "Brilliant Steel", in every user-visible string of the page — the two company pills, the commission hint, the toast, Help, What\'s New, the guided tour — and the legal name BRILLIANCE STEEL CORPORATION on the letterhead of a Brilliance Steel quotation (CO.BS)', () => {
+    const src = visibleSource();
+    assert.equal(/Brilliant\s+Steel|BRILLIANT/i.test(src), false, 'a user-visible "Brilliant Steel" is left: ' + (src.match(/.{40}(?:Brilliant\s+Steel|BRILLIANT).{40}/i) || [''])[0]);
     assert.equal((HTML.match(/⚙ Brilliance Steel<\/button>/g) || []).length, 2, 'the desktop and the mobile company pill');
     assert.ok(HTML.includes("showToast('Remove the configured lines first: a Brilliance Steel quote cannot carry them.','error')"));
     assert.ok(/\(never on Brilliance Steel\); your manual choice wins/.test(HTML));
     for (const id of ['coBS', 'mtbCoBS']) assert.ok(new RegExp(`id="${id}"[^>]*onclick="(mtb)?[sS]etCompany\\('BS'\\)"`).test(HTML), `the id and the code of ${id} are internal and unchanged`);
     assert.match(HTML, /QUOTE_COLL=\{ BK:'bk_quotes', BI:'bk_quotes', BS:'bs_quotes' \};/, 'bs_quotes and BS stay');
+    assert.match(HTML, /code:'BS'/, 'the internal code BS is unchanged');
+  });
+
+  it('Addendum 2 B4: the Brilliance Steel letterhead says BRILLIANCE STEEL CORPORATION everywhere it names the company: the name, the signature title, the thank-you, the footer line and the top-bar logo; nothing else of the identity moved', () => {
+    const b = makeEnv(), bs = b.plain('CO.BS');
+    assert.equal(bs.name, 'BRILLIANCE STEEL CORPORATION'); assert.equal(bs.sig.title, 'President, Brilliance Steel Corporation'); assert.equal(bs.nav, '<span>BRILLIANCE</span> STEEL');
+    assert.equal(bs.thanks, 'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.');
+    assert.equal(bs.creds, 'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300');
+    assert.deepEqual([bs.code, bs.addr, bs.contact, bs.sig.name, bs.logo, bs.sub], ['BS', 'Pasig City, Metro Manila', '09276836300', 'GERALD CHAN', '', ''], 'the internal code, the address, the contact, the signatory and the empty logo are as they were');
+    assert.equal(bs.pay, undefined, 'a Brilliance Steel quote never carries Barro\'s account');
+    b.run("setCompany('BS')");                                                                   // what the page draws when the Brilliance Steel pill is pressed
+    assert.equal(b.el('phName').textContent, 'BRILLIANCE STEEL CORPORATION'); assert.equal(b.el('sigTitle').textContent, 'President, Brilliance Steel Corporation');
+    assert.equal(b.el('navLogo').innerHTML, '<span>BRILLIANCE</span> STEEL'); assert.match(b.el('pfThanks').textContent, /^Thank you for considering Brilliance Steel Corporation\./); assert.match(b.el('pfCreds').textContent, /^Brilliance Steel Corporation {2}•/);
+    assert.equal(b.run('currentCo'), 'BS');
+    for (const other of ['BK', 'BI']) { assert.equal(/Brilli/i.test(JSON.stringify(b.plain(`CO.${other}`))), false, other + ' never names it'); }
   });
 
   it('A10: no prototype wording anywhere a person can read it (the pages, Help, What\'s New, the tour): no "prototype", no "Prototype:" prefix, no "sample prices", no "made-up"', () => {
@@ -619,5 +636,115 @@ describe('QA: linking, unlinking, deleting or reordering a photo redraws the Pho
   it('the Photo cell reads the quote\'s photos (so the redraw is what puts a linked photo in the cell)', () => {
     const doc = fs.readFileSync(path.join(ROOT, 'qb/d7/d7-doc.js'), 'utf8');
     assert.match(doc, /function photoCell\(/); assert.match(doc, /quotePhotos/);
+  });
+});
+
+// ═══════════════════════════════════════════════ Addendum 2 B5: What's New is held until the switch is on ═══════════════════════════════════════════════
+describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only while the configurators are on for this person, and a person who sees the builder with the switch off is never marked as having seen v51', () => {
+  const mk = (allow) => { const b = makeEnv(); b.run(`D7.live = true; globalThis.KCLive = { allowsNew: function () { return globalThis.__allow; } }; globalThis.__allow = ${allow};`); return b; };
+  const switchTo = (b, allow) => b.run(`globalThis.__allow = ${allow}`);
+  const list = (b) => b.el('helpWhatsNew').innerHTML;
+  const vers = (b) => [...list(b).matchAll(/<span class="wn-ver">v(\d+)<\/span>/g)].map((m) => +m[1]);
+  const dot = (b) => b.el('helpDot').classList.contains('show');
+  const bannerText = (b) => (b.el('qbTutBanner').style.display === 'flex' ? b.el('qbTutBannerText').innerHTML : '');
+  const seen = (b) => b.store.get('qbTutSeenVer') || null;
+
+  it('static: the v51 entry is the one flagged kc:true (nothing else is), the version constant is still 51, the helpers exist, and initUI measures the tutorial again once the switch has been read', () => {
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
+    const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
+    assert.deepEqual(wn.filter((e) => e.kc).map((e) => e.ver), [51], 'only the configurators\' entry is held');
+    assert.equal(wn[0].ver, 51); assert.equal(wn[1].ver, 50); assert.equal(wn[1].kc, undefined);
+    for (const f of ['kcWhatsNewOn', 'whatsNewList', 'tutorialVersion', 'tutMarkSeen']) assert.ok(SCRIPT.includes(`function ${f}(`), f);
+    assert.match(fnSource('kcWhatsNewOn'), /KCLive\.allowsNew\(\)/, 'the one question the page already asks for a new quote');
+    const ui = stripComments(fnSource('initUI')); assert.ok(ui.indexOf('kcAdoptEngineIfBlank()') > 0 && ui.indexOf('initTutorial()') > ui.indexOf('kcAdoptEngineIfBlank()'), 'initTutorial runs again after the switch was read');
+    for (const fn of ['openHelpModal', 'startTour', 'initTutorial', 'dismissTutBanner']) assert.equal(/localStorage\.setItem\('qbTutSeenVer', String\(TUTORIAL_VERSION\)\)|localStorage\.setItem\('qbTutDismissedVer', String\(TUTORIAL_VERSION\)\)/.test(stripComments(fnSource(fn))), false, `${fn} no longer stores the constant: it stores the version the person can see`);
+    assert.match(stripComments(fnSource('renderWhatsNew')), /whatsNewList\(\)/, 'the list is the filtered one');
+  });
+
+  it('switch OFF: the list ends at 50 (no v51, no word of the configurators), and the version people are measured against is 50', () => {
+    const b = mk(false); b.run('initTutorial()');
+    assert.deepEqual(vers(b)[0], 50); assert.equal(vers(b).includes(51), false, 'no v51 entry'); assert.equal(/seven tabs|configurator/i.test(list(b)), false, 'nothing about the configurators');
+    assert.equal(b.run('tutorialVersion()'), 50); assert.equal(b.run('kcWhatsNewOn()'), false);
+    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length') - 1);
+  });
+  it('switch ON (kcMode "on", or "president" for the President, or the device force: all of them are KCLive.allowsNew()): the list starts at 51 and the version is 51', () => {
+    const b = mk(true); b.run('initTutorial()');
+    assert.equal(vers(b)[0], 51); assert.ok(/seven tabs/.test(list(b))); assert.equal(b.run('tutorialVersion()'), 51); assert.equal(b.run('kcWhatsNewOn()'), true);
+    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length'));
+  });
+  it('the question is asked of the live layer and nothing else: no layer (D7.live off), no KCLive, no allowsNew, one that throws, or one that says no: all of these hold the entry back', () => {
+    const none = makeEnv(); none.run('initTutorial()'); assert.equal(none.run('kcWhatsNewOn()'), false); assert.equal(none.run('tutorialVersion()'), 50);
+    const dead = mk(true); dead.run('D7.live = false'); assert.equal(dead.run('kcWhatsNewOn()'), false, 'the files did not load: the configurators are not on');
+    const noFn = mk(true); noFn.run('globalThis.KCLive = {}'); assert.equal(noFn.run('kcWhatsNewOn()'), false);
+    const boom = mk(true); boom.run('KCLive.allowsNew = function () { throw new Error("boom"); }'); assert.equal(boom.run('kcWhatsNewOn()'), false); assert.equal(boom.run('tutorialVersion()'), 50);
+    const ro = mk(true); ro.run('KCLive.allowsNew = function () { return false; }'); assert.equal(ro.run('kcWhatsNewOn()'), false, 'prices not loaded / switch off / device off');
+    const quirk = mk('"yes"'); assert.equal(quirk.run('kcWhatsNewOn()'), true, 'any truthy answer is a yes; the real allowsNew only ever answers a boolean');
+  });
+
+  it('a first-time user with the switch off gets the first-run banner and the dot as before; opening Help marks 50 as seen, never 51', () => {
+    const b = mk(false); b.run('initTutorial()');
+    assert.equal(dot(b), true, 'unseen: the gold dot'); assert.match(bannerText(b), /New to the quote builder/);
+    b.run('openHelpModal()');
+    assert.equal(seen(b), '50', 'seen 50, not 51'); assert.equal(dot(b), false, 'the dot clears'); assert.equal(b.el('qbTutBanner').style.display, 'none');
+    assert.equal(vers(b).includes(51), false, 'the Help list has no v51 while the switch is off');
+  });
+  it('the person who saw the builder with the switch off still gets the news once it is turned on: dot and the "updated" banner for 51, the list shows v51, and seeing it then marks 51', () => {
+    const b = mk(false); b.run('initTutorial()'); b.run('openHelpModal()'); assert.equal(seen(b), '50'); b.run('closeHelpModal()');
+    b.run('initTutorial()'); assert.equal(dot(b), false, 'switch still off: nothing new'); assert.equal(bannerText(b), '');
+    switchTo(b, true); b.run('initTutorial()');
+    assert.equal(dot(b), true, 'the switch is on: v51 is news'); assert.match(bannerText(b), /The quote builder was updated/); assert.equal(seen(b), '50', 'initTutorial does not mark anything as seen');
+    assert.equal(vers(b)[0], 51);
+    b.run('openHelpModal()'); assert.equal(seen(b), '51'); assert.equal(dot(b), false); assert.equal(b.el('qbTutBanner').style.display, 'none');
+    b.run('initTutorial()'); assert.equal(dot(b), false, 'once seen, it stays seen'); assert.equal(bannerText(b), '');
+  });
+  it('the update banner and the Help button are measured against what the person can see: with the switch off and 50 seen, nothing is pending; a person who last saw 49 is told, and Dismiss is remembered for the version they could see', () => {
+    const b = mk(false); b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()');
+    assert.equal(dot(b), true, 'seen 49 < 50'); assert.match(bannerText(b), /updated/);
+    b.run('dismissTutBanner()'); assert.equal(b.store.get('qbTutDismissedVer'), '50', 'dismissed at 50, not 51'); assert.equal(b.el('qbTutBanner').style.display, 'none');
+    b.run('initTutorial()'); assert.equal(bannerText(b), '', 'not shown again at 50'); assert.equal(dot(b), true, 'the dot stays until it is seen');
+    switchTo(b, true); b.run('initTutorial()'); assert.match(bannerText(b), /updated/, 'dismissing 50 does not hide 51');
+  });
+  it('what a person has seen only grows: a person who saw 51 while it was on keeps 51 when it is switched off, and Help or the tour with the switch off never lowers it', () => {
+    const b = mk(true); b.run('openHelpModal()'); assert.equal(seen(b), '51'); b.run('closeHelpModal()');
+    switchTo(b, false); b.run('openHelpModal()'); assert.equal(seen(b), '51', 'never lowered to 50'); b.run('closeHelpModal()');
+    b.run('initTutorial()'); assert.equal(dot(b), false);
+    b.run('showTourStep = function () {}; startTour()'); assert.equal(seen(b), '51', 'the tour does not lower it either');
+    b.run('endTour()');
+    const t = mk(false); t.run('showTourStep = function () {}; startTour()'); assert.equal(seen(t), '50', 'the tour with the switch off marks 50, not 51'); assert.equal(dot(t), false);
+    switchTo(t, true); t.run('initTutorial()'); assert.equal(dot(t), true, 'and 51 is still news the day it is on');
+    const d = mk(true); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '51'); switchTo(d, false); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '51', 'a dismissal is not lowered either');
+  });
+  it('initTutorial is a pure function of the state it reads: run again after the switch is read, a banner that no longer applies goes away (it is never left showing)', () => {
+    const b = mk(true); b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/);
+    b.store.set('qbTutSeenVer', '51'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'seen 51 with the switch on: nothing to tell');
+    b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/); b.store.set('qbTutDismissedVer', '51'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'dismissed at this version');
+  });
+  it('the Help list is redrawn every time Help opens, so it follows the switch as it is then (and the device row of Help, which can turn it off)', () => {
+    const b = mk(true); b.run('initTutorial()'); assert.equal(vers(b)[0], 51);
+    switchTo(b, false); b.run('openHelpModal()'); assert.equal(vers(b)[0], 50, 'off now: the v51 entry is gone from the list');
+    switchTo(b, true); b.run('openHelpModal()'); assert.equal(vers(b)[0], 51);
+  });
+  it('the keys are the same (qbTutSeenVer, qbTutDismissedVer) and are never renamed or cleared by the gate', () => {
+    for (const k of ['qbTutSeenVer', 'qbTutDismissedVer']) assert.ok(SCRIPT.includes(`'${k}'`), k);
+    const b = mk(false); b.store.set('qbTutSeenVer', '44'); b.run('initTutorial()'); b.run('openHelpModal()'); assert.deepEqual([...b.store.keys()].filter((k) => /^qbTut/.test(k)).sort(), ['qbTutSeenVer']);
+  });
+});
+
+// ═══════════════════════════════════════════════ Addendum 2 B2: the item code reaches the printed line only for a quote on the new rules ═══════════════════════════════════════════════
+describe('Addendum 2 B2: the line block (with the item code at its start) is drawn in the print slot of a quote on the new rules, and a legacy quote never asks the document layer for one', () => {
+  it('KC mode: the slot of each row is the doc layer\'s block; legacy: the old spec sheet, the hook is never called, no item code anywhere in the row', () => {
+    const b = makeEnv();
+    b.run(`items.push(${JSON.stringify(catalogueLine({ id: 'GR-LR-900', name: 'Lava rock griller' }))}); DB = { products: [], categories: [{id:'prep_washing',label:'Prep'}], laborRoles: [], constants: {} };`);
+    b.answer('doc.printBlock', '<div class="kc-d d7-blk"><div class="kc-d-code">GR-LR-900</div><div class="kc-d-title">Lava rock griller</div></div>');
+    b.run('renderItems()');
+    assert.equal(b.calls().some((c) => c[0] === 'doc.printBlock'), false, 'legacy: the document layer is never asked for a block');
+    assert.equal(/kc-d-code|d7-blk/.test(b.el('itemsTbody').innerHTML), false, 'legacy: no item code in the row');
+    b.run("currentCo = 'BS'; quoteEngine = 'kc1'; D7.live = true"); b.run('renderItems()');
+    assert.equal(b.calls().some((c) => c[0] === 'doc.printBlock'), false, 'Brilliance Steel: never');
+    b.run("currentCo = 'BK'"); b.answer('doc.photoCell', ''); b.el('d7PhotoCol').checked = true; b.clear(); b.run('renderItems()');
+    assert.ok(b.calls().some((c) => c[0] === 'doc.printBlock'), 'KC: the block is asked for');
+    assert.match(b.el('itemsTbody').innerHTML, /<div class="print-only sheet-slot"><div class="kc-d d7-blk"><div class="kc-d-code">GR-LR-900<\/div><div class="kc-d-title">Lava rock griller<\/div><\/div><\/div>/, 'KC: the print slot holds it, so the Client preview, the A4 pages and every copy that clones the slot carry it');
+    assert.equal((b.el('itemsTbody').innerHTML.match(/<th\b/g) || []).length, 0, 'no new header cell in the row');
+    assert.equal((b.el('itemsThead').innerHTML.match(/<th\b/g) || []).length, 7, 'still seven columns: no column for the code');
   });
 });

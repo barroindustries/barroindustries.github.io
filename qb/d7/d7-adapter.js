@@ -48,8 +48,8 @@ const roleName = () => (window.KCLive && window.KCLive.userName) || (KC.ROLES[S.
 const fromFiledLoad = () => { try{ return typeof reopenSourceDocId!=='undefined' && !!reopenSourceDocId; }catch(e){ return false; } };
 const toast = (t, k) => D7.toast(t, k);
 const REVIEW_REASON_FALLBACK = 'custom part';
-/* Addendum 1 A4: Neil's blower figures are not yet said to be cost or selling prices, so a line that holds a blower needs review until he does; and ducting is priced per job (packet B puts that sentence in the check of every ventilation line) */
-const BLOWER_REASON = 'Blower price to be confirmed by Neil.';
+/* Ducting is priced per job, so every ventilation line needs review (Addendum 1 A1; packet B puts that sentence in the check of every ventilation line).  A blower is a COST like any other material (Addendum 2 B1):
+   it prices by the normal formula and is no review reason; the older "Blower price to be confirmed by Neil." reason and the President-only lock on a blower line are gone. */
 const DUCTING_REASON = 'Ducting is priced per job; check before sending.';
 
 /* ═════════ ids ═════════ */
@@ -107,13 +107,6 @@ A.lineOfItem = it => isKc(it) ? mirrorOf(it) : null;
 
 /* ═════════ text: name, dims, specs, the print snapshot (spec 3.2 / 3.4) ═════════ */
 /* needsReview / reviewReasons from the host's check (custom part, custom item, ventilation sizing ...) */
-/* does the line hold a blower?  Only a ventilation line can: its scope is the whole system or the blower alone (not "ducts for a blower supplied by others").  The engine's own check flags a line whose price has a
-   blower row; this is the second lock for a blower that has no row yet (a sirocco blower is picked by hand, so the price has none): the line still holds one. */
-function hasBlower(item){
-  try { return !!(isKc(item) && item.kcKind==='vent' && item.cfg && item.cfg.scope!=='duct'); } catch(e){ return false; }
-}
-/* only the President clears the blower reason (Operations clears the other reasons): a reviewer who is not the President cannot mark a blower line reviewed */
-function blowerLocked(item){ return !!(item && Array.isArray(item.reviewReasons) && item.reviewReasons.indexOf(BLOWER_REASON) >= 0 && D7.role() !== 'president'); }
 function review(item){
   const D = defOf(item.kcKind); if(!D) return;
   const v = safe(() => KC.check(item.kcKind, item.cfg), null);
@@ -121,8 +114,6 @@ function review(item){
   item.reviewReasons = v ? v.review.slice() : [];
   if(item.kcKind==='custom'){ item.needsReview = true; if(!item.reviewReasons.length) item.reviewReasons = ['custom item']; }       // Q31 / D4: a custom item always needs review
   if(item.kcKind==='vent' && item.reviewReasons.indexOf(DUCTING_REASON) < 0){ item.needsReview = true; item.reviewReasons.push(DUCTING_REASON); }   // A1: ducting is priced per job (the check says it already; this is the second lock)
-  if(hasBlower(item) && item.reviewReasons.indexOf(BLOWER_REASON) < 0){ item.needsReview = true; item.reviewReasons.push(BLOWER_REASON); }
-  if(item.reviewed && blowerLocked(item)){ item.reviewed = false; delete item.reviewedAt; }              // a review that a non-President gave to a blower line does not count
 }
 /* the reasons of a line as one text: the short ones first ("custom part, ventilation sizing."), then the whole sentences ("Ducting is priced per job; check before sending.") */
 function reasonText(reasons){
@@ -130,6 +121,14 @@ function reasonText(reasons){
   const shorts = all.filter(r => !whole(r)), sents = all.filter(whole);
   return (shorts.length ? shorts.join(', ') + '.' : '') + (sents.length ? (shorts.length ? ' ' : '') + sents.join(' ') : '') || REVIEW_REASON_FALLBACK + '.';
 }
+/* the item code a line prints (Addendum 2 B2): the price-list code of the model the line is built from (KC.baseModel: PS-PT-1200, CK-HP-4 ...), '' for a line that has no code (the custom item, the kitchen station,
+   ventilation, a Chef Mode model that is not on the list).  It is a pure function of the configuration, so it needs no prices; the print block draws it as small grey text at the start of the description. */
+function codeOf(item){
+  if(!isKc(item) || item.kcKind==='custom') return '';
+  const m = safe(() => KC.baseModel(item.kcKind, item.cfg), null);
+  return m && typeof m.code==='string' ? m.code : '';
+}
+A.codeOf = codeOf;
 /* name, dims, specEdit (plain text) and the print snapshot `doc` from the cfg. The hood number a ventilation line names is the builder's (the mirror is index-preserving). */
 function describe(item){
   const D = defOf(item.kcKind); if(!D) return item;
@@ -140,7 +139,7 @@ function describe(item){
   const L = KC.printParts(D, cc), ix = D.incl(cc), forced = D.notes ? D.notes(cc) : [];
   const specs = c.txt && c.txt.specs ? String(c.txt.specs) : KC.htmlToText(KC.autoSpecs(item.kcKind, cc));
   item.name = L.title; item.dims = L.dims; item.specEdit = specs;
-  item.doc = { material:L.material, use:L.use, title:L.title, sub:L.sub, dims:L.dims, specs,
+  item.doc = { code:codeOf(item), material:L.material, use:L.use, title:L.title, sub:L.sub, dims:L.dims, specs,
                notes:(item.notes ? [String(item.notes)] : []).concat(forced), includes:(ix.i||[]).slice(), excludes:(ix.x||[]).slice() };
   if(item.kcKind==='vent' && c.hoodRef){ const h = hoodOf(c.hoodRef); if(h){ const k = item._kc || (item._kc = {}); k.hoodNo = numberOf(items.indexOf(h)); } }
   return item;
@@ -201,7 +200,7 @@ function priceNow(item, opts){
 }
 A.reprice = item => priceNow(item);
 A.refresh = refresh;
-A.BLOWER_REASON = BLOWER_REASON; A.DUCTING_REASON = DUCTING_REASON; A.hasBlower = hasBlower; A.blowerLocked = blowerLocked; A.reasonText = reasonText;
+A.DUCTING_REASON = DUCTING_REASON; A.reasonText = reasonText;
 
 /* every kc line again: ventilation re-linked to its hood first, then priced (a filed line whose costs are unreadable keeps its price). Renders nothing: the caller does. */
 A.repriceAll = function(){
@@ -274,7 +273,6 @@ function insertItem(it, afterId){
   else items.splice(idx, 0, it);
 }
 function setReviewed(it, wanted){
-  if(wanted && blowerLocked(it)) wanted = false;                                              // A4: only the President clears a blower line
   if(wanted){ if(it.reviewed !== wanted || !it.reviewedAt) it.reviewedAt = nowIso(); it.reviewed = wanted; }
   else { it.reviewed = false; delete it.reviewedAt; }
 }
@@ -334,7 +332,6 @@ A.addCustom = function(){ KC.openCustom(ALL.includes(S.tab) ? S.tab : 'prep'); }
 A.markReviewed = function(idx, on, quiet){
   const it = items[idx];
   if(!isKc(it) || !KC.can('review')) return false;
-  if(on && blowerLocked(it)){ toast('Only the President can clear the blower price on a line.', 'error'); return false; }     // A4
   if(on){ it.reviewed = roleName(); it.reviewedAt = nowIso(); } else { it.reviewed = false; delete it.reviewedAt; }
   if(!quiet){ saveToStorage(); renderItems(); if(typeof flashItemSaved==='function') flashItemSaved(); }
   return true;
@@ -429,7 +426,7 @@ function lineRow(item, idx){
     if(!isManual(item) && k.priced && k.markupOvr) out.push(chip('warn', 'markup override', costs ? 'Priced with the quote’s markup override ×' + k.markupOvr + ' instead of the standard ×' + KC.SET.markup : 'Priced with the quote’s markup override'));
     if(item.needsReview){
       if(item.reviewed) out.push(chip('ok', 'reviewed by ' + (typeof item.reviewed==='string' ? item.reviewed : KC.ROLES.president.name), item.reviewedAt ? 'Reviewed ' + item.reviewedAt : ''));
-      else out.push(chip('warn', 'needs review', reasonText(item.reviewReasons) + (blowerLocked(item) ? ' Only the President can clear the blower price.' : ' The President or Operations reviews it; the quote cannot be filed until then.')));
+      else out.push(chip('warn', 'needs review', reasonText(item.reviewReasons) + ' The President or Operations reviews it; the quote cannot be filed until then.'));
     }
     if(KC.isEdited(c)) out.push(chip('warn', 'edited by hand', 'Wording, build detail or costs were changed by hand'));
   }

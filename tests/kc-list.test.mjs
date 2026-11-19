@@ -19,12 +19,13 @@
 //   4. THE PRICE           worked out by hand for each product: a per-metre code (length difference at the rate, options by formula, the length not counted twice), a code with no
 //                          per-metre rate (the formula carries the size), options that take money off, the formula only where there is no code, no list loaded, a material missing.
 //   5. "STARTS AT"         the list price of the smallest (cheapest) standard model the loaded list prices.
-//   6. REVIEW AND WARNING  a line with a blower needs review (A4); ventilation (ducting) always does; the 90 % formula warning shows only in the 'formula' floor mode (President only, staff note).
+//   6. REVIEW AND WARNING  a blower is a COST like any other material and puts no line in review (Addendum 2 B1, which replaced A4); ventilation (ducting) always needs review; the 90 % formula warning shows only in
+//                          the 'formula' floor mode (President only, staff note).
 //
 // Mutation-tested in scratch copies of the sources, re-bundled each time (never the shared tree). Each of these must fail here (tests/kc-rules.test.mjs holds the rule-level ones):
 // the base model taken at the standard length when a per-metre rate applies (the length counted twice), or at the cfg's length when it does not; a tie taken to the longer length;
 // the per-metre rate ignored; the list price used for a cfg with no code; a hood mapped for an island; a sink family by type only; a trolley told by its name; the "starts at" taking the
-// dearest; the blower or the ducting reason dropped; the 90 % warning shown in list mode.
+// dearest; the ducting reason dropped; the old blower reason put back (it must not reappear); the 90 % warning shown in list mode.
 // Run with: node --test tests/*.test.mjs
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +37,7 @@ const round10 = x => Math.round(x / 10) * 10;
 const close = (got, want, msg) => assert.ok(Math.abs(got - want) < 1e-6, `${msg || 'figure'}: got ${got}, want ${want}`);
 const rowOf = code => { const v = FX.listPrices[code]; return typeof v === 'object' ? { price: v.price, perMetre: v.perMetre } : { price: v, perMetre: null }; };
 
-const BLOWER = 'Blower price to be confirmed by Neil.';
+const BLOWER = 'Blower price to be confirmed by Neil.';       // Addendum 2 B1 removed this reason: no line carries it any more
 const DUCTING = 'Ducting is priced per job; check before sending.';
 
 let priced, bare;
@@ -476,22 +477,32 @@ describe('"starts at": the list price of the smallest standard model', () => {
   });
 });
 
-describe('review: a blower needs review (A4) and ducting is always reviewed (A1)', () => {
+describe('review: ducting is always reviewed (A1); a blower is a cost and needs no review (Addendum 2 B1)', () => {
   const review = (KC, id, c) => plain(KC.products[id].validate(c).review);
-  it('every ventilation line is reviewed for its ducting; the lines with a blower also for the blower', () => {
+  const noBlowerReason = rv => rv.every(r => !/blower/i.test(r));
+  it('every ventilation line is reviewed for its ducting, once, and for nothing about its blower', () => {
     const KC = priced.KC;
     for (const st of KC.products.vent.starts) {
       const c = KC.products.vent.startCfg(st.id), rv = review(KC, 'vent', c);
       assert.ok(rv.includes(DUCTING), `vent ${st.id}: ducting`);
-      assert.ok(rv.includes(BLOWER), `vent ${st.id}: blower`);
+      assert.ok(!rv.includes(BLOWER), `vent ${st.id}: the old blower reason is gone`);
+      assert.ok(noBlowerReason(rv), `vent ${st.id}: no reason mentions a blower: ${rv.join(' | ')}`);
       assert.equal(rv.length, new Set(rv).size, 'no reason twice');
+    }
+  });
+  it('a ventilation line that holds a blower row (the whole system, or the blower alone) is reviewed for the ducting only', () => {
+    const KC = priced.KC;
+    for (const scope of ['full', 'blower']) {
+      const c = KC.products.vent.startCfg('ex1'); c.scope = scope; c.needsReview = false;       // the sizing tick (a reason of its own) is off
+      assert.ok(KC.price('vent', c).lines.some(l => l.q > 0 && KC.isBlower(l.k)), `${scope}: the line holds a blower`);
+      assert.deepEqual(review(KC, 'vent', c), [DUCTING], scope);
     }
   });
   it('ducting is reviewed even when the sizing tick is off and a blower is by others', () => {
     const KC = priced.KC, c = KC.products.vent.startCfg('ex1'); c.needsReview = false; c.scope = 'duct';
     const rv = review(KC, 'vent', c);
     assert.ok(rv.includes(DUCTING)); assert.ok(!rv.includes('ventilation sizing'));
-    assert.ok(!KC.price('vent', c).lines.some(l => KC.isBlower(l.k)), 'no blower in the line: no blower reason');
+    assert.ok(!KC.price('vent', c).lines.some(l => KC.isBlower(l.k)), 'no blower in the line');
     assert.ok(!rv.includes(BLOWER));
   });
   it('asking twice gives the same answer (nothing piles up)', () => {
@@ -499,23 +510,38 @@ describe('review: a blower needs review (A4) and ducting is always reviewed (A1)
     assert.deepEqual(review(KC, 'vent', c), review(KC, 'vent', c));
     assert.deepEqual(plain(KC.products.vent.validate(c).warnings), plain(KC.products.vent.validate(c).warnings));
   });
-  it('a product with no blower in it is not reviewed for one: nothing in the workshop or the Chef Mode line', () => {
+  it('a product other than ventilation carries neither the blower reason nor the ducting one: nothing in the workshop or the Chef Mode line', () => {
     const KC = priced.KC;
     for (const def of KC.productList().filter(d => d.id !== 'vent')) for (const st of def.starts) {
       const rv = review(KC, def.id, def.startCfg(st.id));
       assert.ok(!rv.includes(BLOWER), `${def.id} / ${st.id}`); assert.ok(!rv.includes(DUCTING), `${def.id} / ${st.id}`);
     }
   });
-  it('a blower added as a "+ material" row to any product puts the line in review, and a swapped material that is a blower too', () => {
+  it('a blower added as a "+ material" row to any product puts nothing in review: it is a material cost like any other, in the line\'s materials', () => {
     const KC = priced.KC;
-    const c = KC.products.sink.startCfg('dish2'); c.extra = [{ k: 'scr1', q: 1, part: 'Other' }];
-    assert.deepEqual(review(KC, 'sink', c), [BLOWER]);
+    const base = KC.products.sink.startCfg('dish2'), c = KC.products.sink.startCfg('dish2'); c.extra = [{ k: 'scr1', q: 1, part: 'Other' }];
+    assert.deepEqual(review(KC, 'sink', c), [], 'no review for a blower');
+    close(KC.price('sink', c).M - KC.price('sink', base).M, FX.materials.scr1, 'the blower\'s cost is in the materials, once');
     const fan = KC.products.sink.startCfg('dish2'); fan.extra = [{ k: 'axi2', q: 1, part: 'Other' }];
-    assert.deepEqual(review(KC, 'sink', fan), [BLOWER], 'a fan of the Blowers & fans list counts');
+    assert.deepEqual(review(KC, 'sink', fan), [], 'a fan of the Blowers & fans list is a cost too');
     const other = KC.products.sink.startCfg('dish2'); other.extra = [{ k: 'bullet', q: 4, part: 'Other' }];
     assert.deepEqual(review(KC, 'sink', other), []);
     const none = KC.products.sink.startCfg('dish2'); none.extra = [{ k: 'scr1', q: 0, part: 'Other' }];
-    assert.deepEqual(review(KC, 'sink', none), [], 'a blower of quantity 0 is not in the line');
+    assert.deepEqual(review(KC, 'sink', none), []);
+  });
+  it('a blower prices by the normal formula (Addendum 2 B1): its cost goes in with the labor and misc of the line, the unit is the project cost x the markup to the nearest 10 pesos, and one more peso of blower cost is one more peso of material', () => {
+    const e = loadPricedEngine(), KC = e.KC, c = KC.products.vent.startCfg('ex1'); c.scope = 'full';
+    const r1 = KC.price('vent', c), blowerLines = r1.lines.filter(l => l.q > 0 && KC.isBlower(l.k));
+    assert.equal(blowerLines.length, 1, 'one blower row in the line');
+    const key = blowerLines[0].k, q = blowerLines[0].q;
+    assert.equal(r1.priced, true); assert.equal(r1.list, undefined, 'ventilation has no list price: it prices by formula');
+    assert.equal(r1.unit, round10(r1.projectCost * KC.SET.markup), 'the unit is the formula: project cost x markup, nearest 10');
+    KC.P[key].p += 100;
+    const r2 = KC.price('vent', c);
+    close(r2.M - r1.M, 100 * q, 'materials');
+    close(r2.projectCost - r1.projectCost, 100 * q * 1.7 * 1.1, 'project cost = materials x 1.7 x 1.1 (ventilation is Complex: labor 70 %, misc 10 %)');
+    assert.equal(r2.unit, round10(r2.projectCost * KC.SET.markup));
+    assert.ok(r2.unit > r1.unit, 'a dearer blower makes a dearer line');
   });
   it('a product\'s own review reasons are kept, and added to', () => {
     const KC = priced.KC, c = KC.products.vent.startCfg('ex3'); c.needsReview = true;

@@ -49,9 +49,9 @@ const CONTACT = `${PHONE}  |  ${DOMAIN}`;
 const CREDS = ['Barro Industries OPC', 'SEC Registered', DOMAIN, PHONE, ADDRESS].join('  •  ');
 
 // Brilliant Steel exactly as it stood before this change. No e-mail, a Pasig address, a different phone format on the credentials line.
-const BS_CREDS = 'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300';
-const BS_THANKS = 'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.';
-const BS_SIG = { name: 'GERALD CHAN', title: 'President, Brilliant Steel Corporation' };
+const BS_CREDS = 'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300';
+const BS_THANKS = 'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.';
+const BS_SIG = { name: 'GERALD CHAN', title: 'President, Brilliance Steel Corporation' };
 
 // ── source extraction ────────────────────────────────────────────────────────────────────────────────
 function sliceBetween(src, from, to, label) {
@@ -135,7 +135,7 @@ describe('js/config.js — BRAND.companies (the builder\'s company map, mirrored
 
   it('BS (the third company) is untouched: Pasig address, phone only, NO e-mail — none is invented (ruling #11 stays open for it)', () => {
     assert.deepEqual(BRAND.companies.BS, {
-      name: 'BRILLIANT STEEL CORPORATION', sub: '', addr: 'Pasig City, Metro Manila', contact: '09276836300',
+      name: 'BRILLIANCE STEEL CORPORATION', sub: '', addr: 'Pasig City, Metro Manila', contact: '09276836300',
       sig: BS_SIG, code: 'BS', thanks: BS_THANKS, creds: BS_CREDS,
     });
     assert.ok(!JSON.stringify(BRAND.companies.BS).includes('@'), 'Brilliant Steel gained an e-mail address');
@@ -154,7 +154,7 @@ describe('js/screens/sales.js — QUOTE_BRANDS (the brand strings the public quo
   }
 
   it('BS is untouched and has no e-mail', () => {
-    assert.deepEqual(QUOTE_BRANDS.BS, { name: 'BRILLIANT STEEL CORPORATION', sub: '', creds: BS_CREDS, thanks: BS_THANKS });
+    assert.deepEqual(QUOTE_BRANDS.BS, { name: 'BRILLIANCE STEEL CORPORATION', sub: '', creds: BS_CREDS, thanks: BS_THANKS });
     assert.ok(!JSON.stringify(QUOTE_BRANDS.BS).includes('@'), 'Brilliant Steel gained an e-mail address');
   });
 });
@@ -205,8 +205,8 @@ describe('quote-builder-v2.html — CO.BK / CO.BI (the builder\'s own copy; edit
   it('BS is untouched and has no e-mail', () => {
     const bs = builderCO().BS;
     assert.deepEqual(bs, {
-      name: 'BRILLIANT STEEL CORPORATION', sub: '', logo: '', addr: 'Pasig City, Metro Manila', contact: '09276836300',
-      sig: BS_SIG, nav: '<span>BRILLIANT</span> STEEL', code: 'BS', thanks: BS_THANKS, creds: BS_CREDS,
+      name: 'BRILLIANCE STEEL CORPORATION', sub: '', logo: '', addr: 'Pasig City, Metro Manila', contact: '09276836300',
+      sig: BS_SIG, nav: '<span>BRILLIANCE</span> STEEL', code: 'BS', thanks: BS_THANKS, creds: BS_CREDS,
     });
     assert.ok(!JSON.stringify(bs).includes('@'), 'Brilliant Steel gained an e-mail address');
   });

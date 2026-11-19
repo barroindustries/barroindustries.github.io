@@ -3,8 +3,9 @@
   "what": "GOLDEN money figures of the configurator engine: every product and every start pill, priced with the SYNTHETIC fixture (tests/fixtures/kc-prices.fixture.json). Made-up numbers, not real prices.",
   "how": "Generated once by running the UNTOUCHED D7 prototype engine (the 12 engine files of the D7 copy as they were on 2026-11-19 at 15:34, before Round 5) with the fixture swapped in for the prices; the generator script is kept outside the repository. Money is rounded to 2 decimals; unit is the whole-peso unit price; missing is the length of the missing list; listAdj is the list-price adjustment of a list-priced start.",
   "proves": "tests/kc-engine.test.mjs requires the live engine (price-free, KCRules arithmetic, minified bundle) to reproduce every entry below exactly: the price-stripping port changed no arithmetic.",
-  "round5": "The four start pills that owner Round 5 changed ON PURPOSE (salamander body 660 x 400 x 400 and its list row for both mountings, Q60; hot holding cabinet 600 mm electric with its heater, Q61 and the owner ruling after Round 5; dimsum steamer with 1 boiler now has a list row, Q63) cannot come from the D7 reference. Each carries d7 (what the untouched D7 engine gave: it must now be different) and live (the figure of the live engine, pinned here to catch a regression: it is NOT a D7 figure). The live figures are checked independently by the hand-worked arithmetic in tests/kc-engine.test.mjs, which works them out line by line from the fixture.",
-  "a1": "Addendum 1 A1: every configured product with a Standard Price List code now sells from the list (list price of the base model + the per-metre length rate + what the options add by formula). The D7 reference has no such rule, so for these start pills the entry under products keeps ONLY the formula figures (M, projectCost, selling, priced, missing), which are exactly D7's because the formula did not change, and the unit comes from a1: d7Unit is what D7 gave (the formula price), code the list code, stdLen the standard length in mm (null: none), lengthAdj the per-metre length adjustment, listAdj the adjustment of the formula selling price, unit the list-based unit (pinned against regression: it is NOT a D7 figure). tests/kc-engine.test.mjs works each of them out by hand from the fixture rows."
+  "round5": "The four start pills that owner Round 5 changed ON PURPOSE (salamander body 660 x 400 x 400 and its list row for both mountings, Q60; hot holding cabinet electric with its heater, Q61 and the owner ruling after Round 5 (its size moved again with Addendum 2 B3: 650 x 750 x 1700 mm, full height: the live figure below is that build); dimsum steamer with 1 boiler now has a list row, Q63) cannot come from the D7 reference. Each carries d7 (what the untouched D7 engine gave: it must now be different) and live (the figure of the live engine, pinned here to catch a regression: it is NOT a D7 figure). The live figures are checked independently by the hand-worked arithmetic in tests/kc-engine.test.mjs, which works them out line by line from the fixture.",
+  "a1": "Addendum 1 A1: every configured product with a Standard Price List code now sells from the list (list price of the base model + the per-metre length rate + what the options add by formula). The D7 reference has no such rule, so for these start pills the entry under products keeps ONLY the formula figures (M, projectCost, selling, priced, missing), which are exactly D7's because the formula did not change, and the unit comes from a1: d7Unit is what D7 gave (the formula price), code the list code, stdLen the standard length in mm (null: none), lengthAdj the per-metre length adjustment, listAdj the adjustment of the formula selling price, unit the list-based unit (pinned against regression: it is NOT a D7 figure). tests/kc-engine.test.mjs works each of them out by hand from the fixture rows.",
+  "addendum2": "The start pill that owner Addendum 2 B9 changed ON PURPOSE: the default sink package (2-Bowl Dishwashing Sink) now starts with the 15 GPM grease trap pre-selected, the size that carries the Recommended tag, so its figures are no longer the D7 reference ones. d7 holds what the untouched D7 engine gave (the formula figures and the formula unit), live the figure of the live engine, pinned against regression. tests/kc-engine.test.mjs works the live figure out by hand: the materials are the old ones plus one 15 GPM grease trap, the list adjustment is the old one, and the unit is the list-based unit."
  },
  "products": {
   "prep": {
@@ -66,13 +67,6 @@
    }
   },
   "sink": {
-   "dish2": {
-    "M": 4979.05,
-    "projectCost": 8215.43,
-    "selling": 16430.86,
-    "priced": true,
-    "missing": 0
-   },
    "hand": {
     "M": 3055.77,
     "projectCost": 5042.03,
@@ -534,13 +528,34 @@
     "listAdj": 21726.84
    },
    "live": {
-    "M": 4278.81,
-    "projectCost": 8001.37,
-    "selling": 16002.73,
+    "M": 6185.05,
+    "projectCost": 11566.04,
+    "selling": 23132.08,
     "unit": 56000,
     "priced": true,
     "missing": 0,
-    "listAdj": 39997.27
+    "listAdj": 32867.92
+   }
+  }
+ },
+ "addendum2": {
+  "sink/dish2": {
+   "d7": {
+    "M": 4979.05,
+    "projectCost": 8215.43,
+    "selling": 16430.86,
+    "unit": 16430,
+    "priced": true,
+    "missing": 0
+   },
+   "live": {
+    "M": 5664.05,
+    "projectCost": 9345.68,
+    "selling": 18691.36,
+    "unit": 101410,
+    "priced": true,
+    "missing": 0,
+    "listAdj": 82720.36
    }
   }
  },
@@ -560,14 +575,6 @@
    "lengthAdj": 22,
    "listAdj": 53420.18,
    "unit": 60120
-  },
-  "sink/dish2": {
-   "d7Unit": 16430,
-   "code": "WS-SK2-1200",
-   "stdLen": 1200,
-   "lengthAdj": 0,
-   "listAdj": 82720.36,
-   "unit": 99150
   },
   "sink/hand": {
    "d7Unit": 10080,

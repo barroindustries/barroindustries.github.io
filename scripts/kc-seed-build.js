@@ -31,7 +31,7 @@
  *               the overrides declare as new (so the document is complete even when materials.js does not have the row yet).
  *               source: 'Sample' (the prototype's made-up price), 'Kingsway PO + 10%', 'Set by Neil' (blowers), 'Manual'.
  *   listPrices  { effective, rows: { <code>: { code, price, perMetre | null, status, label, std } } }, the kc_config/list_prices document. status is one of Data, Smoothed,
- *               Estimate, After review, Supplier price (staff only, never printed); label is the product name and std its standard size and spec.
+ *               Estimate, After review, Supplier price, Approved (staff only, never printed); label is the product name and std its standard size and spec.
  *   products    [ { sku, title, category, unit, formulaType, basePrice, measurement?, specifications } ], written to products/{sku}.
  *               measurement uses W / D / H in millimetres, the keys the Product Database page and the quote builder read.
  *
@@ -52,7 +52,7 @@ const vm = require('vm');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SOURCES = ['Sample', 'Kingsway PO + 10%', 'Set by Neil', 'Manual'];
-const STATUSES = ['Data', 'Smoothed', 'Estimate', 'After review', 'Supplier price'];       // the price status of a list row: staff only, never printed
+const STATUSES = ['Data', 'Smoothed', 'Estimate', 'After review', 'Supplier price', 'Approved'];       // the price status of a list row: staff only, never printed ('Approved' = the owner confirmed the price: Addendum 2 B6)
 const KEY_RE = /^[a-z0-9_]{1,40}$/;        // the kc_materials rule: the doc id is the key
 const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,40}$/;
 const SKU_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,60}$/;

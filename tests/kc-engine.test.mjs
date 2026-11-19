@@ -4,13 +4,13 @@
 // The engine carries no price. Every figure here comes from the SYNTHETIC fixture (tests/fixtures/kc-prices.fixture.json: made-up numbers) applied by tests/helpers/kc-vm.mjs.
 //
 // WHAT IT PINS
-//   1. GOLDEN      With the fixture applied, every product and every start pill gives exactly the figures of tests/fixtures/kc-golden.json. 51 of the 55 start pills come from the UNTOUCHED D7
-//                  reference engine run with the same fixture: stripping the prices and moving the arithmetic into KCRules changed no number (for the 16 that Addendum 1 A1 moved to the
-//                  Standard Price List only the formula figures are D7's; their list-based unit is pinned under a1 and worked out by hand in tests/kc-list.test.mjs). The other four are the start pills that Round 5
-//                  changed on purpose (salamander wall and cooktop, hot holding cabinet, dimsum 1 boiler): the golden holds their D7 figure (which must now differ) and the live figure
-//                  (pinned against regression), and the hand-worked arithmetic below works the live figures out independently, line by line.
-//   2. ROUND 5     Q60 salamander 660 x 400 x 400, one list row for both mountings, one igniter per burner; Q61 hot holding cabinet 600 mm electric, no gas part, one heater (the materials row
-//                  `heater`, owner ruling after Round 5); Q62 the list codes are the real
+//   1. GOLDEN      With the fixture applied, every product and every start pill gives exactly the figures of tests/fixtures/kc-golden.json. 50 of the 55 start pills come from the UNTOUCHED D7
+//                  reference engine run with the same fixture: stripping the prices and moving the arithmetic into KCRules changed no number (for the 15 that Addendum 1 A1 moved to the
+//                  Standard Price List only the formula figures are D7's; their list-based unit is pinned under a1 and worked out by hand in tests/kc-list.test.mjs). The other five are the start pills that the
+//                  owner changed on purpose (salamander wall and cooktop, hot holding cabinet, dimsum 1 boiler in Round 5; the default sink package in Addendum 2 B9): the golden holds their D7 figure (which must now
+//                  differ) and the live figure (pinned against regression), and the hand-worked arithmetic below works the live figures out independently, line by line.
+//   2. ROUND 5     Q60 salamander 660 x 400 x 400, one list row for both mountings, one igniter per burner; Q61 hot holding cabinet electric, no gas part, one heater (the materials row
+//                  `heater`, owner ruling after Round 5), and its size 650 x 750 x 1700 mm, full height, 2 doors, 3 shelves (Addendum 2 B3); Q62 the list codes are the real
 //                  codes (27 of them), no "provisional" wording; Q63 CK-DS-1; the ten Kingsway rows (no price). Each figure is worked out in the test from the fixture, line by line.
 //   3. NO PRICES   Without prices every product is unpriced (never a zero price reported as priced); a list code with no number prices by formula; no corner charge makes an L / U station
 //                  "priced after review" with its own reason; a partly loaded price list is not priced.
@@ -20,7 +20,9 @@
 //   6. PENDING REVIEW KC.pendingReview(): the fabrication placeholders under "Pending Rene's review" on the Pricing settings screen (words and sizes only, read live from KC.LIB).
 //
 // Mutation-tested in scratch copies (never the shared tree). Each of these must fail here: KC.price treating a null price as zero and reporting priced:true; the list adjustment added to the
-// project cost; plus every KCRules mutant (they reach the engine through the golden file). Run with: node --test tests/*.test.mjs
+// project cost; plus every KCRules mutant (they reach the engine through the golden file). Addendum 2 B3 (the hot holding cabinet) and B9 (the default sink package), each re-bundled from a mutated private source and
+// killed: the cabinet 600 wide again, 850 high again, with the old 70 cm body, with one door, drawn as the old cabinet, or with the old code; the default sink package without its 15 GPM trap.
+// Run with: node --test tests/*.test.mjs
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -48,7 +50,7 @@ let priced, bare;
 before(() => { priced = loadPricedEngine(); bare = loadEngine(); });
 
 describe('the golden file: the port changed no arithmetic', () => {
-  it('every product and start pill that Round 5 did not touch gives exactly the D7 figures (the 16 that moved to the Standard Price List: the D7 formula figures)', () => {
+  it('every product and start pill that the owner did not change on purpose gives exactly the D7 figures (the 15 that moved to the Standard Price List: the D7 formula figures)', () => {
     const live = snapshotStarts(priced.KC);
     let n = 0, onList = 0;
     for (const [id, starts] of Object.entries(GOLDEN.products)) {
@@ -61,12 +63,12 @@ describe('the golden file: the port changed no arithmetic', () => {
         assert.deepEqual(formula, want, `${id} / ${st}: the formula figures are D7's`);
       }
     }
-    assert.equal(n, 51, 'the golden has 51 start pills');
-    assert.equal(onList, 16, '16 of them sell from the Standard Price List (Addendum 1 A1)');
+    assert.equal(n, 50, 'the golden has 50 start pills that are still the D7 reference figures');
+    assert.equal(onList, 15, '15 of them sell from the Standard Price List (Addendum 1 A1)');
   });
-  it('the 16 start pills that sell from the Standard Price List give their pinned unit, which is not the D7 formula unit', () => {
+  it('the 15 start pills that sell from the Standard Price List give their pinned unit, which is not the D7 formula unit (the sixteenth, the default sink package, is pinned under addendum2)', () => {
     const KC = priced.KC;
-    assert.deepEqual(Object.keys(GOLDEN.a1).sort(), ['cabinet/cabinet', 'caddy/std', 'dishrack/std', 'hood/wall', 'prep/basic', 'prep/blank', 'rack/rack', 'sink/blank', 'sink/dish2', 'sink/hand',
+    assert.deepEqual(Object.keys(GOLDEN.a1).sort(), ['cabinet/cabinet', 'caddy/std', 'dishrack/std', 'hood/wall', 'prep/basic', 'prep/blank', 'rack/rack', 'sink/blank', 'sink/hand',
       'sink/pot', 'trolley/dish', 'trolley/food', 'trolley/luggage', 'trolley/tray', 'trolley/utility']);
     for (const [key, pin] of Object.entries(GOLDEN.a1)) {
       const [id, st] = key.split('/'), r = KC.price(id, KC.products[id].startCfg(st));
@@ -83,7 +85,7 @@ describe('the golden file: the port changed no arithmetic', () => {
     const live = snapshotStarts(priced.KC);
     const want = {};
     for (const [id, starts] of Object.entries(GOLDEN.products)) want[id] = Object.keys(starts);
-    for (const key of Object.keys(GOLDEN.round5)) { const [id, st] = key.split('/'); (want[id] = want[id] || []).push(st); }
+    for (const key of Object.keys(GOLDEN.round5).concat(Object.keys(GOLDEN.addendum2))) { const [id, st] = key.split('/'); (want[id] = want[id] || []).push(st); }
     const got = {};
     for (const [id, starts] of Object.entries(live)) got[id] = Object.keys(starts);
     const norm = o => Object.fromEntries(Object.keys(o).sort().map(k => [k, [...o[k]].sort()]));
@@ -109,6 +111,27 @@ describe('the golden file: the port changed no arithmetic', () => {
     assert.equal(GOLDEN.round5['chef_dimsum/1'].d7.listAdj, undefined, 'D7 had no list price for 1 boiler');
     assert.notEqual(GOLDEN.round5['chef_dimsum/1'].live.listAdj, undefined, 'it has one now (Q63)');
     assert.equal(GOLDEN.round5['chef_dimsum/1'].live.M, GOLDEN.round5['chef_dimsum/1'].d7.M, 'the dimsum steamer\'s materials did not move: only its price source did');
+  });
+  it('the default sink package starts with the 15 GPM grease trap (Addendum 2 B9): its figures are the old ones plus one trap, worked out here from the fixture, and are not the D7 figures', () => {
+    const KC = priced.KC, live = snapshotStarts(KC), pin = GOLDEN.addendum2['sink/dish2'];
+    assert.deepEqual(Object.keys(GOLDEN.addendum2), ['sink/dish2']);
+    assert.deepEqual(live.sink.dish2, pin.live, 'the pinned live figure');
+    assert.notDeepEqual(pin.live, pin.d7, 'moved on purpose');
+    const c = KC.products.sink.startCfg('dish2');
+    assert.equal(c.trap, 15, 'the 15 GPM trap is pre-selected');
+    const gt = price('gt15');
+    close(pin.live.M - pin.d7.M, gt, 'materials: the D7 figure plus one 15 GPM grease trap');
+    close(pin.live.projectCost - pin.d7.projectCost, gt * 1.5 * 1.1, 'project cost = materials x 1.5 x 1.1 (the sink is Medium: labor 50 %, misc 10 %)');
+    close(pin.live.selling - pin.d7.selling, gt * 1.5 * 1.1 * 2, 'selling = project cost x markup 2');
+    // the list-based unit: the code of the double sink at 1200 mm, its list price less the formula price of the unchanged base model, plus the formula price of the cfg
+    const r = KC.price('sink', c), model = KC.stdModels('sink').find(m => m.code === 'WS-SK2-1200');
+    const baseSelling = KC.price('sink', model.cfg(), { noList: true }).selling;
+    assert.equal(r.list.code, 'WS-SK2-1200');
+    close(r.list.adj, listPriceOf('WS-SK2-1200') - baseSelling, 'the list adjustment is the base model\'s: the trap is an option, it does not change it');
+    assert.equal(r.unit, round10(listPriceOf('WS-SK2-1200') - baseSelling + r.selling), 'unit = list + what the options add (the trap included), nearest 10');
+    const before = round10(listPriceOf('WS-SK2-1200') - baseSelling + pin.d7.selling);                         // the starting price without the trap (what the package gave before B9)
+    assert.ok(r.unit > before, 'the starting price is dearer: the owner accepted it');
+    assert.ok(Math.abs(r.unit - before - gt * 1.5 * 1.1 * 2) <= 10, 'by the trap\'s selling price, to the nearest 10');
   });
   it('a list-priced start keeps the formula project cost: the adjustment is selling price only (the floor and the lead time read true costs)', () => {
     const KC = priced.KC;
@@ -321,17 +344,17 @@ describe('Round 5, Q60: the salamander is 660 x 400 x 400 mm, one list row (CK-S
   });
 });
 
-describe('Round 5, Q61: the hot holding cabinet is 600 mm and electric; the gas build is gone', () => {
-  const W = 60, D = 75, LEGH = 85;
-  const a = 2 * D * 70 + W * 70;
+describe('Round 5, Q61 and Addendum 2 B3: the hot holding cabinet is electric and 650 x 750 x 1700 mm, full height, 2 doors, 3 shelves; the gas build is gone', () => {
+  const W = 65, D = 75, H = 170, LEG = 15, BODY = H - LEG;                                  // cm: the body (and the doors) run the full height less the 15 cm legs
+  const a = 2 * D * BODY + W * BODY;
   const expectedM = () => price('sh12') * sheets((W + 7.6) * (D + 7.6))                     // top
     + price('sh08') * sheets(2 * a) + price('insul') * (a / 10000 / 18)                     // double-wall body with foil insulation
     + price('sh10') * sheets(3 * (W + 4) * (D + 4))                                         // 3 shelves
-    + price('sh08') * sheets(1 * (W / 1 + 4) * (70 + 2)) + 2 * price('hinge') + price('bar') * tubes(25 * 1)   // ONE door (60 cm per door): leaf, 2 hinges, a handle bar
+    + price('sh08') * sheets(2 * (W / 2 + 4) * (BODY + 2)) + 6 * price('hinge') + price('bar') * tubes(25 * 2)   // TWO doors (60 cm per door): the leaves, 3 hinges a door (a door over 150 cm), a handle bar each
     + price('heater')                                                                       // ONE electric heating element per cabinet
-    + price('t15') * tubes(4 * LEGH) + 4 * price('bullet');                                 // legs and feet
+    + price('t15') * tubes(4 * H) + 4 * price('bullet');                                    // legs and feet
   const start = KC => KC.products.chef_hold.startCfg('std');
-  it('the materials are worked out line by line: one door, one heater, no burner, no thermostat valve, no ball valve, no pilot lighter', () => {
+  it('the materials are worked out line by line: two doors, one heater, no burner, no thermostat valve, no ball valve, no pilot lighter', () => {
     const KC = priced.KC, r = KC.price('chef_hold', start(KC));
     close(r.M, expectedM(), 'hot holding cabinet materials');
     ['gburner', 'tstat', 'bvalve', 'pilot', 'hpburner', 'irburner', 'spburner'].forEach(k => assert.equal(r.lines.filter(l => l.k === k).length, 0, `no ${k} line`));
@@ -341,12 +364,34 @@ describe('Round 5, Q61: the hot holding cabinet is 600 mm and electric; the gas 
     assert.equal(r.unit, FX.listPrices['CK-HH']);
     assert.equal(r.list.code, 'CK-HH');
   });
-  it('it is 600 mm wide in the print block and the build detail, with one door', () => {
+  it('it is 650 mm wide, 750 deep and 1700 high in the print block and the build detail, full height, with two doors and 3 shelves (Addendum 2 B3)', () => {
     const KC = priced.KC, D_ = KC.products.chef_hold, c = start(KC);
-    assert.equal(D_.lineParts(c).dims, '600mmL x 750mmW x 850mmH');
-    assert.equal(D_.lineParts(c).sub, '(1 Door, 3 Shelves)');
-    assert.match(D_.starts[0].line, /^600mm wide, electric, 1 door/);
-    assert.ok(D_.describe(c).some(r => r[0] === 'Doors' && /^1 hinged door/.test(r[1])));
+    assert.equal(D_.lineParts(c).dims, '650mmL x 750mmW x 1700mmH');
+    assert.equal(D_.lineParts(c).sub, '(2 Doors, 3 Shelves)');
+    assert.match(D_.starts[0].line, /^650mm wide, 1700mm tall, electric, 2 doors, 3 shelves$/);
+    assert.match(D_.starts[0].tip || '', /650 .* 750 .* 1700 mm, full height, electric/);
+    assert.ok(D_.describe(c).some(r => r[0] === 'Doors' && /^2 hinged doors/.test(r[1])));
+    assert.ok(D_.describe(c).some(r => r[0] === 'Body' && /65 × 75 × 155 cm/.test(r[1])), 'the body is the full height less the legs');
+    assert.ok(D_.describe(c).some(r => r[0] === 'Shelves' && /^3 shelves/.test(r[1])));
+    const text = [D_.shortSpecs(c), D_.lineParts(c).dims, D_.lineParts(c).sub, D_.starts[0].line, D_.starts[0].tip].join(' ');
+    assert.doesNotMatch(text, /\b600\s?mm|600mm|850\s?mm|850mmH|\b1 door\b/, 'nothing of the old size is left in the words');
+    assert.equal(KC.CHEF_LIST.filter(r => r.items.includes('hold')).length, 1);
+    assert.equal(KC.CHEF_LIST.find(r => r.items.includes('hold')).code, 'CK-HH', 'the code stays');
+  });
+  it('the drawing shows the real size: 65 cm wide, 75 deep, full height (a tall front view), two doors', () => {
+    const KC = priced.KC, svg = KC.products.chef_hold.svg(start(KC), {});
+    assert.ok(svg.includes('65 cm') && svg.includes('65 × 75 cm'), 'the width and the footprint are printed in cm');
+    assert.doesNotMatch(svg, /\b60 cm|\b60 × 75/, 'not the old 60 cm');
+    const vb = /viewBox="0 0 ([0-9.]+) ([0-9.]+)"/.exec(svg);
+    assert.ok(vb && +vb[2] > 170, 'the viewBox holds the 170 cm front view and the top view under it: ' + (vb && vb[0]));
+    const doors = (svg.match(/opacity="0\.85"/g) || []).length;
+    assert.equal(doors, 2, 'two door panels in the front view');
+  });
+  it('its list row and its price do not move with its size: CK-HH at the same list price, the adjustment absorbs the build', () => {
+    const KC = priced.KC, r = KC.price('chef_hold', start(KC));
+    assert.equal(r.unit, listPriceOf('CK-HH')); assert.equal(r.list.code, 'CK-HH');
+    close(r.list.adj, listPriceOf('CK-HH') - r.selling, 'adjustment = list - formula selling price');
+    assert.equal(KC.listModels().filter(m => m.code === 'CK-HH').length, 1);
   });
   it('nothing the customer reads says gas: the Specs, the Includes, the Not included, the standard sentence', () => {
     const KC = priced.KC, D_ = KC.products.chef_hold, c = start(KC);

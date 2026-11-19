@@ -101,6 +101,7 @@ const SET = KC.SET;                                            // settings: muta
 .kc-adm-st-est{background:#fff3d6;color:#8a5a00;border-color:#f0cf95;}
 .kc-adm-st-review{background:#fdecea;color:#8a1c12;border-color:#f1b5ae;}
 .kc-adm-st-supp{background:#f0ebf8;color:#4a2f7a;border-color:#cbbbe6;}
+.kc-adm-st-appr{background:#e2f3f0;color:#0d5c52;border-color:#9ccfc7;}
 .kc-adm-st-none{background:#f3f5f8;color:var(--gray-dark);border-color:var(--gray-mid);}
 button.kc-adm-stbtn{font-family:inherit;cursor:pointer;min-height:26px;}
 button.kc-adm-stbtn.kc-adm-on{box-shadow:0 0 0 2px var(--dark-blue);}
@@ -408,7 +409,8 @@ async function commitCorner(n){
 const LINES = [['CK','Cooking'],['GR','Grilling'],['BK','Bakery'],['PS','Prep and storage'],['WS','Washing'],['VN','Ventilation']];
 const lineOf = code => { const hit = LINES.find(l => l[0]===String(code).split('-')[0]); return hit ? hit[1] : 'Other'; };
 const STATUS = [['Data','data','From our own past quotes.'],['Smoothed','smooth','Adjusted between neighbouring sizes so a longer item never costs less.'],['Estimate','est','A judgement: there is no quote history for it.'],
-  ['After review','review','Not priced from data yet: confirm it before relying on it.'],['Supplier price','supp','A bought-in unit: supplier cost plus markup.']];
+  ['After review','review','Not priced from data yet: confirm it before relying on it.'],['Supplier price','supp','A bought-in unit: supplier cost plus markup.'],
+  ['Approved','appr','The owner has confirmed this price.']];
 const statusClass = st => (STATUS.find(x => x[0]===st) || [,'none'])[1];
 const naturalCmp = (a, b) => String(a).localeCompare(String(b), undefined, { numeric:true });
 let LPDOC = { rows:null, effective:'', read:false, failed:false };            // the document as read; KC.LISTP is the engine's copy

@@ -60,7 +60,7 @@
     return rows;
   }
   F.reviewRows = reviewRows;
-  /* "N line(s) need review: #3 Title (reason), #5 Title." and then each reason that is a whole sentence, once ("Blower price to be confirmed by Neil.  Ducting is priced per job; check before sending.") */
+  /* "N line(s) need review: #3 Title (reason), #5 Title." and then each reason that is a whole sentence, once ("Ducting is priced per job; check before sending.") */
   F.reviewReason = function () {
     var rows = reviewRows();
     if (!rows.length) return '';
@@ -79,10 +79,8 @@
     if (!KC || !KC.can || !KC.can('review')) return;
     var rows = reviewRows();
     if (!rows.length) return;
-    var blower = D7.adapter && D7.adapter.BLOWER_REASON, isPres = D7.role() === 'president';
     rows.forEach(function (r) {
       var it = items[r.idx];
-      if (blower && !isPres && r.reasons.indexOf(blower) >= 0) return;   // A4: only the President clears a line that holds a blower
       D7.h('adapter.markReviewed', r.idx, true, true);             // quiet: one save and one redraw for all of them
       if (it && !it.reviewed) { it.reviewed = who() || true; it.reviewedAt = nowIso(); }      // the adapter is optional: the flag is the contract
     });

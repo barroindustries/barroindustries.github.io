@@ -9,7 +9,7 @@
                 (the builder calls these hooks only when d7On() is true).
 
    HOOKS        (D7.h('doc.<name>', ...) in quote-builder.html; a hook that throws is turned into '' by D7.h)
-     parts(item)                    -> { material, use, title, sub, dims, dimsLabel, specs, notes[], includes[], excludes[], sep }   all PLAIN text, never HTML
+     parts(item)                    -> { code, material, use, title, sub, dims, dimsLabel, specs, notes[], includes[], excludes[], sep }   all PLAIN text, never HTML
      blockHtml(parts, {print})      -> the D5 block, HTML.  Includes / Not included are part of the Notes row unless {print:false}.
      lines(parts, {print})          -> the same block as an array of plain-text lines (for the Checks screen and the approval view)
      printBlock(item, idx, {view})  -> the block for the .sheet-slot of EVERY D7 line (print and the Client preview).  Also repaints that row's screen block.
@@ -31,6 +31,9 @@
      kc product line   item.doc, the snapshot the adapter stored (so a filed quote prints the same after a product file changes); when it is missing
                        (a quote stored before the adapter, or the adapter not loaded) it is built here from KC.products[kind] the way KC.descBlock does.
                        The line note (item.notes) goes first in Notes, then the product's forced notes, then Includes / Not included.
+     THE ITEM CODE     (Addendum 2 B2) the first row of the block, small grey text, no column of its own: the price-list code of the line (CK-HP-4, PS-PT-1200 ...).  A kc product line takes it from its snapshot (item.doc.code,
+                       made by the adapter; a snapshot made before the field existed gets it from the configuration), a catalogue line from its SKU when that SKU is a Standard Price List code (PS- WS- CK- GR- BK- VN-);
+                       a line with no code (the custom item, the station, ventilation, an old catalogue SKU) prints nothing extra.  This file only runs for KC quotes (d7On()): Brilliance Steel and legacy quotes print as before.
      kc custom item    material = the one the description names, else STAINLESS STEEL 304; title cfg.name; dims cfg.dims; specs cfg.desc; the Details editor's
                        finish / specLines / includes / excludes are added like any other line.
      every other line  material = an extra row (Details editor) labelled "Material", else the Material row of item.specs, else item.material, else STAINLESS STEEL 304
@@ -108,7 +111,20 @@
   }
 
   /* ---------- parts: the text of one line, as data ---------- */
-  function emptyParts() { return { material: '', use: '', title: '', sub: '', dims: '', dimsLabel: 'Dimensions', specs: '', notes: [], includes: [], excludes: [], sep: '; ' }; }
+  function emptyParts() { return { code: '', material: '', use: '', title: '', sub: '', dims: '', dimsLabel: 'Dimensions', specs: '', notes: [], includes: [], excludes: [], sep: '; ' }; }
+  /* the item code (Addendum 2 B2): a few letters, then hyphen-separated letters or digits (CK-HP-4, PS-PT-1200, CK-ST-4-OV), so nothing odd from a hand-made file is ever drawn; '' = no code.  A catalogue SKU counts only
+     when it is a Standard Price List code (the line codes of the list: PS- WS- CK- GR- BK- VN-): the older catalogue SKUs (PW-001, CE-004, GL-001 ...) are not item codes and print nothing. */
+  const CODE_OK = /^[A-Za-z]{1,6}(?:-[A-Za-z0-9]{1,12}){1,5}$/, LIST_CODE = /^(?:PS|WS|CK|GR|BK|VN)(?:-[A-Za-z0-9]{1,12}){1,5}$/;
+  const cleanCode = v => { const t = trim(v); return CODE_OK.test(t) ? t : ''; };
+  const skuCode = v => { const t = trim(v); return LIST_CODE.test(t) ? t : ''; };
+  /* the code a kc product line is built from, worked out from its configuration (the adapter stores it in the snapshot; this is for a snapshot that has none) */
+  function kcCodeOf(item) {
+    try {
+      if (!item || !item.kcKind || item.kcKind === 'custom' || !window.KC || typeof KC.baseModel !== 'function' || !isObj(item.cfg)) return '';
+      const m = KC.baseModel(item.kcKind, item.cfg);
+      return m && typeof m.code === 'string' ? cleanCode(m.code) : '';
+    } catch (e) { return ''; }
+  }
 
   /* a line that has no product file behind it: a catalogue line, a website family line, an old 🧮 custom line, the kc custom item.
      o.title / o.dims / o.desc override the line's own name / dims / spec text (the kc custom item reads them from its cfg). */
@@ -128,6 +144,7 @@
     if (typeof item.finish === 'string' && has(FINISH(), item.finish)) { pieces.push(FINISH()[item.finish]); generated = true; }
     extra.forEach(r => { if (r !== matExtra) { pieces.push(r.label ? r.label + ': ' + r.value : r.value); generated = true; } });
     const p = emptyParts();
+    p.code = skuCode(item.id);                                      // a catalogue line whose SKU is a Standard Price List code (GR-LR-900, CK-TP-1200 ...); the custom item's id is 'CUSTOM'
     p.material = material;
     p.use = trim(item.use) || 'Commercial';
     p.title = trim(o.title != null ? o.title : item.name);
@@ -161,7 +178,7 @@
       const cu = (c.custom || []).map(x => trim(x && x.text).replace(/[.\s]+$/, '')).filter(Boolean).map(t => 'Custom: ' + t + '.').join(' ');
       if (cu) specs += (specs ? ' ' : '') + cu;
     }
-    return { material: L.material, use: L.use, title: L.title, sub: L.sub, dims: L.dims, specs,
+    return { code: kcCodeOf(item), material: L.material, use: L.use, title: L.title, sub: L.sub, dims: L.dims, specs,
       notes: typeof D.notes === 'function' ? arr(D.notes(c)) : [], includes: arr(ix.i), excludes: arr(ix.x) };
   }
 
@@ -169,6 +186,7 @@
     const d = isObj(item.doc) ? item.doc : deriveKc(item);
     if (!d) return null;
     const p = emptyParts();
+    p.code = has(d, 'code') ? cleanCode(d.code) : kcCodeOf(item);     // a snapshot that says nothing about the code (made before the field existed) gets it from the configuration; one that says '' has none
     p.material = trim(d.material);
     p.use = trim(d.use);
     p.title = trim(d.title) || trim(item.name);
@@ -197,6 +215,7 @@
   function rowsOf(p, o) {
     const withInc = !(o && o.print === false);
     const out = [];
+    if (p.code) out.push({ cls: 'kc-d-code', text: p.code });                  // Addendum 2 B2: the item code leads the block, small and grey, above the material and the title; no column of its own
     const head = [p.material, p.use].filter(Boolean).join(' | ').toUpperCase();
     if (head) out.push({ cls: 'kc-d-mat', text: head });
     if (p.title) out.push({ cls: 'kc-d-title', text: p.title });
@@ -391,7 +410,8 @@
      asks d7on() first, so Brilliance Steel and a legacy quote keep the original letterhead, the original buttons and no extra DOM at all.
        Header   top left the horizontal Barro Industries logo on white with the company lines UNDER it; top right QUOTATION, the quote number exactly as it is (its R suffix is the revision: there is no
                 separate "Rev." label) and the date; on a Barro Kitchens quote only, the small Barro Kitchens company tile (about 40 px high) sits above QUOTATION.  Barro Industries quotes have no tile.
-       Signatures  today's signature row stays (Conforme, Reviewed and Approved by) with its dividers; one box is added to it, Prepared by (the salesperson).  The thank-you and company footer stays as it is.
+       Signatures  today's signature row stays (Conforme, Reviewed and Approved by) with its dividers; one box is added to it, Prepared by (the salesperson), and the order is Prepared by, Approved by, Client conforme
+                (the client's box moves to the end: Addendum 1 A5, QA D7).  The thank-you and company footer stays as it is.
        Download PDF  writes a FILE named "<quote number>.pdf" through window.FormsPdf (js/forms-pdf.js, the form engine of the Sales flow): downloadPdf() lays the document out on explicit A4 page containers
                 (794 x 1123 CSS px, every line item whole on one page, the signatures with the last terms) and hands the container to FormsPdf.download(container, fileName).  Without the engine, or when it
                 fails, the print dialog opens instead and a toast says so in plain words.
@@ -459,27 +479,44 @@
     return headerHtml({ no: o.docNumber != null && trim(o.docNumber) ? o.docNumber : (o.no != null ? o.no : val('quoteNo')), date: val('quoteDate') || trim(o.date), tags: o.extraMeta != null ? o.extraMeta : o.tags, co: o.co });
   }
 
-  /* ---------- the signature row: today's two boxes stay exactly as the page draws them; Prepared by (the salesperson) is added as the first box, in the same look ---------- */
+  /* ---------- the signature row: today's two boxes stay exactly as the page draws them; Prepared by (the salesperson) is added as the first box, in the same look; and the order is the owner's (A5, QA D7):
+     Prepared by, Approved by ("Reviewed & Approved by", today's right-hand box), then the client's Conforme last.  The page draws Conforme first; a KC quote moves that one box to the end, and puts it back when the
+     quote stops being a KC one, so a legacy quote and Brilliance Steel print exactly the row the page made. ---------- */
   function prepBoxHtml(name) {
     return '<div class="sig-box d7-sig-prep"><div class="sig-role">' + esc(FS.prepared) + '</div><div style="height:34px;"></div>'
       + '<div class="sig-name">' + esc(name) + '</div><small>' + esc(FS.preparedRole) + '</small></div>';
+  }
+  /* the client's box ("Conforme — Accepted by Client"): the child of the row that holds #sigClientName; null when it cannot be told (then the order is left as the page made it) */
+  function clientBoxOf(row) {
+    let el = byId('sigClientName');
+    while (el && el.parentNode && el.parentNode !== row) el = el.parentNode;
+    return el && el.parentNode === row ? el : null;
   }
   function syncSigs(on) {                         // true when the row changed (the Client preview is a clone made before this ran)
     const row = document.querySelector('#termsSection > .sig-row');
     if (!row) return false;
     let box = null;
     for (let i = 0; i < row.children.length; i++) { if (row.children[i].classList.contains('d7-sig-prep')) { box = row.children[i]; break; } }
-    if (!on) { if (box) { box.remove(); row.classList.remove('d7-sig3'); return true; } return false; }
+    const cb = clientBoxOf(row);
+    if (!on) {
+      if (!box) return false;
+      box.remove(); row.classList.remove('d7-sig3');
+      if (cb && row.children[0] !== cb) row.insertBefore(cb, row.firstChild);                 // the page's own order again: Conforme first
+      return true;
+    }
     const name = val('salesperson');
+    let changed = false;
     if (box) {
       const nm = box.querySelector('.sig-name');
-      if (nm && nm.textContent !== name) { nm.textContent = name; return true; }
-      return false;
+      if (nm && nm.textContent !== name) { nm.textContent = name; changed = true; }
+    } else {
+      const t = document.createElement('template'); t.innerHTML = prepBoxHtml(name);
+      row.insertBefore(t.content.firstElementChild, row.firstChild);
+      row.classList.add('d7-sig3');
+      changed = true;
     }
-    const t = document.createElement('template'); t.innerHTML = prepBoxHtml(name);
-    row.insertBefore(t.content.firstElementChild, row.firstChild);
-    row.classList.add('d7-sig3');
-    return true;
+    if (cb && row.children[row.children.length - 1] !== cb) { row.appendChild(cb); changed = true; }   // Prepared by, Approved by, Client conforme
+    return changed;
   }
 
   /* ---------- the KC-only chrome: put in the page when the quote is a KC one, taken out when it is not ---------- */

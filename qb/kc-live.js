@@ -163,7 +163,7 @@
     if (r.exists) overlay(KC.SET, r.data, true);
     KC.FLOOR_MODE = (r.exists && r.data.floorMode === 'formula') ? 'formula' : 'list';
   }
-  /* a row of kc_config/list_prices (Addendum 1 A1): { code, price, perMetre | null, status, label, std } (status is one of Data, Smoothed, Estimate, After review, Supplier price: staff only, never printed), or a
+  /* a row of kc_config/list_prices (Addendum 1 A1): { code, price, perMetre | null, status, label, std } (status is one of Data, Smoothed, Estimate, After review, Supplier price, Approved: staff only, never printed), or a
      bare number (a document of the first format).  A row with no price above 0 is no row: that code has no list price and the formula price is used. */
   function listRowOf(v, code) {
     if (isNum(v)) return v > 0 ? v : null;
@@ -295,6 +295,17 @@
     return cleanCarry({ lastApprovedNet: a.lastApprovedNet, lastApprovedGrand: a.lastApprovedGrand, approvedAt: a.approvedAt, approvedBy: a.approvedBy, approvedByName: a.approvedByName,
       sourceColl: a.sourceColl || coll, sourceDocId: a.sourceDocId || id });
   }
+  /* The approver's name (QA D7): js/screens/approvals.js writes approvedBy (a uid) and no name, so the carry has none of its own unless the approver is the person signed in.  It is filled from the approver's
+     user record: one document get of users/<uid>, which any signed-in profile may do (firestore.rules: `allow get: if isAuth()`), so no rules change.  A record that cannot be read, or has no name, leaves the
+     name blank, as before; the carry is set first and never waits for the lookup or is refused for it. */
+  function profileName(p) { return isObj(p) ? str(p.name || p.displayName || p.fullName).trim() : ''; }
+  function withApproverName(c) {
+    if (!c || c.approvedByName || !c.approvedBy) return Promise.resolve(c);
+    return getDoc('users', c.approvedBy).then(function (r) {
+      var n = r.ok && r.exists ? profileName(r.data) : '';
+      return n ? Object.assign({}, c, { approvedByName: n }) : c;
+    }, function () { return c; });
+  }
   /* the typed costs of the sidecar go back into the lines' cfg, in memory only.  A row matches by kcId; with no kcId it matches by index; either way the NAME must still be the line's, so a stale row never lands on the
      wrong line (the same rule js/app.js graftQuoteCosts keeps).  Returns how many lines were grafted. */
   function graftTyped(sc) {
@@ -328,7 +339,10 @@
         var grafted = (sc.ok && sc.exists) ? graftTyped(sc.data) : 0;
         repriceAndDraw();                                                                         // the typed costs are in (or not): price the lines again and draw (spec 3.4)
         void grafted;
-        return true;
+        return withApproverName(c).then(function (named) {                                        // QA D7: the carry is in place already; the approver's name joins it when the one lookup answers (unless another load replaced the carry meanwhile)
+          if (named !== c && carry === c) carry = named;
+          return true;
+        });
       }).catch(function (err) { warn('afterLoad failed', err); return false; });
     } catch (err) { warn('afterLoad failed', err); return Promise.resolve(false); }
   };

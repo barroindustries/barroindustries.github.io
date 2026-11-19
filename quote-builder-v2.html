@@ -2120,7 +2120,7 @@ body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:nor
       <div class="d7-only" id="helpKcSection">
         <h4>Configurators</h4>
         <p>Add items has <strong>seven tabs</strong>: Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems. Each tab shows its <strong>configurators</strong> first, then the catalogue items. A configured line <strong>prices itself</strong> from the materials price list (materials + labor 30 / 50 / 70 % + 10 % misc, × 2, rounded to the nearest 10); a <strong>Chef Mode</strong> line starts from the Standard Product Price List and adds what its options cost by the same formula (it says <em>list price</em>). Type a price to override it, ↺ goes back, and a price below the standard shows a warning. <strong>Catalogue items</strong> keep their catalogue price. ➕ <strong>Add custom item</strong> opens a configurator too: pick the materials from the price list (every row shows its list price) and type the quantities; only the President types free costs, and the line always needs review. Amounts show centavos, and Quantity and unit share one column. The OH and MK dials are gone: the President can set <strong>one markup for the whole quote</strong>, and a discount stops at the project cost. Additional labor is priced at cost × that markup; delivery, installation and other at cost + 25 %. A new Barro Kitchens or Barro Industries quote starts at a 65 % down payment.</p>
-        <p>Every line prints in <strong>one format</strong>: material and use, the title, dimensions, specs, notes. The Photo column shows the photo of the line or its drawing, and the Workforce Copy carries the drawing and the build detail (no prices). A line that <strong>needs review</strong>, or a quote sold <strong>below its standard price</strong>, goes to the President: Verify &amp; File says why and, once you send it, shows a <strong>link</strong> to copy and pass to him by Messenger or Viber; he approves it from the Approvals page. An approved quote keeps its approval when you reopen it, unless the new total falls below the approved total and below the standard price. The PDF button saves the A4 document named by its quote number and revision.</p>
+        <p>Every line prints in <strong>one format</strong>: the item code in small grey text (for example CK-HP-4; a line with no code prints none), material and use, the title, dimensions, specs, notes. The signatures read Prepared by, Approved by and Client conforme. The Photo column shows the photo of the line or its drawing, and the Workforce Copy carries the drawing and the build detail (no prices). A line that <strong>needs review</strong>, or a quote sold <strong>below its standard price</strong>, goes to the President: Verify &amp; File says why and, once you send it, shows a <strong>link</strong> to copy and pass to him by Messenger or Viber; he approves it from the Approvals page. An approved quote keeps its approval when you reopen it, unless the new total falls below the approved total and below the standard price. The PDF button saves the A4 document named by its quote number and revision.</p>
         <p>Where the numbered list below describes the old tabs, the ⚙ chips, the OH / MK dials, the cost-plus pricing or the OH load on additional costs, this section is what a quote on the new rules does.</p>
       </div>
       <div id="helpKcDevice" style="display:none;">
@@ -2351,10 +2351,10 @@ const CO = {
   // No `pay` field either, deliberately: Brilliant Steel must never show
   // Barro's own UnionBank account — renderPaymentDetails() only renders a
   // payment block when co.pay exists.
-  BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
-    sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS',
-    thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
-    creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
+  BS:{name:'BRILLIANCE STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
+    sig:{name:'GERALD CHAN',title:'President, Brilliance Steel Corporation'},nav:'<span>BRILLIANCE</span> STEEL',code:'BS',
+    thanks:'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.',
+    creds:'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3049,6 +3049,7 @@ function initUI(){
   renderClientPreview();
   D7.h('core.ready');   // D7:E23 — D7.ready = true; draws the tab row and the cards; reprices the kc lines (runs again on every "Reload DB")
   kcAdoptEngineIfBlank();   // KC:L3 — the office switch has been read (KCLive.load, in loadDatabase): a blank quote takes the engine it gives. D7.core.ready may have done it already; this returns at once then
+  if(typeof initTutorial==='function') initTutorial();   // B5 — the same switch decides whether the configurators' What's New entry counts: the gold dot, the banner and the list are measured again now that it is known
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -10213,14 +10214,14 @@ const TUTORIAL_VERSION = 51;   // integer; bump on every user-visible quote-buil
 // 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
 // them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
 const ESTIMATE_RANGE_MODE = 'warn';
-const WHATS_NEW = [           // newest first; plain user language, no dev jargon
-  { ver:51, date:'2026-11-20', items:[
+const WHATS_NEW = [           // newest first; plain user language, no dev jargon. An entry with kc:true is the configurators' own and is shown only while they are on for this person (kcWhatsNewOn(), Addendum 2 B5).
+  { ver:51, date:'2026-11-20', kc:true, items:[
     'Add items has seven tabs now — Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems — and each tab shows its configurators ahead of the catalogue items. ➕ Add custom item opens a configurator too: pick the materials from the price list and type the quantities.',
     'A configured line prices itself from the materials price list, and a Chef Mode line starts from the Standard Product Price List. Type a price to override it; ↺ puts the computed price back, and a price below the standard shows a warning. Catalogue items keep their catalogue price.',
-    'Every line prints in one format — material and use, title, dimensions, specs and notes — with the photo of the line or its drawing beside it. Amounts show centavos, Quantity and unit share one column, and the 🛠 Workforce Copy carries the drawing and the build detail (still no prices).',
+    'Every line prints in one format — the item code (for example CK-HP-4) in small grey text, then material and use, title, dimensions, specs and notes — with the photo of the line or its drawing beside it. Amounts show centavos, Quantity and unit share one column, the signatures read Prepared by, Approved by and Client conforme, and the 🛠 Workforce Copy carries the drawing and the build detail (still no prices).',
     'A line that needs review, or a quote priced below the standard, goes to the President for approval: Verify & File says why and, once you send it, gives you a link to pass to him by Messenger or Viber. An approved quote keeps its approval when you reopen it.',
     'The President can set one markup for a quote (the OH and MK dials are gone from these quotes), and a discount stops at the project cost.',
-    'Quotes, drafts and templates made before today open and price exactly as before, and Brilliance Steel quotes are unchanged.',
+    'Quotes, drafts and templates made before today open and price exactly as before, and Brilliance Steel quotes price as before (their letterhead now names the company BRILLIANCE STEEL CORPORATION).',
   ]},
   { ver:50, date:'2026-11-19', items:[
     'Client tab: after 👁 Preview document, the ✎ Back to the form button now stays on screen above the preview, so you can return to the form without switching tabs.'
@@ -10457,7 +10458,7 @@ const TOUR_STEPS = [
    kcBody:'Every line lands here. A configured line prices itself from the materials price list: materials + labor (30 / 50 / 70 %) + 10 % misc, times 2, rounded to the nearest 10. A Chef Mode line starts from its Standard Product Price List price and adds what the options you pick cost by the same formula. A catalogue item keeps its catalogue price. Type a price to override it — ↺ goes back to the computed one, and a price below the standard shows a warning. Amounts show centavos. Below the table: VAT (12%), discounts (a discount never goes below the project cost), agent commission, and Options mode.',
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. A configured line (or one from a website request) keeps the website price instead — the calculator shows the cost-based price beside it. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'.line-details-toggle', needsWorkspace:true, title:'Details ▸ — the spec sheet of a line',
-   kcBody:'Every line prints in one format: material and use, the title, dimensions, specs, notes. Details ▸ opens the editor under a catalogue line — pick the Use (Commercial, Institutional or Residential) and the finish (hairline is the standard), type what is included and not included, add your own rows. A configured line is edited in its panel instead. The chips beside it — no size, no specs, no finish, no photo — show what is still missing, and Quote strength scores the whole quote. A made-to-order line with no size cannot be filed. (Opens nothing and changes nothing in the demo.)',
+   kcBody:'Every line prints in one format: the item code in small grey text, material and use, the title, dimensions, specs, notes. Details ▸ opens the editor under a catalogue line — pick the Use (Commercial, Institutional or Residential) and the finish (hairline is the standard), type what is included and not included, add your own rows. A configured line is edited in its panel instead. The chips beside it — no size, no specs, no finish, no photo — show what is still missing, and Quote strength scores the whole quote. A made-to-order line with no size cannot be filed. (Opens nothing and changes nothing in the demo.)',
    body:'Every line prints as a spec sheet: size first, then material and options, construction, finish, includes and not included, lead time. Details ▸ opens the editor under a line — pick the finish (hairline is the standard), type what is included and not included, add your own rows. The chips beside it — no size, no specs, no finish, no photo — show what is still missing, and Quote strength scores the whole quote. A made-to-order line with no size cannot be filed. (Opens nothing and changes nothing in the demo.)' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
    kcBody:'Right under the quote items — one layout. Pick a type per entry: Delivery, Installation and Other are pass-throughs: cost + 25%, no markup. Additional labor is real work and carries the markup of this quote (cost × the markup). Delivery and Installation present as one combined line on the quotation. Ticked "On quote?" puts an entry on the document; unticked, its price is quietly distributed into the item prices you choose.',
@@ -10477,12 +10478,28 @@ const TOUR_STEPS = [
    body:'Your work auto-saves as a draft while you type — an unfiled quote offers to resume next time you open the builder. Tap ❓ Help any time for the written guide and What\'s New.' },
 ];
 
+/* Addendum 2 B5 — the configurators' What's New entry (v51, kc:true) is held until the configurators are on for this person: it shows, and counts as news, only when the office switch gives this user the
+   configurators (KCLive.allowsNew(): kcMode 'on', or 'president' for the President, or the per-device force), never while the switch is off. While it is held, the newest entry a person can see is 50, so the gold
+   dot and the "updated" banner measure against 50, and what a person has "seen" is recorded as 50, never 51: the day the switch is turned on they get it once. initTutorial() runs again when the switch has been read (initUI). */
+function kcWhatsNewOn(){
+  try{ return !!(window.D7 && D7.live && window.KCLive && typeof KCLive.allowsNew==='function' && KCLive.allowsNew()); }catch(e){ return false; }
+}
+function whatsNewList(){ const on=kcWhatsNewOn(); return WHATS_NEW.filter(e=>on || !e.kc); }
+function tutorialVersion(){ return whatsNewList().reduce((m,e)=>Math.max(m, Number(e.ver)||0), 0) || TUTORIAL_VERSION; }
+function tutStoredInt(key, dflt){ try{ const v=parseInt(localStorage.getItem(key),10); return isNaN(v)?dflt:v; }catch(e){ return dflt; } }
+/* what a person has seen only ever grows: opening Help while the switch is off records 50 (never 51), and a person who saw 51 while it was on keeps 51 if it is switched off again */
+function tutMarkSeen(){
+  const v=tutorialVersion();
+  try{ if(!(tutStoredInt('qbTutSeenVer',0) > v)) localStorage.setItem('qbTutSeenVer', String(v)); }catch(e){}
+  document.getElementById('helpDot')?.classList.remove('show');
+}
+
 // ── What's New / Help modal ──────────────────────────────────────────
 function renderWhatsNew(){
   const host=document.getElementById('helpWhatsNew');
   if(!host) return;
   try{
-    host.innerHTML=WHATS_NEW.map(entry=>{
+    host.innerHTML=whatsNewList().map(entry=>{
       const li=(entry.items||[]).map(t=>`<li>${t}</li>`).join('');
       return `<div class="wn-entry"><span class="wn-ver">v${entry.ver}</span><span class="wn-date">${entry.date}</span><ul>${li}</ul></div>`;
     }).join('');
@@ -10507,13 +10524,13 @@ function openHelpModal(section){
   const m=document.getElementById('helpModal');
   if(!m) return;
   kcSyncHelp();
+  renderWhatsNew();   // B5 — the list follows the switch as it is now (the v51 entry only while the configurators are on)
   // Note: intentionally does NOT end an active tour — helpModal (z-index
   // 2600) is designed to be able to open above one (the tour highlight uses
   // pointer-events:none, so the ❓ Help button stays clickable mid-tour); see
   // the z-index map comment on the HTML block above.
   m.style.display='flex';
-  try{ localStorage.setItem('qbTutSeenVer', String(TUTORIAL_VERSION)); }catch(e){}
-  document.getElementById('helpDot')?.classList.remove('show');
+  tutMarkSeen();
   hideTutBanner();
   if(section==='whatsnew'){
     setTimeout(()=>{ document.getElementById('helpWhatsNew')?.scrollIntoView({block:'start',behavior:'smooth'}); }, 50);
@@ -10530,7 +10547,7 @@ function hideTutBanner(){
   if(b) b.style.display='none';
 }
 function dismissTutBanner(){
-  try{ localStorage.setItem('qbTutDismissedVer', String(TUTORIAL_VERSION)); }catch(e){}
+  try{ const v=tutorialVersion(); if(!(tutStoredInt('qbTutDismissedVer',-1) > v)) localStorage.setItem('qbTutDismissedVer', String(v)); }catch(e){}
   hideTutBanner();
 }
 
@@ -10562,8 +10579,7 @@ function startTour(){
   tourActive=true;
   tourChangedView=false;
   tourSavedView=(typeof currentView!=='undefined' && currentView) ? currentView : 'client';
-  try{ localStorage.setItem('qbTutSeenVer', String(TUTORIAL_VERSION)); }catch(e){}
-  document.getElementById('helpDot')?.classList.remove('show');
+  tutMarkSeen();
   document.addEventListener('keydown', tourKeyHandler);
   window.addEventListener('resize', tourReposition);
   window.addEventListener('scroll', tourReposition, {capture:true, passive:true});
@@ -10726,8 +10742,9 @@ function initTutorial(){
     let seenVer=0, dismissedVer=-1;
     try{ const sv=parseInt(localStorage.getItem('qbTutSeenVer'),10); seenVer=isNaN(sv)?0:sv; }catch(e){}
     try{ const dv=parseInt(localStorage.getItem('qbTutDismissedVer'),10); dismissedVer=isNaN(dv)?-1:dv; }catch(e){}
+    const curVer=tutorialVersion();   // B5 — 50 while the configurators are held back, 51 once they are on for this person
 
-    document.getElementById('helpDot')?.classList.toggle('show', seenVer < TUTORIAL_VERSION);
+    document.getElementById('helpDot')?.classList.toggle('show', seenVer < curVer);
 
     renderWhatsNew();
 
@@ -10736,8 +10753,8 @@ function initTutorial(){
     const noBtn=document.getElementById('qbTutBannerNo');
     const yesBtn=document.getElementById('qbTutBannerYes');
     if(banner && textEl && noBtn && yesBtn){
-      const notDismissedAtThisVersion=(dismissedVer!==TUTORIAL_VERSION);
-      if(seenVer < TUTORIAL_VERSION && notDismissedAtThisVersion){
+      const notDismissedAtThisVersion=(dismissedVer!==curVer);
+      if(seenVer < curVer && notDismissedAtThisVersion){
         if(seenVer===0){
           // First-run — never opened Help / taken the tour.
           textEl.innerHTML='👋 <strong>New to the quote builder?</strong> Take a 2-minute guided demo of how a quote gets built, priced and filed.';
@@ -10753,6 +10770,8 @@ function initTutorial(){
         }
         noBtn.onclick=dismissTutBanner;
         banner.style.display='flex';
+      } else {
+        banner.style.display='none';   // B5 — initTutorial runs again once the switch is read: a banner that no longer applies goes away
       }
     }
   }catch(e){}

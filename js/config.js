@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.376';
+window.APP_VERSION = '14.0.377';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -2811,10 +2811,10 @@ window.BRAND = {
       sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BI',
       thanks:'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
       creds:'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila' },
-    BS: { name:'BRILLIANT STEEL CORPORATION', sub:'', addr:'Pasig City, Metro Manila', contact:'09276836300',
-      sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'}, code:'BS',
-      thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
-      creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300' }
+    BS: { name:'BRILLIANCE STEEL CORPORATION', sub:'', addr:'Pasig City, Metro Manila', contact:'09276836300',
+      sig:{name:'GERALD CHAN',title:'President, Brilliance Steel Corporation'}, code:'BS',
+      thanks:'Thank you for considering Brilliance Steel Corporation. We are committed to quality steelworks delivered on time.',
+      creds:'Brilliance Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300' }
   }
 };
 
