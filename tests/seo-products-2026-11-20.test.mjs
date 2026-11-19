@@ -35,9 +35,9 @@ describe('the four product pages of 2026-11-20', () => {
     it(`${slug}: exists, with its head, one h1 and JSON-LD that parses`, () => {
       const html = read(file);
       const title = html.match(/<title>([^<]*)<\/title>/)[1];
-      assert.ok(title.endsWith('| Barro Industries') && title.length <= 65, title);
+      assert.ok(title.endsWith('| Barro Kitchens') && title.length <= 65, title);
       assert.match(title, keyword);
-      assert.ok(!/Barro Kitchens/.test(title));
+      assert.ok(!/Barro Industries/.test(title));
       assert.match(html, /<meta name="description" content="[^"]{60,170}"/);
       assert.ok(html.includes(`<link rel="canonical" href="https://barroindustries.com/products/${slug}/">`));
       const og = html.match(/<meta property="og:image" content="https:\/\/barroindustries\.com\/([^"]+)"/)[1];

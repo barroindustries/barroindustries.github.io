@@ -351,7 +351,7 @@ describe('No project-count claim (owner, 2026-10-21: "500+ projects" removed, it
   it('About keeps the family-business line and the SEC-registered wording, with no project count', () => {
     const t = visibleText(about);
     assert.ok(t.includes('The company began as a family business in Baguio City and La Union.'));
-    assert.ok(t.includes('Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
+    assert.ok(t.includes('Barro Kitchens is the brand of Barro Industries OPC, an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
   });
 
   it('states no number of projects, clients or customers anywhere a visitor or crawler reads', () => {
@@ -429,11 +429,11 @@ describe('Warranty & after-sales: the owner\'s two facts, exactly', () => {
     assert.ok(!/\b(lifetime|guarantee[ds]?|parts|labou?r|free|unlimited|replacement|on[- ]site|24\/7|hours?|days?|years?|extended|full coverage)\b/i.test(t), 'a term the owner did not give is in the warranty section');
   });
 
-  it('keeps the ™ on KitchenShield exactly once, and the page has just two marks (the header brand and KitchenShield)', () => {
+  it('keeps the ™ on KitchenShield exactly once, and it is the only mark on the page (the header lockup carries none since 2026-11-20)', () => {
     assert.equal((homeSite.match(/KitchenShield™/g) || []).length, 1);
     assert.equal((homeSite.match(/KitchenShield/g) || []).length, 1);
-    assert.equal((visibleText(homeSite).match(/™/g) || []).length, 2);
-    assert.ok(homeSite.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'));
+    assert.equal((visibleText(homeSite).match(/™/g) || []).length, 1);
+    assert.ok(homeSite.includes('<span class="site-brand-sub">by Barro Industries OPC</span>'));
   });
 
   it('comes after How we work, before About, as two navy cards', () => {

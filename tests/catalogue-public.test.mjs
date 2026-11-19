@@ -1122,14 +1122,14 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
 
   it('has the title, description, canonical, robots and Open Graph tags the owner specified', () => {
     // owner ruling 2026-10-22: "Barro Kitchens" is a permanent, historic name of the business, so it is in the title (the full pins are in tests/site-public-surface.test.mjs)
-    assert.match(cat, /<title>Commercial Kitchen Equipment \| Barro Kitchens by Barro Industries<\/title>/);   // 65 characters since the owner's shortening of 2026-10-28 (it read "... Equipment Catalogue | ...", 75)
+    assert.match(cat, /<title>Commercial Kitchen Equipment \| Barro Kitchens<\/title>/);   // 65 characters since the owner's shortening of 2026-10-28 (it read "... Equipment Catalogue | ...", 75)
     assert.match(catHead, /<meta name="description" content="[^"]{60,}">/);
     assert.match(catHead, /<link rel="canonical" href="https:\/\/barroindustries\.com\/catalogue\/">/);
     assert.match(catHead, /<meta name="robots" content="index,follow">/);
     for (const p of ['og:title', 'og:description', 'og:url', 'og:image', 'og:type', 'og:site_name']) assert.ok(catHead.includes(`property="${p}"`), p);
     assert.ok(catHead.includes('property="og:url" content="https://barroindustries.com/catalogue/"'));
-    assert.ok(catHead.includes('property="og:title" content="Commercial Kitchen Equipment | Barro Kitchens by Barro Industries"'));
-    assert.ok(catHead.includes('property="og:site_name" content="Barro Industries"'));
+    assert.ok(catHead.includes('property="og:title" content="Commercial Kitchen Equipment | Barro Kitchens"'));
+    assert.ok(catHead.includes('property="og:site_name" content="Barro Kitchens"'));
     // the hero project photo as an absolute URL, with the large Twitter card (owner, 2026-10-21; the full set of tag pins is in tests/site-public-surface.test.mjs)
     assert.ok(catHead.includes('property="og:image" content="https://barroindustries.com/site/img/projects/ispsc/01.webp"'));
     assert.ok(catHead.includes('name="twitter:card" content="summary_large_image"'));
@@ -1403,8 +1403,8 @@ describe('the committed homepage (index.html): a business feature first, NO prod
   it('uses the ™ mark once per page (the header brand), British spelling, no doubled spaces, no stray double dash', () => {
     for (const [label, html] of [['homepage', homeSite], ['catalogue page', cat.slice(cat.indexOf('<body'))]]) {
       // the owner's programme name KitchenShield™ (warranty section, 2026-10-21) is the one other mark; the header brand stays the only other ™
-      assert.equal((visibleText(html).replace(/KitchenShield™/g, 'KitchenShield').match(/™/g) || []).length, 1, `${label}: ™ count`);
-      assert.ok(html.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'), `${label}: the ™ is not in the header brand`);
+      assert.equal((visibleText(html).replace(/KitchenShield™/g, 'KitchenShield').match(/™/g) || []).length, 0, `${label}: ™ count (the header lockup carries none since 2026-11-20)`);
+      assert.ok(html.includes('<span class="site-brand-sub">by Barro Industries OPC</span>'), `${label}: the header lockup`);
       const segments = stripTags(html, '\u0001').split('\u0001').map(s => s.trim()).filter(Boolean);
       for (const s of segments) assert.ok(!/\S {2,}\S/.test(s), `${label}: doubled space in "${s.slice(0, 50)}"`);
       assert.ok(!/ -- |\s-\s(?=[A-Za-z])/.test(visibleText(html)), `${label}: a hyphen used as a dash`);
@@ -1541,8 +1541,8 @@ describe('the public contact details (owner ruling: hello@ and ONE address and n
   it('shows ONLY the Quezon City address; La Union is a project location (the map section, the DMMMSU project entry and areaServed), never an address, and San Fernando is never named', () => {
     const ADDRESS = '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila';
     assert.ok(homeSite.includes(`<address>${ADDRESS}, Philippines</address>`));
-    assert.ok(homeSite.includes(`<p>${ADDRESS}, Philippines</p>`));
-    assert.ok(cat.includes(`<p>${ADDRESS}, Philippines</p>`));
+    assert.ok(homeSite.includes(`<p>by Barro Industries OPC<br>${ADDRESS}, Philippines</p>`));
+    assert.ok(cat.includes(`<p>by Barro Industries OPC<br>${ADDRESS}, Philippines</p>`));
     // Owner ruling 2026-10-21: La Union is a PROJECT location ("Projects across Luzon", section #luzon, the JSON-LD areaServed, and — owner's answer, same day —
     // the DMMMSU project entry in section #projects), never an address.
     // Everything else on these surfaces (the contact section, the footer, the JSON-LD address, the other head tags) stays guarded.
