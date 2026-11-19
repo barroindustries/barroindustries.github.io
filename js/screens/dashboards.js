@@ -1105,6 +1105,7 @@ async function renderPresidentDashboard() {
         <span>${emojiIcon('📋',16)} <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):'', pendingReview>0?pendingReview+' review'+(pendingReview!==1?'s':''):'', pendingLeave>0?pendingLeave+' leave'+(pendingLeave!==1?'s':''):'', (pendingFinDel+pendingPayDel)>0?(pendingFinDel+pendingPayDel)+' delete req'+((pendingFinDel+pendingPayDel)!==1?'s':''):'', (pendingBsDel+pendingBkDel+pendingClientDel)>0?(pendingBsDel+pendingBkDel+pendingClientDel)+' record delete'+((pendingBsDel+pendingBkDel+pendingClientDel)!==1?'s':''):'', pendingPO>0?pendingPO+' PO'+(pendingPO!==1?'s':''):'', pendingRaises>0?pendingRaises+' raise'+(pendingRaises!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
         <span class="alert-chevron">›</span>
       </div>`:''}
+      <div id="dash-payconfirm"></div>
 
       <div class="kpi-row">
         <div class="kpi-card">
@@ -1209,6 +1210,12 @@ async function renderPresidentDashboard() {
     liveDateTime('live-clock');
     renderMiniCal();
     if (window.lucide) lucide.createIcons({ nodes: [c] });
+    // Payments waiting for the President's confirmation (SALES-QUICK-FIXES-SPEC §5.4). Fills in when the read lands; a failed read is silent
+    // here (the Approvals page shows the list, with its own retry) so it can never break the dashboard.
+    window.pendingPaymentConfirmations?.().then(list => {
+      const el = document.getElementById('dash-payconfirm');
+      if (el && list.length) el.innerHTML = '<div class="alert-banner alert-warn" onclick="navigateTo(\'approvals\')"><span>' + emojiIcon('💵',16) + ' <strong>' + list.length + ' payment' + (list.length>1?'s':'') + '</strong> waiting for your confirmation</span><span class="alert-chevron">›</span></div>';
+    }).catch(()=>{});
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
   }
