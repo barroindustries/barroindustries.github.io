@@ -81,7 +81,7 @@ const EXPECTED_KIT_SCRIPTS = [
   ['https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js', 'sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu'],
   ['js/firebase-config.js'], ['js/errlog.js'], ['js/config.js'], ['js/ui-states.js'], ['js/ui-status-meta.js'], ['js/statutory-tables.js'],
   ['js/print-docs.js'], ['js/finance-ledger.js'], ['js/drive.js'], ['js/notifications.js'], ['js/meetings.js'], ['js/calendar-feed.js'],
-  ['js/svc-approvals.js'], ['js/ui-crud-table.js'], ['js/money-core.js'], ['js/geo-core.js'], ['js/departments.js'], ['js/screens/dept-budgets.js'],
+  ['js/svc-approvals.js'], ['js/ui-crud-table.js'], ['js/money-core.js'], ['js/sales-flow-core.js'], ['js/geo-core.js'], ['js/departments.js'], ['js/screens/dept-budgets.js'],
   ['js/app.js'], ['js/modules.js'], ['js/screens/dashboards.js'], ['js/chat.js'],
 ];
 
@@ -173,7 +173,7 @@ describe('2 · the head script that writes the kit: every view except "site", an
       assert.deepEqual(r.writes, [EXPECTED_WRITE], `view=${view}`);
       assert.ok(!/<!--/.test(r.writes[0]), 'comments are documentation, not written');
     }
-    assert.equal(EXPECTED_WRITE.split('<script').length - 1, 28);
+    assert.equal(EXPECTED_WRITE.split('<script').length - 1, 29);   // 28 + js/sales-flow-core.js (Sales quick fixes, 2026-11-19)
     assert.equal(EXPECTED_WRITE.split('<link').length - 1, 8);
   });
 

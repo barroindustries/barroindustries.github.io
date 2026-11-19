@@ -251,6 +251,9 @@ window.Notifs = (() => {
     quote_review_request:{icon:'👀',accent:'#1C7ED6'}, quote_approved:{icon:'✅',accent:'#2F9E44'},
     quote_rejected:{icon:'❌',accent:'#D92D20'}, bs_quote:{icon:'📄',accent:'#1C7ED6'},
     sales_order:{icon:'🛒',accent:'#1C7ED6'}, lead_handoff:{icon:'🤝',accent:'#1C7ED6'},
+    // Sales flow (SALES-QUICK-FIXES-SPEC-2026-11-19 §7): payment confirmation round-trip + a lost quote
+    payment_confirm:{icon:'💵',accent:'#F76707'}, payment_confirmed:{icon:'✅',accent:'#2F9E44'},
+    payment_rejected:{icon:'↩️',accent:'#E8590C'}, quote_lost:{icon:'✖️',accent:'#868E96'},
     // Purchasing / inventory
     po_approval:{icon:'🧮',accent:'#F76707'}, po_approval_result:{icon:'🧮',accent:'#2F9E44'},
     purchase_submitted:{icon:'🧮',accent:'#F76707'}, low_stock:{icon:'📦',accent:'#E8590C'},
