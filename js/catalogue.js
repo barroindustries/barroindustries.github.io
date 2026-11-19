@@ -2,9 +2,8 @@
    Firebase and no app script. Every control is bound by id or class delegation (no inline handlers),
    everything below is a class or attribute toggle, and the only text it writes uses textContent
    (the visitor's query is compared and echoed with textContent, never parsed as markup).
-   What it does: live search over every product, a scroll-spy that highlights the current category
-   (a sticky sidebar from 1024px, a sticky chip bar on phones), deep links such as #cat-baking
-   that land under the sticky header, the Configure deep link ?configure=<family> (a product page's
+   What it does: live search over every product, a category filter (the sticky bar of buttons: All + one per
+   category; plain anchors without script), deep links such as #cat-baking that open that category, the Configure deep link ?configure=<family> (a product page's
    "Configure" button: it presses that family card's own "Configure & add" button), and a back-to-top button. */
 (function () {
   'use strict';
@@ -24,7 +23,7 @@
     var links = [].slice.call(layout.querySelectorAll('.cat-link'));
     var groups = [].slice.call(layout.querySelectorAll('.cat-group'));
     var cards = [].slice.call(layout.querySelectorAll('.cat-card'));
-    var idle = status ? status.textContent : '';
+    var idle = status ? status.textContent : '', allIdle = idle, total = cards.length;
 
     // What a card can be found by: its name, its one-line description and its feature bullets — not the price line, not the tag
     // and not the button. A card also carries (in data-kw, never shown) its product code and, for a configurable product, the names and codes of the products it
@@ -74,11 +73,11 @@
       }
       if (empty) { empty.hidden = !(raw && shown === 0); if (emptyQ) emptyQ.textContent = raw; }
       if (clearBtn) clearBtn.hidden = !input.value;
-      setActive(idOf(pick()));
     }
     var timer = 0;
     on(input, 'input', function () {
       if (clearBtn) clearBtn.hidden = !input.value;
+      if (input.value && filterCat) { setFilter(''); try { window.history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* harmless */ } }   // a search covers every category
       clearTimeout(timer); timer = setTimeout(run, 120);
     });
     on(input, 'keydown', function (e) { if (e.key === 'Escape' && input.value) { input.value = ''; run(); } });
@@ -93,90 +92,53 @@
       e.preventDefault(); input.focus(); input.select();
     });
 
-    // ── Scroll-spy: the current category is the last section whose top has passed the line under the
-    // sticky chrome. An IntersectionObserver on a 2px band at that line tells us when to recompute.
-    var activeId = '', lockUntil = 0, io = null;
-    function barHeight() {
-      return nav && window.innerWidth < 1024 && window.getComputedStyle(nav).position === 'sticky' ? nav.getBoundingClientRect().height : 0;
-    }
-    // The line sits just below where a deep link places a section (scroll-margin-top: header + 24px on the desktop,
-    // header + chip bar + 12px on a phone), so the section you were sent to is the one that reads as current.
-    function lineY() { var bar = barHeight(); return Math.round((header ? header.getBoundingClientRect().height : 64) + bar + (bar ? 16 : 28)); }
-    function pick() {
-      var y = lineY(), best = null;
-      for (var i = 0; i < groups.length; i++) {
-        if (groups[i].classList.contains('is-empty')) continue;
-        if (groups[i].getBoundingClientRect().top <= y + 2) best = groups[i]; else break;
-      }
-      return best;
-    }
-    function idOf(g) { return g ? g.getAttribute('data-cat') : ''; }
-    function keepVisible(a) {                      // scroll the nav itself (never the page) so the active link stays in view
-      if (!nav) return;
+    // ── Category filter (owner 2026-11-19): the bar of buttons above the grid — All + one per category — shows one category at a time.
+    // Without script the same links are plain anchors to #cat-… and every category stays on the page. The filter sets .is-off on the
+    // other sections (never the search's .is-empty), highlights its own button and writes #cat-… into the address so a link can be shared.
+    var filterCat = '', moved = false;
+    function labelOf(id) { var a = link[id], s = a && a.querySelector('.cat-link-name'); return s ? s.textContent : id; }
+    function keepVisible(a) {                      // scroll the bar itself (never the page) so the active button stays in view
+      if (!nav || !a) return;
       if (nav.scrollWidth > nav.clientWidth + 1) {
         var left = a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2;
         if (nav.scrollTo) nav.scrollTo({ left: left, behavior: reduced() ? 'auto' : 'smooth' }); else nav.scrollLeft = left;
-      } else if (nav.scrollHeight > nav.clientHeight + 1) {
-        nav.scrollTop = a.offsetTop - (nav.clientHeight - a.offsetHeight) / 2;
       }
     }
-    function setActive(id) {
-      if (id === activeId) return;
-      activeId = id;
+    function setFilter(id) {
+      filterCat = id && link[id] ? id : '';
+      var active = null;
+      groups.forEach(function (g) { g.classList.toggle('is-off', !!filterCat && g.getAttribute('data-cat') !== filterCat); });
       links.forEach(function (a) {
-        var is = a.getAttribute('data-cat') === id;
+        var is = (a.getAttribute('data-cat') || 'all') === (filterCat || 'all');
         a.classList.toggle('is-active', is);
-        if (is) { a.setAttribute('aria-current', 'true'); keepVisible(a); } else a.removeAttribute('aria-current');
+        if (is) { a.setAttribute('aria-current', 'true'); active = a; } else a.removeAttribute('aria-current');
       });
+      keepVisible(active);
+      if (!input || !input.value) {
+        var n = filterCat ? Number(counts[filterCat]) || 0 : total;
+        idle = filterCat ? n + (n === 1 ? ' product in ' : ' products in ') + labelOf(filterCat) : allIdle;
+        if (status) status.textContent = idle;
+      }
     }
-    function observe() {
-      if (io) io.disconnect();
-      if (!('IntersectionObserver' in window)) return;
-      var y = lineY();
-      io = new IntersectionObserver(function () { if (Date.now() >= lockUntil) setActive(idOf(pick())); },
-        { rootMargin: '-' + y + 'px 0px -' + Math.max(0, window.innerHeight - y - 2) + 'px 0px', threshold: [0, 1] });
-      groups.forEach(function (g) { io.observe(g); });
+    function hashCat() {
+      var m = /^#cat-([A-Za-z0-9_-]+)$/.exec(location.hash || '');
+      return m && link[m[1]] ? m[1] : '';
     }
-    // A click on a category: highlight it at once and ignore the observer until the scroll has settled.
     on(nav, 'click', function (e) {
       var a = up(e, '.cat-link');
       if (!a) return;
-      lockUntil = Date.now() + 1500;
-      setActive(a.getAttribute('data-cat'));
-      window.setTimeout(function () { lockUntil = 0; setActive(idOf(pick())); }, 1550);
+      e.preventDefault();
+      var id = a.getAttribute('data-cat'); id = id === 'all' ? '' : id;
+      if (input && input.value) { input.value = ''; run(); }        // a filter and a search at once would hide the very products the visitor clicked for
+      setFilter(id);
+      try { window.history.replaceState(null, '', location.pathname + location.search + (id ? '#cat-' + id : '')); } catch (_) { /* the address keeps its old hash, which is harmless */ }
+      var top = layout.getBoundingClientRect().top + window.pageYOffset - (header ? header.getBoundingClientRect().height : 64) - 8;
+      if (window.pageYOffset > top) window.scrollTo({ top: Math.max(0, top), behavior: reduced() ? 'auto' : 'smooth' });
     });
-    var resizeTimer = 0;
-    on(window, 'resize', function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(function () { observe(); setActive(idOf(pick())); }, 150); });
-    if (!('IntersectionObserver' in window)) on(window, 'scroll', raf(function () { setActive(idOf(pick())); }), { passive: true });
-    observe();
-    setActive(idOf(pick()));
-
-    // ── Deep links: the browser scrolls to #cat-… itself (scroll-margin-top clears the sticky chrome). Fonts arriving
-    // and late layout can move the target a few pixels afterwards, so for the first few seconds we check that the
-    // section still sits where the scroll margin puts it and re-align when it does not — unless the visitor has
-    // already scrolled, in which case we never fight them.
-    var moved = false;
+    on(window, 'hashchange', function () { moved = true; setFilter(hashCat()); });
+    setFilter(hashCat());
     ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(function (ev) { on(window, ev, function () { moved = true; }, { passive: true }); });
-    function deepTarget() {
-      if (!/^#cat-/.test(location.hash)) return null;
-      try { return d.getElementById(decodeURIComponent(location.hash.slice(1))); } catch (_) { return null; }   // a malformed escape leaves the browser's own scroll
-    }
-    function realign() {
-      var el = deepTarget();
-      if (moved || !el || !el.scrollIntoView) return;
-      var want = parseFloat(window.getComputedStyle(el).scrollMarginTop) || 0;
-      if (Math.abs(el.getBoundingClientRect().top - want) > 2) el.scrollIntoView({ behavior: 'instant', block: 'start' });
-      setActive(idOf(pick()));
-    }
-    if (deepTarget()) {
-      on(window, 'load', realign);
-      if (d.fonts) {
-        if (d.fonts.ready) d.fonts.ready.then(realign);
-        if (d.fonts.addEventListener) d.fonts.addEventListener('loadingdone', realign);
-      }
-      var polls = 0, poll = window.setInterval(function () { realign(); if (++polls >= 14 || moved) window.clearInterval(poll); }, 250);
-    }
-    on(window, 'hashchange', function () { moved = true; setActive(idOf(pick())); });
+
 
     // ── Configure deep link. A product page's "Configure" button goes to /catalogue/?configure=<family>#cat-… . When the value names a
     // configurable family card of this page, that family's configurator opens at once: this presses the card's own "Configure & add" button,

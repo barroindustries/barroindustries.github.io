@@ -31,7 +31,6 @@ const NOTES = {
   stove: ['CK-LP-2', '750 mm deep, 850 mm high', '2, 4 or 6 burners, oven below'],
   wok_range: ['CK-WK-1', '600 × 750 × 850 mm', '1 to 3 holes, rear stock burner'],
   cooking_line: ['CK-GD-600', '600 × 750 × 850 mm', 'Griddle 600 or 900 mm, fryer with 1 or 2 vats, lava-rock griller'],
-  deck_oven: [null, 'Trays of 40 × 60 cm', 'Heavy-duty stand'],
   cabinet: ['PS-CBW-900', '900 × 350 × 600 mm', 'Floor or wall, 900 to 1500 mm, swing or sliding doors'],
   wall_shelf: ['PS-RKW-1200', '1200 × 300 mm', 'One to three tiers, solid or slotted'],
   rack: ['PS-RK-900', '900 × 500 × 1800 mm', 'Lengths up to 1500 mm, slotted shelves, wheels'],
@@ -49,8 +48,8 @@ const NOTES = {
 const NO_DATA = ['CE-024', 'CE-031', 'MS-015', 'MS-016', 'BA-006', 'BA-011', 'RF-001', 'RF-002', 'RF-003', 'RF-004', 'RF-005', 'RF-006'];   // fixed items: no code, no size, no options
 
 describe('the cards carry the Website Notes data', () => {
-  it('has 33 cards, each with the code line iff the Notes give a code, the size line and the options line only where they give one', () => {
-    assert.equal(cards.length, 33);
+  it('has 32 cards, each with the code line iff the Notes give a code, the size line and the options line only where they give one', () => {
+    assert.equal(cards.length, 32);
     for (const [id, [code, size, options]] of Object.entries(NOTES)) {
       const c = BY[id];
       assert.ok(c, `${id}: no card`);
@@ -60,7 +59,7 @@ describe('the cards carry the Website Notes data', () => {
       assert.equal(line(c, 'cat-options'), options === null ? null : `Options: ${options}`, `${id}: options`);
     }
     for (const id of NO_DATA) for (const k of ['cat-code', 'cat-size', 'cat-options']) assert.ok(!BY[id].includes(`<p class="${k}">`), `${id}: has a ${k}`);
-    assert.equal(Object.keys(NOTES).length + NO_DATA.length, 33);
+    assert.equal(Object.keys(NOTES).length + NO_DATA.length, 32);
   });
 
   it('puts the code right under the name, then the sentence; the size and the options frame the specs; every card has three or four specs', () => {
@@ -77,7 +76,7 @@ describe('the cards carry the Website Notes data', () => {
   });
 
   it('leads Chef Mode with the three featured hero products (Pugon pandesal oven, Teppanyaki grill, Inasal charcoal grill) at 53000, 62000 and 50000, tagged Featured; the range hood is Featured too', () => {
-    const cooking = block.match(/<section class="cat-group" id="cat-cooking"[\s\S]*?<\/section>/)[0];
+    const cooking = block.match(/<section class="cat-group" data-cat="cooking"[\s\S]*?<\/section>/)[0];
     const order = [...cooking.matchAll(/<li class="cat-card[^"]*" data-(?:family|id|ask)="([^"]+)"/g)].map((m) => m[1]);
     assert.deepEqual(order.slice(0, 4), ['pugon', 'teppanyaki', 'inasal', 'stove']);
     const prices = JSON.parse(read('scripts/public-from-prices.json')).prices;
@@ -101,7 +100,7 @@ describe('the words stay plain', () => {
   const visible = block.replace(/<p class="cat-from[ "][^>]*>.*?<\/p>/g, '').replace(/<[^>]+>/g, ' ');
   it('has no "premium", "world-class" or "high quality" on the catalogue page, and uses the plain lede', () => {
     assert.ok(!/premium|world-class|high[- ]quality/i.test(visible + page.slice(0, page.indexOf('</head>')).replace(/<style[\s\S]*?<\/style>/, '')), 'a hype word on /catalogue/');
-    assert.ok(block.includes('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, made in our own shop in SS304 stainless steel (SS316 on request) and built to your sizes.'));
+    assert.ok(block.includes('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, built by our own team in SS304 stainless steel (SS316 on request) and built to your sizes.'));
   });
   it('has no number with a thousands comma, and no peso sign, anywhere in the catalogue block outside the price lines', () => {
     assert.ok(!/\b\d{1,3}(,\d{3})+\b|₱/.test(visible), 'money-like text outside the price lines');

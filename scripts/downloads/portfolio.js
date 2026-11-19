@@ -7,7 +7,7 @@ const { CO, img, ic, icb } = L;
 
 const DOC = 'Portfolio';
 const META = {
-  title: `Portfolio | ${CO.name}`,
+  title: `Portfolio | ${CO.brand}`,
   subject: `${CO.brand} by ${CO.name}: portfolio of completed projects, 2026 edition.`,
   keywords: `${CO.name}, ${CO.brand}, portfolio, completed projects, stainless-steel kitchens, Philippines`,
 };

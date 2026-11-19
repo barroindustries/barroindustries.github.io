@@ -80,13 +80,13 @@ const CHAT_PATH = 'M7.9 20A9 9 0 1 0 4 16.1L2 22Z';
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('the head: a noindex intake page on the site\'s own card', () => {
-  it('is titled "Project brief — Barro Industries", for visitors from any kind of project (not "Commissary Kitchen")', () => {
-    assert.match(html, /<title>Project brief — Barro Industries<\/title>/);
+  it('is titled "Project brief — Barro Kitchens", for visitors from any kind of project (not "Commissary Kitchen")', () => {
+    assert.match(html, /<title>Project brief — Barro Kitchens<\/title>/);
     assert.equal((html.match(/<title>/g) || []).length, 1);
     assert.ok(!/commissar/i.test(head), 'the head still talks about a commissary');
     assert.match(metaContent('description'), /^Share the details of your kitchen, laboratory or fabrication project\./);
-    assert.equal(metaContent('og:title'), 'Project brief — Barro Industries');
-    assert.equal(metaContent('twitter:title'), 'Project brief — Barro Industries');
+    assert.equal(metaContent('og:title'), 'Project brief — Barro Kitchens');
+    assert.equal(metaContent('twitter:title'), 'Project brief — Barro Kitchens');
   });
 
   it('is noindex,nofollow, has no canonical and no structured data, is not in the sitemap, and stays in robots.txt\'s Disallow list', () => {
@@ -205,9 +205,8 @@ describe('uniform with the website: the same header and the same footer as /serv
 
   it('header: the brand lockup, the eight nav links (Guides added 2026-11-19, owner), "Get a quote" top right beside the menu button, no login control', () => {
     const h = header(html);
-    assert.match(h, /<a href="\/" id="site-brand"><img src="\/site\/img\/barro-kitchens-96\.webp" width="36" height="36" alt="Barro Industries logo">/);
-    assert.match(h, /<span class="site-brand-name">Barro Industries<\/span>/);
-    assert.equal((h.match(/<span data-brand>Barro Kitchens<\/span>/g) || []).length, 1);
+    assert.match(h, /<a href="\/" id="site-brand"><img src="\/site\/img\/barro-kitchens-96\.webp" width="36" height="36" alt="Barro Kitchens">/);
+    assert.match(h, /<span class="site-brand-name">Barro Kitchens<\/span><span class="site-brand-sub">by Barro Industries OPC<\/span>/);
     assert.deepEqual([...h.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]),
       [['/services/', 'Services'], ['/catalogue/', 'Products'], ['/work/', 'Our work'], ['/guides/', 'The Kitchen Guide'], ['/#contact', 'Contact']]);
     assert.ok(h.indexOf('id="site-nav"') < h.indexOf('site-head-cta') && h.indexOf('site-head-cta') < h.indexOf('id="site-menu-btn"'));
@@ -218,7 +217,8 @@ describe('uniform with the website: the same header and the same footer as /serv
 
   it('footer: the address, the three registrations, the link row with a muted "Team portal" last, the copyright', () => {
     const f = footer(html);
-    assert.match(f, /<p class="foot-name">Barro Industries OPC<\/p>/);
+    assert.match(f, /<p class="foot-name">Barro Kitchens<\/p>/);
+    assert.ok(f.includes('<p>by Barro Industries OPC<br>21 Capricorn St.'));
     assert.ok(f.includes('21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines'));
     assert.deepEqual([...f.matchAll(/<\/svg>(PhilGEPS-registered|SEC-registered|VAT-registered)<\/li>/g)].map((m) => m[1]), ['PhilGEPS-registered', 'SEC-registered', 'VAT-registered']);
     const row = f.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
