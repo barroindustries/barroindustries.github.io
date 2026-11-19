@@ -724,7 +724,9 @@ fi
 PRODUCT_PAGES='products/index.html products/stainless-steel-sinks/index.html products/stainless-steel-dish-tables/index.html products/stainless-steel-work-tables/index.html products/commercial-gas-stoves/index.html products/commercial-wok-ranges/index.html products/commercial-griddles-grillers-and-fryers/index.html products/gas-deck-ovens/index.html products/stainless-steel-range-hoods/index.html products/stainless-steel-cabinets/index.html products/stainless-steel-shelving/index.html products/stainless-steel-racks/index.html services/fresh-air-systems/index.html'
 prod_fail=0
 prod_body() {  # $1 = page, $2 = its first body line
-  if [ "${1#products/}" != "$1" ]; then sed -n "$2,\$p" "$1" | sed 's/Prices depend on size and options\.//g'; else sed -n "$2,\$p" "$1"; fi
+  # /products/ and its eleven pages (owner ruling 2026-11-19, later): the exact starting-price element (the catalogue's own CAT_FROM_STRIP form) is blanked as well; it is checked
+  # against scripts/public-from-prices.json and the catalogue card by scripts/check-catalogue-cards.js (below), and every other amount still fails.
+  if [ "${1#products/}" != "$1" ]; then sed -n "$2,\$p" "$1" | sed 's/Prices depend on size and options\.//g' | perl -pe "$CAT_FROM_STRIP"; else sed -n "$2,\$p" "$1"; fi
 }
 # The head, up to line $2, without the generated inline stylesheet (page_head(), defined above the content pages: the block is css text, not page content).
 prod_head() {
@@ -752,6 +754,12 @@ for pp in $PRODUCT_PAGES; do
     prod_fail=1
   fi
 done
+# Owner ruling 2026-11-19 (later): each product page carries the SAME starting price as its catalogue card (scripts/public-from-prices.json); /products/ is the noindex forward to /catalogue/. scripts/check-catalogue-cards.js prints problems, never an amount.
+prod_align_problems=$(node scripts/check-catalogue-cards.js | grep '^products/')
+if [ -n "$prod_align_problems" ]; then
+  echo "$prod_align_problems" | sed 's/^/FAIL: /'
+  prod_fail=1
+fi
 if grep -nE -- "'/products|'/services/fresh-air|'/site/img/seo/|'/js/late-fonts\.js'" sw.js >/dev/null 2>&1; then
   echo "FAIL: sw.js PRECACHE lists a product page, the fresh-air page, their social images or js/late-fonts.js. Like the other public pages, they are deliberately NOT precached (not part of the app shell):"
   grep -nE -- "'/products|'/services/fresh-air|'/site/img/seo/|'/js/late-fonts\.js'" sw.js | sed 's/^/    /'
@@ -760,7 +768,7 @@ fi
 # Their stylesheet is INLINE (scripts/inline-page-css.js): a stale block, or a CSP hash that does not match it, would ship stale or unstyled pages. The generator's --check covers
 # every page that has a block (these 13 and, since 2026-10-28, the 12 content pages and the 3 guides), so it runs once for all of them in the FIRST PAINT block below.
 if [ "$prod_fail" -eq 0 ]; then
-  echo "PASS: the 13 product and fresh-air pages carry no pricing tokens (only the owner's sentence \"Prices depend on size and options.\", and only on the hub and the eleven product pages), no disallowed contact detail and no app script, and are not precached"
+  echo "PASS: the 13 product and fresh-air pages carry no pricing tokens (only the owner's sentence \"Prices depend on size and options.\" and the one exact starting-price line per card / page, both only on the hub and the eleven product pages), no disallowed contact detail and no app script, and are not precached"
 else
   cat_fail=1
 fi

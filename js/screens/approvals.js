@@ -276,10 +276,14 @@ window.renderApprovals = async function(currentUser) {
     ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, leave, submissions, task reviews). Cash advances, raises and payroll deletions stay visible here so you can flag them — approving them is the President's.</span></div>`
       :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('ℹ️',16)} Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
+    <div id="approvals-payconfirm"></div>
     ${window.chipTabs(approvalChips, 'all')}
     <div id="approvals-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+  // "Payments to confirm" (SALES-QUICK-FIXES-SPEC §5.4): the President's one-tap list, or Finance's stand-in list. Deliberately NOT part of the
+  // 14-query tuple or the chip counts — the function (js/departments.js) gates itself and leaves the host empty for everyone else.
+  if (typeof window.renderPaymentConfirmList === 'function') window.renderPaymentConfirmList(c.querySelector('#approvals-payconfirm'), { onDone: () => renderApprovals(currentUser) });
 
   // Which sub-tab the DOM currently inside #approvals-content belongs to. Seeded
   // to 'all' because the container is rendered above ALREADY holding the 'all'

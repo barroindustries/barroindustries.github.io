@@ -438,3 +438,17 @@ describe('4. window.Forms — the §9.3 contract', () => {
     F.bind(elsewhere); elsewhere.listeners[0][1](mk({ 'data-form': 'sales_order' })); assert.equal(calls.length, 3, 'a button outside the container is not ours');
   });
 });
+
+// 5. RULES IN STEP: the engine lets Sales store `soNumber` only because firestore.rules (QF's C4, deployed 2026-11-20) lists it as a Sales
+//    hand-off key. If either side changes alone, a Sales login either prints a fallback number or gets a refused write.
+describe('forms ↔ firestore.rules: Sales may store the SO number', () => {
+  it('ships salesMayWriteSoNumber = true, and the rules list soNumber and paNumber as Sales hand-off keys', () => {
+    const core = read('js/forms-core.js');
+    assert.match(core, /FC\.RULES = \{ salesMayWriteSoNumber: true \};/);
+    const rules = read('firestore.rules');
+    const m = rules.match(/function soHandoffKeys\(\)\s*\{\s*return \[([\s\S]*?)\];/);
+    assert.ok(m, 'soHandoffKeys() is in firestore.rules');
+    assert.match(m[1], /'soNumber'/);
+    assert.match(m[1], /'paNumber'/);
+  });
+});

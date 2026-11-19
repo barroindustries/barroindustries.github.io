@@ -249,8 +249,8 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     if (audience === 'finance') return isBooksTier(v) || extra;
     return false;
   };
-  // Flip to true in the same release as QF's C4 (firestore.rules lets the Sales list write `soNumber`). Until then a Sales login prints the fallback.
-  FC.RULES = { salesMayWriteSoNumber: false };
+  // QF's C4 is deployed (2026-11-20): firestore.rules lets Sales write `soNumber` on a confirmed (status recorded) order, so Sales stores the real serial.
+  FC.RULES = { salesMayWriteSoNumber: true };
   // May THIS viewer write this serial field under today's rules? job_projects: any staff, as long as the key is not a money key (joNumber is not).
   // sales_orders / payment_claims: the books tier only (the confirmer).
   FC.canStoreNumber = function (coll, field, viewer) {

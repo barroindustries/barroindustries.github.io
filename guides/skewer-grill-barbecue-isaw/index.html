@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-XLW3MXgn+Utun3WUId/fH3s2rh3SIeSaQHjzUTibxwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Skewer Grill Guide for Barbecue and Isaw | Barro Industries</title>
 <meta name="description" content="How to choose a skewer grill for Filipino barbecue and isaw: width, length, grill bars, charcoal or gas, and smoke. A guide from Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/skewer-grill-barbecue-isaw/">
@@ -177,7 +177,7 @@
           "name": "Do you make grills for isaw and barbecue?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "A stick grill is not one of our catalogue items, but we can fabricate stainless-steel items to your drawing. Send a drawing or sketch with a project brief and ask for a quotation built to it. Our catalogue does list a gas lava-rock griller on its own stand."
+            "text": "Yes. We make skewer grills as part of our grilling line, made to order, so request a quote and give the size you need. Our catalogue also lists a gas lava-rock griller on its own stand, with one, two or three burners."
           }
         }
       ]
@@ -914,6 +914,21 @@ body{margin:0;background:#fff;color:#0E1116}
 @media (prefers-reduced-motion:reduce){
   #site .pg-card,#site .pg-chips a{transition:none}
 }
+
+/* ── the starting price on /products/ and its eleven pages: the same line as the catalogue card (css/catalogue.css .cat-from): "From" small, the amount large, "+ VAT" small;
+   "Priced per project" is the same line, quieter. The two figures always equal the catalogue's (scripts/check-catalogue-cards.js). ── */
+#site .pg-card p.cat-from,#site .pg-example>p.cat-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;margin:0 0 14px;padding:0;color:var(--site-muted);font-size:14px;line-height:1.3}
+#site .pg-card p.cat-from data,#site .pg-example>p.cat-from data{color:var(--site-navy);font:600 22px/1.2 var(--site-sans);font-variant-numeric:tabular-nums}
+#site .pg-card p.cat-from .cat-vat,#site .pg-example>p.cat-from .cat-vat{font-size:14px}
+#site .pg-card p.cat-from.cat-from-ask,#site .pg-example>p.cat-from.cat-from-ask{color:var(--site-ink);font-size:15px;font-weight:500}
+#site .pg-example>p.cat-from{margin:8px 0 14px}
+
+/* two figures side by side; and an options block with no picture beside it */
+#site .pg-figs.pg-figs-two{max-width:640px}
+@media (min-width:600px){
+  #site .pg-figs.pg-figs-two{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+#site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
    (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
    contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
@@ -1097,12 +1112,9 @@ body{margin:0;background:#fff;color:#0E1116}
     <a href="/" id="site-brand"><img src="/site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Industries logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span></span></a>
     <nav id="site-nav" aria-label="Main">
       <a href="/services/">Services</a>
-      <a href="/products/">Products</a>
+      <a href="/catalogue/">Products</a>
       <a href="/work/">Our work</a>
-      <a href="/areas-we-serve/">Areas we serve</a>
-      <a href="/catalogue/">Catalogue</a>
       <a href="/guides/" aria-current="true">The Kitchen Guide</a>
-      <a href="/faq/">FAQ</a>
       <a href="/#contact">Contact</a>
     </nav>
     <a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>
@@ -1220,7 +1232,7 @@ body{margin:0;background:#fff;color:#0E1116}
         </div>
         <div>
         <h3>Lava rock on gas</h3>
-        <p>Our catalogue lists a gas lava-rock griller on its own stand, with one, two or three burners. A narrow stick grill is not one of its options.</p>
+        <p>Our catalogue lists a gas lava-rock griller on its own stand, with one, two or three burners. A narrow stick grill is a separate item in our grilling line.</p>
         </div>
         </div>
         <p>Our <a href="/guides/lava-rock-vs-charcoal-grill/">lava rock vs charcoal guide</a> compares them in detail, and the <a href="/products/commercial-griddles-grillers-and-fryers/">griddles, grillers and fryers</a> page describes the gas options you can choose.</p>
@@ -1239,7 +1251,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="help" aria-labelledby="help-h">
         <h2 id="help-h">How Barro Industries can help</h2>
-        <p>A skewer grill is not one of our catalogue items. We can fabricate stainless-steel items to your drawing, so send a drawing or sketch with the length, the width, the bars, the side rails and the stand: see <a href="/services/stainless-steel-fabrication/">stainless-steel fabrication</a> and our <a href="/guides/custom-stainless-steel-fabrication-guide/">guide to ordering work to your drawing</a>. Everything is made to order, in food-grade SS304 stainless steel as standard, with seams welded and ground smooth.</p>
+        <p>We make skewer grills as part of our grilling line, made to order. <a href="/catalogue/?quote=1">Request a quote</a> and give the size you need in your request: the length, the width and where the grill will stand. Add any other detail as a note and we will confirm it in the quotation. Everything is made to order, in food-grade SS304 stainless steel as standard, with seams welded and ground smooth. For anything not on our list, send a drawing or sketch: see <a href="/services/stainless-steel-fabrication/">stainless-steel fabrication</a> and our <a href="/guides/custom-stainless-steel-fabrication-guide/">guide to ordering work to your drawing</a>.</p>
         <p>For a stall inside a building, we design, fabricate, deliver and install the <a href="/services/exhaust-and-fresh-air-systems/">hood and exhaust</a> over the grill. We are based in Quezon City and work across Metro Manila and Luzon.</p>
         <p>The quickest way to start is the <a href="/sales/clientinformationrequest/">project brief</a>. Tell us the length of your sticks, how many you sell and where the grill will stand. You can also browse the <a href="/catalogue/">catalogue</a> and request a quote online for the <a href="/products/stainless-steel-work-tables/">tables</a> and <a href="/products/stainless-steel-shelving/">shelves</a> around it. We give a 6-month service warranty on our equipment and work, and full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>
       </section>
@@ -1265,7 +1277,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
       <div class="faq-item">
         <h3>Do you make grills for isaw and barbecue?</h3>
-        <p>A stick grill is not one of our catalogue items, but we can fabricate stainless-steel items to your drawing. Send a drawing or sketch with a project brief and ask for a quotation built to it. Our catalogue does list a gas lava-rock griller on its own stand.</p>
+        <p>Yes. We make skewer grills as part of our grilling line, made to order, so request a quote and give the size you need. Our catalogue also lists a gas lava-rock griller on its own stand, with one, two or three burners.</p>
       </div>
     </div>
   </section>
@@ -1277,7 +1289,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="related" class="site-sec site-sec-paper" aria-labelledby="related-h">
   <div class="site-wrap">
     <header class="sec-head">
-      <p class="eyebrow kg-kicker"><a href="/guides/#equipment">Equipment guides</a></p>
+      <p class="eyebrow">Keep reading</p>
       <h2 id="related-h">Related reading</h2>
     </header>
     <div class="pg-cards pg-cards-3 pg-cards-text">
@@ -1335,7 +1347,7 @@ body{margin:0;background:#fff;color:#0E1116}
       </ul>
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
-    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
+    <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>

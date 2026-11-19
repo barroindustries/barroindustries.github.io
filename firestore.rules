@@ -2274,17 +2274,50 @@ service cloud.firestore {
       allow read:   if isAuth() && (
         resource.data.createdBy == request.auth.uid || hasProfile()
       );
-      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.get('status', 'pending') == 'pending';
+      // Sales (creator or Sales dept): payment fields until confirmed, hand-off fields after. Never money totals.
+      function soDiff() { return request.resource.data.diff(resource.data).affectedKeys(); }
+      function soPayKeys() { return ['paymentReceived','paymentMethod','vatTreatment','orRef','paymentDate',
+        'receiptUrl','receiptName','paymentConfirm']; }
+      function soHandoffKeys() { return ['sentToDesign','sentToDesignAt','designProjectId','sentToProduction',
+        'sentToProductionAt','designDoneAt','designDoneBy','handoffDrawing','releasedAt','releasedBy','releasedByName',
+        'soNumber','paNumber']; }
+      function soSalesUpdate() {
+        return hasProfile() && !isSecretary()
+          && (resource.data.createdBy == request.auth.uid || inDept('Sales'))
+          && soDiff().hasOnly(soPayKeys().concat(soHandoffKeys())
+               .concat(['status','targetDate','priority','notes','trackingToken','updatedAt']))
+          && ( request.resource.data.get('status','') == resource.data.get('status','')
+               || (resource.data.get('status','') == 'payment_rejected' && request.resource.data.get('status','') == 'pending') )
+          && ( !soDiff().hasAny(soPayKeys()) || resource.data.get('status','') != 'recorded' )
+          && ( !soDiff().hasAny(['paymentConfirm']) || request.resource.data.paymentConfirm.get('decision', null) == null )
+          && ( !soDiff().hasAny(soHandoffKeys()) || resource.data.get('status','') == 'recorded' );
+      }
+      // F2: a decision carries the decider's own uid.
+      function soDecisionOk() {
+        return !soDiff().hasAny(['paymentConfirm'])
+          || request.resource.data.paymentConfirm.get('decision', null) == null
+          || request.resource.data.paymentConfirm.get('decidedBy', '') == request.auth.uid;
+      }
+      // F2: only the President may confirm a flow-2 order he or she created.
+      function soSelfConfirmOk() {
+        return !( resource.data.get('flowVersion', 0) == 2
+                  && resource.data.get('status','') != 'recorded'
+                  && request.resource.data.get('status','') == 'recorded' )
+          || isPresident() || resource.data.createdBy != request.auth.uid;
+      }
       // Finance keeps full update rights. Design may write ONLY the design-flow
       // handoff fields (send-to-production stamps + the handoff trio) — never
       // money/status/recorded* fields. hasOnly on the affected-keys diff.
-      allow update: if isAuth() && (
+      allow update: if isAuth() && soDecisionOk() && soSelfConfirmOk() && (
         canFinance()
         || ( canDesign()
              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
                   ['sentToProduction', 'sentToProductionAt',
                    'targetDate', 'priority', 'notes',
                    'designDoneAt', 'designDoneBy', 'noDrawingsNeeded', 'updatedAt']) )
+        || soSalesUpdate()
       );
       allow delete: if isAuth() && isPresident();
     }
@@ -2299,7 +2332,7 @@ service cloud.firestore {
       // writes not touching money keys are unaffected).
       allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || hasProfile())
         && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(
-               ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule'])
+               ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule', 'contractAmount'])
              || canFinance() );
       allow delete: if isAuth() && isAdmin();
     }
