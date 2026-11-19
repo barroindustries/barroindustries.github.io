@@ -133,34 +133,41 @@
         function (err) { return { ok: false, err: err }; });
     } catch (err) { return Promise.resolve({ ok: false, err: err }); }
   }
-  /* the user's own profile.  Inside the ops app the builder runs in an iframe, and there a direct get() of users/<uid> can hang (the app's presence heartbeat writes that
-     document all the time; on v15.0.2 the President loaded as Sales because the read never answered).  A query by document id answers at once, so after PROFILE_WAIT_MS
-     the read asks that way instead, and last the local cache.  Whichever answers first wins; an error falls through to the next way. */
-  var PROFILE_WAIT_MS = 2500;
-  function getProfile(uid) {
-    var WAIT = {};
+  /* A read that always answers.  Inside the ops app the builder is an iframe and Firestore runs with synchronizeTabs, so a plain get() of a document the app itself listens to
+     (users/<uid>: the presence heartbeat) can wait forever (v15.0.1/2: the President loaded as Sales).  getDocSafe starts the plain read AND a query by document id together
+     (a different target, it answers at once) and takes the first good answer; if neither answers in `ms`, the local cache; failing that { ok:false, err:{ code:'timeout' } }.
+     Never rejects.  Used for the profile, the reopen reads and the approver's name (Fable review F1). */
+  var SAFE_READ_MS = 3000;
+  function getDocSafe(coll, id, ms) {
+    ms = ms || SAFE_READ_MS;
     function viaQuery() {
       try {
         var fp = (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldPath) ? firebase.firestore.FieldPath.documentId() : null;
         if (!fp) return Promise.resolve({ ok: false, err: { code: 'no-fieldpath' } });
-        return db.collection('users').where(fp, '==', uid).limit(1).get().then(function (s) {
+        return db.collection(coll).where(fp, '==', id).limit(1).get().then(function (s) {
           var d = s && s.docs && s.docs[0]; return { ok: true, exists: !!d, data: d ? (d.data() || {}) : null };
         }, function (err) { return { ok: false, err: err }; });
       } catch (err) { return Promise.resolve({ ok: false, err: err }); }
     }
     function viaCache() {
       try {
-        return db.collection('users').doc(uid).get({ source: 'cache' }).then(function (s) { return { ok: true, exists: !!s.exists, data: s.exists ? (s.data() || {}) : null }; },
+        return db.collection(coll).doc(id).get({ source: 'cache' }).then(function (s) { return { ok: true, exists: !!s.exists, data: s.exists ? (s.data() || {}) : null }; },
           function (err) { return { ok: false, err: err }; });
       } catch (err) { return Promise.resolve({ ok: false, err: err }); }
     }
-    var direct = getDoc('users', uid);
-    var wait = new Promise(function (res) { setTimeout(function () { res(WAIT); }, PROFILE_WAIT_MS); });
-    return Promise.race([direct, wait]).then(function (r) {
-      if (r !== WAIT && r.ok) return r;
-      return viaQuery().then(function (q) { return q.ok ? q : viaCache().then(function (c) { return c.ok ? c : (r !== WAIT ? r : q); }); });
+    return new Promise(function (res) {
+      var done = false, pending = 2, lastErr = null;
+      function finish(r) { if (!done) { done = true; res(r); } }
+      function one(r) {
+        if (done) return;
+        if (r && r.ok) return finish(r);
+        lastErr = r; if (--pending === 0) viaCache().then(function (c) { finish(c.ok ? c : (lastErr || c)); });
+      }
+      setTimeout(function () { if (!done) viaCache().then(function (c) { finish(c.ok ? c : { ok: false, err: { code: 'timeout' } }); }); }, ms);
+      getDoc(coll, id).then(one); viaQuery().then(one);
     });
   }
+  function getProfile(uid) { return getDocSafe('users', uid); }
   function getAll(coll) {
     try {
       return db.collection(coll).get().then(function (s) {
@@ -348,7 +355,7 @@
   function profileName(p) { return isObj(p) ? str(p.name || p.displayName || p.fullName).trim() : ''; }
   function withApproverName(c) {
     if (!c || c.approvedByName || !c.approvedBy) return Promise.resolve(c);
-    return getDoc('users', c.approvedBy).then(function (r) {
+    return getDocSafe('users', c.approvedBy).then(function (r) {
       var n = r.ok && r.exists ? profileName(r.data) : '';
       return n ? Object.assign({}, c, { approvedByName: n }) : c;
     }, function () { return c; });
@@ -378,7 +385,7 @@
       var d = isObj(st) ? st : {};
       if (!d.sourceDocId || !d.sourceCollection) return Promise.resolve(false);                  // not a reopen: the pricing fields already brought the carry (or none)
       var coll = str(d.sourceCollection), id = str(d.sourceDocId);
-      return Promise.all([getDoc(coll, id), getDoc('quote_costs', coll + '_' + id)]).then(function (r) {
+      return Promise.all([getDocSafe(coll, id), getDocSafe('quote_costs', coll + '_' + id)]).then(function (r) {
         var qd = r[0], sc = r[1], c = null;
         if (qd.ok && qd.exists && qd.data.approvalStatus === 'approved') c = carryFromDoc(qd.data, coll, id);
         else if (sc.ok && sc.exists && isObj(sc.data.approval)) c = carryFromSidecar(sc.data.approval, coll, id);

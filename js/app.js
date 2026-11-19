@@ -5581,6 +5581,8 @@ window.addEventListener('message', async (e) => {
     }
   } catch(err) {
     console.error('[QB bridge]', err);
+    // Fable review F3 (2026-11-20): the builder already shows FILED; a refused or failed write must never be silent.
+    try { Notifs.showToast('The quote was NOT saved: ' + ((err && (err.message || err.code)) || 'unknown error') + '. Try again, or tell Neil.', 'error'); } catch (_) {}
   }
 });
 

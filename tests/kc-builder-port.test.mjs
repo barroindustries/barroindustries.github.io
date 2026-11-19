@@ -115,7 +115,7 @@ describe('the page — static: the loaders, the shim, the gate, the stamp, what 
     for (const type of ['QB_READY', 'QUOTE_FILED', 'QUOTE_UPDATE', 'QUOTE_APPROVAL_REQUESTED', 'QUOTE_DRAFT', 'QUOTE_SAVE_DRAFT', 'QUOTE_SAVE_TEMPLATE', 'QUOTE_REQUEST_TEMPLATES', 'QUOTE_STATE', 'QB_OPEN_SOURCE']) {
       assert.ok(new RegExp(`window\\.parent\\.postMessage\\(\\s*\\{\\s*type:'${type}'`).test(SCRIPT), `${type} is posted with window.parent.postMessage`);
     }
-    assert.equal((code.match(/window\.parent\s*===\s*window/g) || []).length, 2, 'both "open the builder from the app" guards');
+    assert.equal((code.match(/window\.parent\s*===\s*window/g) || []).length, 3, 'the three "open the builder from the app" guards (open source, save draft, and since the Fable review F2 also file)');
     assert.match(SCRIPT, /fetch\('products-database\.json'/, 'the live fallback to products-database.json is still there');
     assert.match(SCRIPT, /localStorage\.setItem\('bkqb_items'/);
     assert.match(SCRIPT, /'qbTutSeenVer'/);
@@ -746,5 +746,24 @@ describe('Addendum 2 B2: the line block (with the item code at its start) is dra
     assert.match(b.el('itemsTbody').innerHTML, /<div class="print-only sheet-slot"><div class="kc-d d7-blk"><div class="kc-d-code">GR-LR-900<\/div><div class="kc-d-title">Lava rock griller<\/div><\/div><\/div>/, 'KC: the print slot holds it, so the Client preview, the A4 pages and every copy that clones the slot carry it');
     assert.equal((b.el('itemsTbody').innerHTML.match(/<th\b/g) || []).length, 0, 'no new header cell in the row');
     assert.equal((b.el('itemsThead').innerHTML.match(/<th\b/g) || []).length, 7, 'still seven columns: no column for the code');
+  });
+});
+
+describe('Fable review 2026-11-20: filing never lies and never waits forever', () => {
+  const code = stripComments(SCRIPT);
+  const fileFn = code.slice(code.indexOf('async function fileQuotation(){'), code.indexOf('async function fileQuotation(){') + 600);
+  it('F2: opened on its own page, File refuses with a plain message before anything is marked FILED', () => {
+    assert.match(fileFn, /if\(window\.parent===window\)\{\s*showToast\('Filing needs the app[^']*','error'\);\s*return;\s*\}/);
+    assert.ok(fileFn.indexOf('window.parent===window') < fileFn.indexOf('canFile') || fileFn.indexOf('canFile') < 0, 'the guard comes first');
+  });
+  it('F3: when the app fails to save a filed quote, the person is told (the bridge catch shows a toast, it does not only log)', () => {
+    const app = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+    const i = app.indexOf("console.error('[QB bridge]', err);");
+    assert.ok(i > 0); assert.match(app.slice(i, i + 400), /Notifs\.showToast\('The quote was NOT saved: '/);
+  });
+  it('F9: the quote-number reservation gives up after 8 s and falls back, so Verify & File cannot hang', () => {
+    const r = code.slice(code.indexOf('async function reserveAtomicQnoSeq(){'), code.indexOf('async function fileQuotation(){'));
+    assert.match(r, /Promise\.race\(\[\s*db\.runTransaction\(/); assert.match(r, /setTimeout\(\(\)=>rej\(new Error\('quote-number reservation timed out'\)\),8000\)/);
+    assert.match(r, /\}catch\(e\)\{ console\.warn\('\[reserveAtomicQnoSeq\]',e\); \}/, 'a timeout lands in the existing fallback');
   });
 });

@@ -9468,12 +9468,16 @@ async function reserveAtomicQnoSeq(){
   const key=`qno_${co}_${loc}_${mth}_${d}`;
   try{
     const ref=db.collection('_counters').doc(key);
-    const next=await db.runTransaction(async t=>{
-      const cur=await t.get(ref);
-      const n=(cur.exists?(cur.data().count||0):0)+1;
-      t.set(ref,{count:n},{merge:true});
-      return n;
-    });
+    // Fable review F9 (2026-11-20): never let Verify & File wait forever on the counter (inside the app frame a read can stall); after 8 s the existing fallback applies.
+    const next=await Promise.race([
+      db.runTransaction(async t=>{
+        const cur=await t.get(ref);
+        const n=(cur.exists?(cur.data().count||0):0)+1;
+        t.set(ref,{count:n},{merge:true});
+        return n;
+      }),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('quote-number reservation timed out')),8000))
+    ]);
     const seqEl=document.getElementById('qnoSeq');
     if(seqEl) seqEl.value=next;
     buildQuoteNo();
@@ -9482,6 +9486,8 @@ async function reserveAtomicQnoSeq(){
 
 async function fileQuotation(){
   if(_isFiling) return; // double-tap guard — see note above canFile()
+  // Fable review F2 (2026-11-20): opened on its own (not inside the app) the page is its own parent, so a filed quote would be posted to nobody while the badge said FILED.
+  if(window.parent===window){ showToast('Filing needs the app — open the builder from Sales › Quote Builder. Nothing was filed; your work is still kept on this device.','error'); return; }
   // Belt-and-braces: canFile() already covers this and the button is disabled,
   // but fileQuotation() is also reachable programmatically — never let a quote
   // whose milestones don't total the contract price reach Firestore.
