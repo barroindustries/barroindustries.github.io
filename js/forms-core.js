@@ -883,6 +883,7 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
       { key: 'workOrders', label: 'Work orders', list: true, from: workOrderNos },
       { key: 'drawings', label: 'Released drawings', list: true, from: crewDrawings },
       { key: 'clientDrawing', label: 'Client-supplied drawing', from: clientDrawingOf },
+      { key: 'standing', label: 'Standing instructions', list: true, from: (c) => arr((joOf(c) || {}).standing).map(str).filter(Boolean) },   // the house list incl. the 12-month warranty, as on the old printJobOrder sheet
       { key: 'instructions', label: 'Special requests', freeText: true, from: (c) => (joOf(c) || {}).instructions },
       { key: 'salesNotes', label: 'Notes from Sales / Design', freeText: true, from: (c) => str(c.project && c.project.notes) },
       { key: 'revisions', label: 'Revision history', list: true, from: crewRevisions },

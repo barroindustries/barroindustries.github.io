@@ -702,3 +702,24 @@ describe('F3 apply → forms: the revision ContractCore writes prints on the Sal
     assert.ok(!/₱|Client added a pot rack/.test(joHtml), 'the job order carries no amount and no Sales reason');
   });
 });
+
+// ── warranty: owner 2026-11-20 "Make the warranty 12 months on both" (Sales Order and Job Order) ─────────────────────
+describe('warranty is 12 months on the Sales Order and the Job Order', () => {
+  const txt = (html) => html.replace(/<\/div>/g, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  it('the Sales Order terms say 12 months and never 6', () => {
+    const fx = fixtures();
+    const p = FC.prepare('sales_order', ctxOf({ order: fx.order, project: fx.project }, PEOPLE.uriel));
+    assert.equal(p.ok, true, p.error);
+    const t = txt(FC.compose(p, FC.renderSections(p)).bodyHtml);
+    assert.ok(/12-month warranty/.test(t), 'Sales Order: 12-month warranty');
+    assert.ok(!/6-month/.test(t), 'Sales Order: no 6-month wording left');
+  });
+  it('the Job Order says 12 months and never 6', () => {
+    const fx = fixtures();
+    const p = FC.prepare('job_order', ctxOf({ project: fx.project, order: fx.order }, PEOPLE.rene));
+    assert.equal(p.ok, true, p.error);
+    const t = txt(FC.compose(p, FC.renderSections(p)).bodyHtml);
+    assert.ok(/12-month warranty/.test(t), 'Job Order: 12-month warranty');
+    assert.ok(!/6-month/.test(t), 'Job Order: no 6-month wording');
+  });
+});
