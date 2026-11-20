@@ -1602,7 +1602,7 @@ describe('firestore.rules › quote_requests / client_info_requests — the quot
   });
   it('the rest of both rules is untouched: signed-in read with a users profile, no create / delete, Sales-tier writers only, attribution fields name the real writer', () => {
     for (const b of [qrBlock, cirBlock]) {
-      assert.match(b, /allow read: if isAuth\(\) && hasProfile\(\);/);
+      assert.match(b, /allow read: if isAuth\(\) && hasProfile\(\) && isOfficeStaff\(\);/);   // office staff only (owner, 2026-11-20)
       assert.match(b, /allow create, delete: if false;/);
       assert.match(upd(b), /allow update: if isAuth\(\) && cirWriter\(\)/);
       assert.match(upd(b), /statusChangedBy'\]\)\s*\|\|\s*request\.resource\.data\.statusChangedBy == request\.auth\.uid/);

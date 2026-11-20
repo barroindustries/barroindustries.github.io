@@ -87,8 +87,8 @@ describe('deleting a cash advance removes every ledger row it posted', () => {
     await del('cash_advances', 'ca1');
     assert.equal(db.cols.cash_advances.has('ca1'), false, 'the advance itself is deleted');
     assert.deepEqual([...db.cols.ledger.keys()].sort(), ['near', 'other', 'pay'], 'exactly the advance\'s own rows are removed');
-    // rollup: release + principal legs are subtracted; the interest leg never reached finance_rollup (F3), so it is not
-    assert.deepEqual(synced.map(([r]) => r).sort(), ['CA-ca1', 'CA-ca1-REPAY-p1', 'CA-ca1-REPAY-p2']);
+    // rollup: every removed row is subtracted — the interest leg too, since it is synced in when posted (F3)
+    assert.deepEqual(synced.map(([r]) => r).sort(), ['CA-ca1', 'CA-ca1-REPAY-p1', 'CA-ca1-REPAY-p2', 'CA-ca1-REPAY-p2-INT']);
     assert.ok(synced.every(([, s]) => s === -1));
   });
 

@@ -182,9 +182,9 @@ describe('2. header, companies, logo', () => {
 describe('3. the peso wall (§9.7)', () => {
   const { project } = fixtures();
   it('the four Phase 1 entries are registered with the spec\'s titles and audiences', () => {
-    const got = Object.fromEntries(FC.list().map((e) => [e.id, [e.title, e.audience]]));
+    const got = Object.fromEntries(FC.list().filter((e) => ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id)).map((e) => [e.id, [e.title, e.audience]]));
     assert.deepEqual(got, { sales_order: ['SALES ORDER', 'sales'], payment_ack: ['PAYMENT ACKNOWLEDGEMENT', 'sales'], job_order: ['JOB ORDER', 'ops'], handoff_pack: ['HANDOFF PACK', 'ops'] });
-    for (const e of FC.list()) { assert.equal(e.bodySet, 'js/forms-set-1.js'); assert.equal(e.orientation, 'portrait'); }
+    for (const e of FC.list()) { assert.equal(e.bodySet, ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id) ? 'js/forms-set-1.js' : 'js/forms-set-2.js'); assert.equal(e.orientation, 'portrait'); }
     for (const id of ['job_order', 'handoff_pack']) assert.deepEqual(FC.get(id).needs, ['js/screens/production.js']);
   });
   it('registering an ops entry with a money:true field throws, and registers nothing', () => {
@@ -700,5 +700,26 @@ describe('F3 apply → forms: the revision ContractCore writes prints on the Sal
     assert.equal(jo.ok, true, jo.error); assert.equal(jo.numberText, 'JO-0012 R1');
     const joHtml = FC.compose(jo, FC.renderSections(jo)).bodyHtml;
     assert.ok(!/₱|Client added a pot rack/.test(joHtml), 'the job order carries no amount and no Sales reason');
+  });
+});
+
+// ── warranty: owner 2026-11-20 "Make the warranty 12 months on both" (Sales Order and Job Order) ─────────────────────
+describe('warranty is 12 months on the Sales Order and the Job Order', () => {
+  const txt = (html) => html.replace(/<\/div>/g, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  it('the Sales Order terms say 12 months and never 6', () => {
+    const fx = fixtures();
+    const p = FC.prepare('sales_order', ctxOf({ order: fx.order, project: fx.project }, PEOPLE.uriel));
+    assert.equal(p.ok, true, p.error);
+    const t = txt(FC.compose(p, FC.renderSections(p)).bodyHtml);
+    assert.ok(/12-month warranty/.test(t), 'Sales Order: 12-month warranty');
+    assert.ok(!/6-month/.test(t), 'Sales Order: no 6-month wording left');
+  });
+  it('the Job Order says 12 months and never 6', () => {
+    const fx = fixtures();
+    const p = FC.prepare('job_order', ctxOf({ project: fx.project, order: fx.order }, PEOPLE.rene));
+    assert.equal(p.ok, true, p.error);
+    const t = txt(FC.compose(p, FC.renderSections(p)).bodyHtml);
+    assert.ok(/12-month warranty/.test(t), 'Job Order: 12-month warranty');
+    assert.ok(!/6-month/.test(t), 'Job Order: no 6-month wording');
   });
 });

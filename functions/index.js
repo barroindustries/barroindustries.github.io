@@ -421,8 +421,9 @@ exports.createUserDocOnAuthCreate = functions.auth.user().onCreate(async (user) 
       // Path B — brand-new account (e.g. added straight in the Auth console):
       // mint a default employee profile with a fresh employee id.
       const counter = await t.get(counterRef);
-      const next = (counter.exists ? counter.data().count : 0) + 1;
-      const empId = `BI-${new Date().getFullYear()}-${String(next).padStart(3, '0')}`;
+      const inUse = await t.get(db.collection('users').select('employeeId'));
+      const { next, employeeId: empId } = staff.nextEmployeeNumber(counter.exists ? counter.data().count : 0,
+        inUse.docs.map((d) => d.get('employeeId')), new Date().getFullYear());
       t.set(counterRef, { count: next }, { merge: true });
       t.set(userRef, {
         uid: user.uid,
@@ -708,11 +709,12 @@ exports.createStaffAccount = functions.https.onCall(async (data, context) => {
     }
     let employeeId = req.employeeId || '';
     if (req.kind === 'invite') {
-      // Same counter and format the client transaction used.
+      // Same counter and format the client transaction used, but never behind a number already in use (nextEmployeeNumber).
       const c = await t.get(counterRef);
-      const next = (c.exists ? c.data().count : 0) + 1;
-      t.set(counterRef, { count: next }, { merge: true });
-      employeeId = `BI-${manilaDate().slice(0, 4)}-${String(next).padStart(3, '0')}`;
+      const inUse = await t.get(db.collection('users').select('employeeId'));
+      const n = staff.nextEmployeeNumber(c.exists ? c.data().count : 0, inUse.docs.map((d) => d.get('employeeId')), manilaDate().slice(0, 4));
+      t.set(counterRef, { count: n.next }, { merge: true });
+      employeeId = n.employeeId;
     }
     userDoc = staff.buildStaffUserDoc(req, uid, context.auth.uid, employeeId, manilaDate(), admin.firestore.FieldValue);
     t.create(userRef, userDoc);

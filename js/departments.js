@@ -653,11 +653,11 @@ async function financeDeleteCascade(collection, docId, batch) {
     const legs = await db.collection('ledger').where('refNumber', '>=', pfx).where('refNumber', '<', pfx + '\uf8ff').get();
     for (const leg of legs.docs) {
       batch.delete(leg.ref);
-      const row = leg.data();
-      // The -INT rows are posted with a raw add and never reach finance_rollup (review item F3), so
-      // subtracting them here would push the rollup BELOW the ledger. Only the principal rows go to
-      // the post-commit rollup sync (asset rows, a zero income/expense delta either way).
-      if (!/-INT$/.test(row.refNumber || '')) staleLedgerRows.push(row);
+      // Every leg goes to the post-commit rollup sync: the principal rows are asset rows (a zero
+      // income/expense delta), and the -INT interest rows have been synced into finance_rollup when
+      // posted since the F3 fix (CashAdvance.recordPayment) — older ones are folded in by the one-time
+      // Finance Tools → Rebuild rollups that shipped with it.
+      staleLedgerRows.push(leg.data());
     }
   }
   return staleLedgerRows;

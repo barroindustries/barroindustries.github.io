@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.24';
+window.APP_VERSION = '15.0.29';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -3330,12 +3330,19 @@ window.CashAdvance = {
           // ref (-INT) so it is independently idempotent and a resync can tell
           // the two legs apart.
           if (result.split.interest > 0) {
-            await db.collection('ledger').add({
+            const intRow = {
               ..._common, accountType:'income', account:'Other Income',
               description:`Cash advance interest — ${result.userName||''}`.trim(),
               amount: result.split.interest, refNumber: `${lref}-INT`,
               ...window.BankAccounts.tag(bankAccount, 'in')
-            });
+            };
+            await db.collection('ledger').add(intRow);
+            // 2026-11-20 review (F3). This is INCOME, but a raw add bypasses Ledger.post, so it never
+            // reached finance_rollup and Finance Overview (built from the rollups) under-reported CA
+            // interest until someone ran Rebuild rollups. Sync it the way Ledger.post does: a separate,
+            // best-effort write after the ledger row exists (_syncRollup never throws). The principal
+            // leg above is an asset row — a zero income/expense delta — so it needs no sync.
+            if (window.Ledger && typeof window.Ledger._syncRollup === 'function') await window.Ledger._syncRollup(intRow, +1);
           }
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
         }
@@ -3425,10 +3432,22 @@ window.CashAdvance = {
     // Custom source, priority: approved approval_requests(ca_deduct) → legacy
     // payroll_ca_overrides (transition only) → default installment.
     let customAmount = null, source = 'installment';
-    const reqAllSnap = await dbCachedGet('ca-deduct-requests-' + month,
-      () => db.collection('approval_requests')
-        .where('type','==','ca_deduct').where('month','==',month).where('status','==','approved')
-        .get().catch(()=>({docs:[]})), 0);
+    // Approved requests live in ca_deduct_requests (2026-11-20); the legacy
+    // approval_requests(type=ca_deduct) docs are read too until the one-time
+    // migration has run. Merged by doc id so a half-migrated doc is not counted twice.
+    const reqAllSnap = await dbCachedGet('ca-deduct-requests-' + month, async () => {
+      const [a, b] = await Promise.all([
+        db.collection('ca_deduct_requests')
+          .where('month','==',month).where('status','==','approved')
+          .get().catch(()=>({docs:[]})),
+        db.collection('approval_requests')
+          .where('type','==','ca_deduct').where('month','==',month).where('status','==','approved')
+          .get().catch(()=>({docs:[]}))
+      ]);
+      const seen = new Set(), docs = [];
+      [...a.docs, ...b.docs].forEach(d => { if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); } });
+      return { docs };
+    }, 0);
     const mine = reqAllSnap.docs.filter(d => d.data().userId === uid);
     if (mine.length) { customAmount = mine[0].data().amount; source = 'custom-request'; }
     if (customAmount == null) {
