@@ -618,7 +618,7 @@ label.check-row.check-row-top,
 html.theme-astral .login-logo-fallback { background: var(--grad-pk-bl); }
 /* owner 2026-11-20: the horizontal Barro Industries logo replaces the round BK logo + the name. Navy on transparent,
    drawn white on the dark themes (same treatment as .splash-hlogo / .topbar-hlogo). */
-.login-hlogo { display: block; width: min(260px, 70vw); height: auto; margin: 0 auto 2px; }
+.login-hlogo { display: block; width: min(260px, 70vw); height: auto; margin: 0 auto 12px; }
 html:not(.light) .login-hlogo { filter: brightness(0) invert(1); }
 .login-title {
   font-family: var(--font-display);
@@ -633,7 +633,12 @@ html.theme-astral .login-title {
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-.login-sub { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 20px; }
+/* owner 2026-11-20: matches the splash — sentence case in the logo's ink, under a hairline the logo's width */
+.login-sub {
+  width: min(260px, 70vw); max-width: 100%; margin: 0 auto 20px;
+  padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 1.125rem; font-weight: 500; letter-spacing: 0.01em; color: var(--text-2);
+}
 .login-form { text-align: left; }
 .pw-wrap { position: relative; }
 .pw-wrap input { padding-right: 44px; }
