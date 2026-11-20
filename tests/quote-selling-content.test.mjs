@@ -9,9 +9,9 @@
 // WHAT IT PINS
 //   1. QB_STANDARD_PAGE   the builder's copy and js/config.js's copy are deep-equal (the builder is an iframe and keeps its own, like CO.*); every value is a string (or a frozen
 //                         list / map of strings); the headings are human labels, never ids; the owner's sentences word for word (materials with the HAIRLINE standard finish;
-//                         the 6-month service warranty; the KitchenShield PMS sentence; five process steps with NO durations; the references DMMMSU and ISPSC and nothing else;
+//                         the 12-month service warranty; the KitchenShield PMS sentence; five process steps with NO durations; the references DMMMSU and ISPSC and nothing else;
 //                         the registrations as text); no markup, no logo, no agency mark.
-//   2. The Warranty and Site Requirements terms   per company and per warranty plan (ruling #1): the default is the 6-month service warranty; the full-kitchen plan adds the
+//   2. The Warranty and Site Requirements terms   per company and per warranty plan (ruling #1): the default is the 12-month service warranty; the full-kitchen plan adds the
 //                         PMS sentence; Barro Industries reads the same; the Site Requirements term names the company that is quoting; the other six terms are exactly as they were.
 //                         Brilliant Steel (ruling #6) keeps its old wording byte for byte — the ONE place "12 months warranty" survives in the builder, a pinned constant.
 //   3. The approved includes / not-included (§3.5, ruling #3), the hairline default finish (#2) and the lead time (#4) of the eleven families, in scripts/public-families.json,
@@ -91,7 +91,7 @@ const resolver = new Function(`
   };
 `)();
 
-const WARRANTY_6 = '6-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.';
+const WARRANTY_6 = '12-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.';
 const KITCHENSHIELD = 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.';
 // Brilliant Steel exactly as it was (owner ruling 2026-11-05 #6)
 const BS_WARRANTY_OLD = '12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.';
@@ -124,7 +124,7 @@ describe('QB_STANDARD_PAGE — the text of the "Our standard" page', () => {
     assert.equal(strings(builderStd).some((s) => /[<>]|&lt;|&amp;[a-z]|<img|logo|badge|\.png|\.svg|\.jpe?g/i.test(s)), false, 'a registration or reference is TEXT: no markup, no logo, no agency mark');
   });
 
-  it('the owner\'s words, word for word: materials with HAIRLINE as the standard finish, the 6-month service warranty, the KitchenShield PMS sentence, the references, the registrations', () => {
+  it('the owner\'s words, word for word: materials with HAIRLINE as the standard finish, the 12-month service warranty, the KitchenShield PMS sentence, the references, the registrations', () => {
     assert.equal(builderStd.title, 'Our standard');
     assert.equal(builderStd.materials, 'Our standard material is SS304 food-grade stainless steel. SS316 laboratory grade is available on request. Standard finish: hairline. Brushed, mirror or satin on request.');
     assert.equal(builderStd.warranty.service6, WARRANTY_6);
@@ -155,10 +155,10 @@ describe('QB_STANDARD_PAGE — the text of the "Our standard" page', () => {
 });
 
 describe('the Warranty and Site Requirements terms — per company and per warranty plan (owner rulings 2026-11-05 #1 and #6)', () => {
-  it('Barro Kitchens, standard plan (the default): exactly the 6-month service warranty — no KitchenShield', () => {
+  it('Barro Kitchens, standard plan (the default): exactly the 12-month service warranty — no KitchenShield', () => {
     const t = resolver.terms('BK', 'service6');
     assert.equal(t.tc_warranty, WARRANTY_6);
-    assert.match(t.tc_warranty, /6-month service warranty/);
+    assert.match(t.tc_warranty, /12-month service warranty/);
     assert.equal(/KitchenShield|12 months|PMS/.test(t.tc_warranty), false);
   });
 
@@ -323,7 +323,8 @@ describe('the banned words — in every string this phase adds, and in the whole
   it('the What\'s New entry of this phase is clean (the old warranty sentence is not quoted back, even to say it is gone)', () => {
     const wn = new Function(`${sliceBetween(BUILDER, 'const WHATS_NEW = [', '\n];', 'quote-builder-v2.html')}\nreturn WHATS_NEW;`)();
     // 51 (the configurators, 2026-11-20) and 50 (owner Q70, Back to the form) sit on top; this phase's entries are 49 and 48
-    assert.deepEqual(wn.slice(0, 4).map((e) => e.ver), [51, 50, 49, 48]);
+    assert.deepEqual(wn.slice(0, 5).map((e) => e.ver), [52, 51, 50, 49, 48]);
+    assertClean('What\'s New 52', wn[0].items.join(' | ')); wn.shift();   // 52: owner 2026-11-20, the 12-month warranty
     assertClean('What\'s New 51', wn[0].items.join(' | '));
     assertClean('What\'s New 50', wn[1].items.join(' | '));
     assertClean('What\'s New 49', wn[2].items.join(' | '));

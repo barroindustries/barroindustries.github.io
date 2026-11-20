@@ -316,23 +316,23 @@ describe('the once-per-document text — docNotes(), summaryStrip(), constructio
 
   it('summaryStrip: validity · payment · lead time · delivery · warranty, in that order, blank parts skipped', () => {
     assert.equal(QS.summaryStrip({ validDays: 30, downPct: '50', balanceMode: 'lump', leadMin: 25, deliveryMethod: 'Company delivery truck', warrantyPlan: 'service6' }),
-      'Valid 30 days · 50% down payment, balance on completion · Lead time from 25 working days · Delivery: Company delivery truck · 6-month service warranty');
-    assert.equal(QS.summaryStrip({ validDays: 120, downPct: '30', balanceMode: 'stagger3' }), 'Valid 120 days · 30% down payment, balance in 3 staggered payments · 6-month service warranty');
+      'Valid 30 days · 50% down payment, balance on completion · Lead time from 25 working days · Delivery: Company delivery truck · 12-month service warranty');
+    assert.equal(QS.summaryStrip({ validDays: 120, downPct: '30', balanceMode: 'stagger3' }), 'Valid 120 days · 30% down payment, balance in 3 staggered payments · 12-month service warranty');
     assert.equal(QS.summaryStrip({ validDays: 30, downPct: '15', balanceMode: 'install12', warrantyOn: false }), 'Valid 30 days · 15% down payment, balance in 12 monthly installments');
-    assert.equal(QS.summaryStrip({ validDays: 30, downCustom: true, balanceMode: 'lump' }), 'Valid 30 days · custom down payment, balance on completion · 6-month service warranty');
-    assert.equal(QS.summaryStrip({ validDays: 30, milestones: 3, downPct: '40', balanceMode: 'lump' }), 'Valid 30 days · 3 payment milestones · 6-month service warranty');
-    assert.equal(QS.summaryStrip({ milestones: 1 }), '1 payment milestone · 6-month service warranty');
-    assert.equal(QS.summaryStrip({}), '6-month service warranty');
-    assert.equal(QS.summaryStrip(null), '6-month service warranty');
+    assert.equal(QS.summaryStrip({ validDays: 30, downCustom: true, balanceMode: 'lump' }), 'Valid 30 days · custom down payment, balance on completion · 12-month service warranty');
+    assert.equal(QS.summaryStrip({ validDays: 30, milestones: 3, downPct: '40', balanceMode: 'lump' }), 'Valid 30 days · 3 payment milestones · 12-month service warranty');
+    assert.equal(QS.summaryStrip({ milestones: 1 }), '1 payment milestone · 12-month service warranty');
+    assert.equal(QS.summaryStrip({}), '12-month service warranty');
+    assert.equal(QS.summaryStrip(null), '12-month service warranty');
     assert.equal(QS.summaryStrip({ warrantyOn: false }), '');
-    assert.equal(QS.summaryStrip({ validDays: 'x', downPct: 'x', leadMin: 0, deliveryMethod: '   ' }), '6-month service warranty');
+    assert.equal(QS.summaryStrip({ validDays: 'x', downPct: 'x', leadMin: 0, deliveryMethod: '   ' }), '12-month service warranty');
     // a down payment keeps up to two decimals (a 33.33% deposit is not "33%")
     assert.equal(QS.summaryStrip({ downPct: '33.33', balanceMode: 'lump', warrantyOn: false }), '33.33% down payment, balance on completion');
     assert.equal(QS.summaryStrip({ downPct: '12.5', warrantyOn: false }), '12.5% down payment');
   });
 
   it('summaryStrip: the KitchenShield part follows the full-kitchen plan ONLY — never the standard plan, never when the warranty is off', () => {
-    assert.equal(QS.summaryStrip({ warrantyPlan: 'kitchenshield12' }), '6-month service warranty · 12-month PMS with KitchenShield™');
+    assert.equal(QS.summaryStrip({ warrantyPlan: 'kitchenshield12' }), '12-month service warranty · 12-month PMS with KitchenShield™');
     for (const plan of ['service6', undefined, '', 'KITCHENSHIELD12', 'kitchenshield', null]) assert.equal(QS.summaryStrip({ warrantyPlan: plan }).includes('KitchenShield'), false, String(plan));
     assert.equal(QS.summaryStrip({ warrantyPlan: 'kitchenshield12', warrantyOn: false }), '');
   });

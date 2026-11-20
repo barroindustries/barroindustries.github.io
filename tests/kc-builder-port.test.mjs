@@ -154,9 +154,10 @@ describe('the page — static: the loaders, the shim, the gate, the stamp, what 
   });
 
   it('the tutorial (repo contract): TUTORIAL_VERSION 51 (Q70 shipped 50 first), What\'s New 51 on top in plain words, Help has the Configurators section and the device row, every TOUR_STEPS target resolves', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 52;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.equal(wn[0].ver, 51);
+    assert.equal(wn[0].ver, 52, 'v52 (owner 2026-11-20: 12-month warranty) on top'); assert.equal(wn[0].kc, true); wn.shift();
+    assert.equal(wn[0].ver, 51, 'the configurators entry');
     assert.equal(wn[1].ver, 50, 'the Q70 entry stays as history');
     assert.equal(wn[0].date, '2026-11-20');
     assert.ok(/Quotes, drafts and templates made before today open and price exactly as before/.test(wn[0].items.join(' ')));
@@ -562,11 +563,11 @@ describe('Addendum 1 (owner-approved): "Brilliance Steel" on screen, no prototyp
       b.run('clearForm()');
       assert.equal(b.run('quoteEngine'), kcOn ? 'kc1' : 'legacy');
       assert.equal(b.el('dpMode').value, dp, `down payment of a new ${kcOn ? 'KC' : 'legacy'} quote`);
-      assert.equal(b.el('warrantyPlan').value, 'service6', 'the 6-month service warranty is the plan of every new quote');
+      assert.equal(b.el('warrantyPlan').value, 'service6', 'the 12-month service warranty is the plan of every new quote');
       assert.equal(b.el('balMode').value, 'lump', 'the balance in one payment');
       assert.equal(b.run("getPricingFields().warrantyPlan"), 'service6');
     }
-    assert.match(HTML, /<select id="warrantyPlan"[^>]*>\s*<option value="service6"/, 'the markup\'s own first (selected) plan is the 6-month service warranty');
+    assert.match(HTML, /<select id="warrantyPlan"[^>]*>\s*<option value="service6"/, 'the markup\'s own first (selected) plan is the 12-month service warranty');
     assert.match(HTML, /<option value="65" hidden>65% Down Payment<\/option>/, 'the 65 % option exists and is shown only in KC mode');
   });
 
@@ -656,10 +657,10 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
   const seen = (b) => b.store.get('qbTutSeenVer') || null;
 
   it('static: the v51 entry is the one flagged kc:true (nothing else is), the version constant is still 51, the helpers exist, and initUI measures the tutorial again once the switch has been read', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 52;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.deepEqual(wn.filter((e) => e.kc).map((e) => e.ver), [51], 'only the configurators\' entry is held');
-    assert.equal(wn[0].ver, 51); assert.equal(wn[1].ver, 50); assert.equal(wn[1].kc, undefined);
+    assert.deepEqual(wn.filter((e) => e.kc).map((e) => e.ver), [52, 51], 'only the configurators\' entries (and the v52 warranty note shown with them) are held');
+    assert.equal(wn[0].ver, 52); assert.equal(wn[1].ver, 51); assert.equal(wn[2].ver, 50); assert.equal(wn[2].kc, undefined);
     for (const f of ['kcWhatsNewOn', 'whatsNewList', 'tutorialVersion', 'tutMarkSeen']) assert.ok(SCRIPT.includes(`function ${f}(`), f);
     assert.match(fnSource('kcWhatsNewOn'), /KCLive\.allowsNew\(\)/, 'the one question the page already asks for a new quote');
     const ui = stripComments(fnSource('initUI')); assert.ok(ui.indexOf('kcAdoptEngineIfBlank()') > 0 && ui.indexOf('initTutorial()') > ui.indexOf('kcAdoptEngineIfBlank()'), 'initTutorial runs again after the switch was read');
@@ -671,11 +672,11 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
     const b = mk(false); b.run('initTutorial()');
     assert.deepEqual(vers(b)[0], 50); assert.equal(vers(b).includes(51), false, 'no v51 entry'); assert.equal(/seven tabs|configurator/i.test(list(b)), false, 'nothing about the configurators');
     assert.equal(b.run('tutorialVersion()'), 50); assert.equal(b.run('kcWhatsNewOn()'), false);
-    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length') - 1);
+    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length') - 2);
   });
   it('switch ON (kcMode "on", or "president" for the President, or the device force: all of them are KCLive.allowsNew()): the list starts at 51 and the version is 51', () => {
     const b = mk(true); b.run('initTutorial()');
-    assert.equal(vers(b)[0], 51); assert.ok(/seven tabs/.test(list(b))); assert.equal(b.run('tutorialVersion()'), 51); assert.equal(b.run('kcWhatsNewOn()'), true);
+    assert.equal(vers(b)[0], 52); assert.ok(/seven tabs/.test(list(b))); assert.equal(b.run('tutorialVersion()'), 52); assert.equal(b.run('kcWhatsNewOn()'), true);
     assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length'));
   });
   it('the question is asked of the live layer and nothing else: no layer (D7.live off), no KCLive, no allowsNew, one that throws, or one that says no: all of these hold the entry back', () => {
@@ -699,8 +700,8 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
     b.run('initTutorial()'); assert.equal(dot(b), false, 'switch still off: nothing new'); assert.equal(bannerText(b), '');
     switchTo(b, true); b.run('initTutorial()');
     assert.equal(dot(b), true, 'the switch is on: v51 is news'); assert.match(bannerText(b), /The quote builder was updated/); assert.equal(seen(b), '50', 'initTutorial does not mark anything as seen');
-    assert.equal(vers(b)[0], 51);
-    b.run('openHelpModal()'); assert.equal(seen(b), '51'); assert.equal(dot(b), false); assert.equal(b.el('qbTutBanner').style.display, 'none');
+    assert.equal(vers(b)[0], 52);
+    b.run('openHelpModal()'); assert.equal(seen(b), '52'); assert.equal(dot(b), false); assert.equal(b.el('qbTutBanner').style.display, 'none');
     b.run('initTutorial()'); assert.equal(dot(b), false, 'once seen, it stays seen'); assert.equal(bannerText(b), '');
   });
   it('the update banner and the Help button are measured against what the person can see: with the switch off and 50 seen, nothing is pending; a person who last saw 49 is told, and Dismiss is remembered for the version they could see', () => {
@@ -711,24 +712,24 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
     switchTo(b, true); b.run('initTutorial()'); assert.match(bannerText(b), /updated/, 'dismissing 50 does not hide 51');
   });
   it('what a person has seen only grows: a person who saw 51 while it was on keeps 51 when it is switched off, and Help or the tour with the switch off never lowers it', () => {
-    const b = mk(true); b.run('openHelpModal()'); assert.equal(seen(b), '51'); b.run('closeHelpModal()');
-    switchTo(b, false); b.run('openHelpModal()'); assert.equal(seen(b), '51', 'never lowered to 50'); b.run('closeHelpModal()');
+    const b = mk(true); b.run('openHelpModal()'); assert.equal(seen(b), '52'); b.run('closeHelpModal()');
+    switchTo(b, false); b.run('openHelpModal()'); assert.equal(seen(b), '52', 'never lowered to 50'); b.run('closeHelpModal()');
     b.run('initTutorial()'); assert.equal(dot(b), false);
-    b.run('showTourStep = function () {}; startTour()'); assert.equal(seen(b), '51', 'the tour does not lower it either');
+    b.run('showTourStep = function () {}; startTour()'); assert.equal(seen(b), '52', 'the tour does not lower it either');
     b.run('endTour()');
     const t = mk(false); t.run('showTourStep = function () {}; startTour()'); assert.equal(seen(t), '50', 'the tour with the switch off marks 50, not 51'); assert.equal(dot(t), false);
     switchTo(t, true); t.run('initTutorial()'); assert.equal(dot(t), true, 'and 51 is still news the day it is on');
-    const d = mk(true); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '51'); switchTo(d, false); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '51', 'a dismissal is not lowered either');
+    const d = mk(true); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '52'); switchTo(d, false); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '52', 'a dismissal is not lowered either');
   });
   it('initTutorial is a pure function of the state it reads: run again after the switch is read, a banner that no longer applies goes away (it is never left showing)', () => {
     const b = mk(true); b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/);
-    b.store.set('qbTutSeenVer', '51'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'seen 51 with the switch on: nothing to tell');
-    b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/); b.store.set('qbTutDismissedVer', '51'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'dismissed at this version');
+    b.store.set('qbTutSeenVer', '52'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'seen 52 with the switch on: nothing to tell');
+    b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/); b.store.set('qbTutDismissedVer', '52'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'dismissed at this version');
   });
   it('the Help list is redrawn every time Help opens, so it follows the switch as it is then (and the device row of Help, which can turn it off)', () => {
-    const b = mk(true); b.run('initTutorial()'); assert.equal(vers(b)[0], 51);
+    const b = mk(true); b.run('initTutorial()'); assert.equal(vers(b)[0], 52);
     switchTo(b, false); b.run('openHelpModal()'); assert.equal(vers(b)[0], 50, 'off now: the v51 entry is gone from the list');
-    switchTo(b, true); b.run('openHelpModal()'); assert.equal(vers(b)[0], 51);
+    switchTo(b, true); b.run('openHelpModal()'); assert.equal(vers(b)[0], 52);
   });
   it('the keys are the same (qbTutSeenVer, qbTutDismissedVer) and are never renamed or cleared by the gate', () => {
     for (const k of ['qbTutSeenVer', 'qbTutDismissedVer']) assert.ok(SCRIPT.includes(`'${k}'`), k);
@@ -986,10 +987,10 @@ describe('Fable review F13 (2026-11-20): Help and the tour say what the page pri
     assert.ok(help.includes('named by its quote number and nothing else'));
     assert.equal(/"<quote no\.> Rev\. 1"|Rev\. 1"/.test(HTML), false);
   });
-  it('the tutorial version is NOT bumped by these copy fixes (a bump would pop the "updated" banner for everyone on launch day)', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
+  it('the tutorial version moved only for the owner\'s 12-month warranty (v52, 2026-11-20); the configurator copy fixes did not bump it', () => {
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 52;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.equal(wn[0].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
+    assert.equal(wn[0].ver, 52); assert.equal(wn[1].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
   });
 });
 

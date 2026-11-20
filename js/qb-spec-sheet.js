@@ -32,7 +32,7 @@
   var TEXT = Object.freeze({
     dimsLegend: 'Dimensions are Length × Width × Height in mm (hoods: Length × Depth).',
     toleranceNote: 'Fabricated dimensions carry the ±5 mm tolerance stated in the terms.',
-    warrantyShort: '6-month service warranty',
+    warrantyShort: '12-month service warranty',
     pmsShort: '12-month PMS with KitchenShield™'
   });
 
@@ -217,7 +217,7 @@
     var r = Math.round(n * 100) / 100;
     return String(r);
   }
-  // summaryStrip(state) -> "Valid 30 days · 50% down payment, balance on completion · Lead time from 25 working days · Delivery: Company delivery truck · 6-month service warranty"
+  // summaryStrip(state) -> "Valid 30 days · 50% down payment, balance on completion · Lead time from 25 working days · Delivery: Company delivery truck · 12-month service warranty"
   //   state = { validDays, milestones (count, in milestone mode), downPct, downCustom, balanceMode ('lump' | 'staggerN' | 'installN'), leadMin, deliveryMethod, warrantyOn (false: the
   //   warranty term is off), warrantyPlan ('service6' | 'kitchenshield12') }. A part with nothing to say is skipped; the KitchenShield part follows the plan only.
   function summaryStrip(state) {

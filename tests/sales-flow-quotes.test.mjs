@@ -344,7 +344,7 @@ describe('the Sales SOP (§6; version 3 of 2026-11-20: the Barro Kitchens proces
   it('the Quote step names the configurators, the standard terms and the discount rule; Approve and Send name the approval and the copies', () => {
     const d = sop(makeEnv(SALES, {}));
     const quote = stepText(d, 'Quote');
-    for (const needle of ['**Configure**', '**Add to Quote**', 'Standard Price List', '**Add custom item**', '65% down payment', '35% on delivery', '6-month service warranty', 'hairline', 'starts at none', '30% at most', 'never type one', '**Reload DB**', 'standalone page is preview only']) assert.ok(quote.includes(needle), `Quote step: ${needle}`);
+    for (const needle of ['**Configure**', '**Add to Quote**', 'Standard Price List', '**Add custom item**', '65% down payment', '35% on delivery', '12-month service warranty', 'hairline', 'starts at none', '30% at most', 'never type one', '**Reload DB**', 'standalone page is preview only']) assert.ok(quote.includes(needle), `Quote step: ${needle}`);
     assert.equal(d.steps.find((s) => s.short === 'Approve').owner, 'President (Neil)');
     assert.ok(stepText(d, 'Approve').includes('Messenger or Viber') && stepText(d, 'Approve').includes('**Approvals**'));
     const send = stepText(d, 'Send');
