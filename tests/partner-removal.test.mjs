@@ -305,6 +305,7 @@ describe('js/config.js registries', () => {
     assert.equal(win.QUOTE_COMPANIES.BS.internal, false);
     assert.equal(win.QUOTE_COMPANIES.BS.coll, 'bs_quotes');
     assert.equal(win.QUOTE_COMPANIES.BS.page, 'bs-quote-builder');
+    assert.equal(win.QUOTE_COMPANIES.BS.label, 'Brilliance Steel'); // owner 2026-11-20: display name (dept key stays 'Brilliant Steel')
     assert.deepEqual(keys(win.QUOTE_COMPANIES), ['BK', 'BI', 'BS']);
     assert.deepEqual([...win.QUOTE_COLLECTIONS], ['bk_quotes', 'bs_quotes']);
     const salesTabs = win.DEPARTMENTS.Sales.subtabs;

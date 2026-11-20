@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.18';
+window.APP_VERSION = '15.0.19';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -2839,7 +2839,7 @@ window.BRAND = {
 window.QUOTE_COMPANIES = {
   BK: { label:'Barro Kitchens',   coll:'bk_quotes', page:'bk-quote-builder', internal:true  },
   BI: { label:'Barro Industries', coll:'bk_quotes', page:'bk-quote-builder', internal:true  },
-  BS: { label:'Brilliant Steel',  coll:'bs_quotes', page:'bs-quote-builder', internal:false },
+  BS: { label:'Brilliance Steel', coll:'bs_quotes', page:'bs-quote-builder', internal:false },
 };
 // Every collection a quote may legitimately live in — the allowlist the
 // QUOTE_UPDATE bridge (js/app.js) validates an incoming collection against.
