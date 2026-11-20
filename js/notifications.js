@@ -254,6 +254,8 @@ window.Notifs = (() => {
     // Sales flow (SALES-QUICK-FIXES-SPEC-2026-11-19 §7): payment confirmation round-trip + a lost quote
     payment_confirm:{icon:'💵',accent:'#F76707'}, payment_confirmed:{icon:'✅',accent:'#2F9E44'},
     payment_rejected:{icon:'↩️',accent:'#E8590C'}, quote_lost:{icon:'✖️',accent:'#868E96'},
+    // F3 Revise contract amount (SALES-FLOW-SPEC-2026-11-19 §12)
+    contract_change:{icon:'📝',accent:'#F76707'}, contract_applied:{icon:'✅',accent:'#2F9E44'}, contract_rejected:{icon:'↩️',accent:'#E8590C'},
     // Purchasing / inventory
     po_approval:{icon:'🧮',accent:'#F76707'}, po_approval_result:{icon:'🧮',accent:'#2F9E44'},
     purchase_submitted:{icon:'🧮',accent:'#F76707'}, low_stock:{icon:'📦',accent:'#E8590C'},

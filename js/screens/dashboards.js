@@ -1106,6 +1106,7 @@ async function renderPresidentDashboard() {
         <span class="alert-chevron">›</span>
       </div>`:''}
       <div id="dash-payconfirm"></div>
+      <div id="dash-contractchange"></div>
 
       <div class="kpi-row">
         <div class="kpi-card">
@@ -1216,6 +1217,8 @@ async function renderPresidentDashboard() {
       const el = document.getElementById('dash-payconfirm');
       if (el && list.length) el.innerHTML = '<div class="alert-banner alert-warn" onclick="navigateTo(\'approvals\')"><span>' + emojiIcon('💵',16) + ' <strong>' + list.length + ' payment' + (list.length>1?'s':'') + '</strong> waiting for your confirmation</span><span class="alert-chevron">›</span></div>';
     }).catch(()=>{});
+    // Contract changes waiting for a decision (SALES-FLOW-SPEC §7.3): lazy js/contract-ui.js; silent on any failure.
+    try { window.ensureScript('js/contract-ui.js').then(() => window.ContractUI.renderBanner(document.getElementById('dash-contractchange'))).catch(()=>{}); } catch(_) {}
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
   }

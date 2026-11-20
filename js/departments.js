@@ -3833,6 +3833,8 @@ async function openSalesOrderModal(d, currentUser, currentRole, container, editO
    ═══════════════════════════════════════════════════════════════════════ */
 window.deleteSalesOrder = async function(o, onDone) {
   if (!o || !o.id) return;
+  // CONTRACT-REVISE-HOOK (F3, §7.9): an order with contract revisions (or one waiting) is never deleted - the revisions are on the books.
+  if ((Number(o.contractRev) || 0) > 0 || o.pendingRevision) { Notifs.showToast('This order has contract revisions. Cancel the job instead.', 'error'); return; }
   if (!(typeof isRealPresident === 'function' && isRealPresident())) {
     Notifs.showToast('Only the President can delete a sales order.', 'error'); return;
   }
@@ -3998,6 +4000,8 @@ window.renderSalesOrders = async function(container){
     if (st === 'rejected') h += sub(escHtml(pc.reason || ''), 'var(--danger)');
     if (['confirmed','in_design','in_production'].includes(st) && pc.onBehalf) h += sub(`Confirmed by ${escHtml(pc.decidedByName || '')} (Finance)`, 'var(--text-muted)');
     if (st === 'awaiting_confirmation' && viewer.isFinanceTier && !viewer.isPresident && viewer.uid && o.createdBy === viewer.uid) h += sub('You recorded this payment, so the President confirms it.', 'var(--text-muted)');
+    // CONTRACT-REVISE-HOOK (F3): placeholder filled lazily by js/contract-ui.js (revisions list, pending state, client credit). Nothing is loaded for an order that has none.
+    try { const _pj = o.projectId ? projById[o.projectId] : null; if ((Number(o.contractRev) || 0) > 0 || o.pendingRevision || (_pj && Number(_pj.clientCredit) > 0)) h += `<div class="so-adj" data-id="${escHtml(o.id)}"></div>`; } catch (_) {}
     return h;
   };
   // FLOW-FORM-HOOK: Sales Order / Payment Acknowledgement buttons from the form engine — only when it is ALREADY loaded
@@ -4040,6 +4044,8 @@ window.renderSalesOrders = async function(container){
       else if (isFin) b.push(emojiIcon('✓',16));
     }
     b.push(formBtns(o));
+    // CONTRACT-REVISE-HOOK (F3): "Revise contract amount" — Sales members and the President, once the payment is confirmed, until the job is paid or cancelled.
+    try { const _pj = o.projectId ? projById[o.projectId] : null; if (o.status === 'recorded' && (isSalesActor || isPres) && _pj && !['paid','cancelled'].includes(_pj.stage)) b.push(`<button class="btn-secondary btn-sm so-revise-btn" data-id="${o.id}" style="min-height:44px">Revise contract amount</button>`); } catch (_) {}
     if (isPres) b.push(`<button class="btn-danger btn-sm so-del-btn" data-id="${o.id}" title="Delete this sales order and everything it created">${emojiIcon('🗑',14)}</button>`);
     return `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end">${b.join('')}</div>`;
   };
@@ -4105,6 +4111,13 @@ window.renderSalesOrders = async function(container){
     const o = byId(b); if(!o) return;
     window.deleteSalesOrder(o, rerender);
   }));
+  // CONTRACT-REVISE-HOOK (F3): the sheet lives in js/contract-ui.js (lazy). A failed load is a plain toast, never a broken page.
+  c.querySelectorAll('.so-revise-btn').forEach(b=>b.addEventListener('click', ()=>window.busy(b, async ()=>{
+    const o = byId(b); if(!o) return;
+    try { await window.ensureScript('js/contract-ui.js'); await window.ContractUI.openReviseSheet(o, rerender); }
+    catch (_) { Notifs.showToast('Could not open the contract screen. Check your connection and try again.', 'error'); }
+  })));
+  try { if (c.querySelector('.so-adj')) window.ensureScript('js/contract-ui.js').then(()=>window.ContractUI.fillAdjustments(c, orders, projById, rerender)).catch(()=>{}); } catch (_) {}
   // The President's one-tap confirmation (or Finance standing in); each card is gated again inside the sheet and the core.
   c.querySelectorAll('.so-confirm-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.openPaymentConfirmSheet(o, rerender); }));
   c.querySelectorAll('.so-reject-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.rejectOrderPayment(o, rerender); }));

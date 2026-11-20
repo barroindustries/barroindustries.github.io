@@ -277,6 +277,7 @@ window.renderApprovals = async function(currentUser) {
       :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('ℹ️',16)} Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
     <div id="approvals-payconfirm"></div>
+    <div id="approvals-contractchange"></div>
     ${window.chipTabs(approvalChips, 'all')}
     <div id="approvals-content">${window.skeletonHtml('rows')}</div>
   `;
@@ -284,6 +285,8 @@ window.renderApprovals = async function(currentUser) {
   // "Payments to confirm" (SALES-QUICK-FIXES-SPEC §5.4): the President's one-tap list, or Finance's stand-in list. Deliberately NOT part of the
   // 14-query tuple or the chip counts — the function (js/departments.js) gates itself and leaves the host empty for everyone else.
   if (typeof window.renderPaymentConfirmList === 'function') window.renderPaymentConfirmList(c.querySelector('#approvals-payconfirm'), { onDone: () => renderApprovals(currentUser) });
+  // "Contract changes" (SALES-FLOW-SPEC §7.3): the decision block of F3, lazy (js/contract-ui.js). It gates itself; a failed load leaves the host empty.
+  try { window.ensureScript('js/contract-ui.js').then(() => window.ContractUI.renderDecisionBlock(c.querySelector('#approvals-contractchange'), { onDone: () => renderApprovals(currentUser) })).catch(() => {}); } catch (_) {}
 
   // Which sub-tab the DOM currently inside #approvals-content belongs to. Seeded
   // to 'all' because the container is rendered above ALREADY holding the 'all'
