@@ -307,7 +307,7 @@ describe('4. the screens (Client acceptance, Punch list)', () => {
     assert.equal(e.pj().punchList.clearedAt, undefined);
     assert.ok(!(e.pj().timeline.some((t) => /₱/.test(t.event))));
   });
-  it('Mark all cleared ticks every item and writes clearedAt / clearedBy; an EMPTY list can be cleared too — and that is what lets the job complete', async () => {
+  it('Mark all cleared writes clearedAt / clearedBy; an EMPTY list can be cleared too — and that is what lets the job complete', async () => {
     const e = env(PROD, { pj: { acceptance: acc() } });
     await e.ctx.FlowDocs.openPunchList({ id: 'prj1', ...e.pj() });
     const p = e.lastPage();
@@ -315,9 +315,25 @@ describe('4. the screens (Client acceptance, Punch list)', () => {
     assert.ok(e.pj().punchList.clearedAt && e.pj().punchList.clearedBy === 'Rene'); assert.deepEqual(e.pj().punchList.items, []);
     await advance(e, 'completed');
     assert.equal(e.pj().stage, 'paid');
+  });
+  it('owner 2026-11-20: Mark all cleared REFUSES while any item is open — it never ticks items done; nothing is written', async () => {
     const f = env(PROD, { pj: { punchList: { items: [{ text: 'a', done: false }] } } });
-    await f.ctx.FlowDocs.savePunchList('prj1', [{ text: 'a', done: false }, { text: 'b', done: false }], { clear: true });
-    assert.ok(f.pj().punchList.items.every((x) => x.done && x.doneDate));
+    const before = JSON.stringify(f.pj().punchList);
+    const r = await f.ctx.FlowDocs.savePunchList('prj1', [{ text: 'a', done: true }, { text: 'b', done: false }], { clear: true });
+    assert.equal(r.ok, false); assert.equal(r.code, 'items-open'); assert.equal(r.open, 1);
+    assert.match(r.message, /1 item\(s\) are not ticked done yet/);
+    assert.equal(JSON.stringify(f.pj().punchList), before, 'nothing written');
+    assert.equal(f.pj().punchList.clearedAt, undefined);
+    // the screen shows the message and stays open
+    await f.ctx.FlowDocs.openPunchList({ id: 'prj1', ...f.pj() });
+    const p = f.lastPage();
+    await p.$('pl-clear').click();
+    assert.equal(f.pj().punchList.clearedAt, undefined);
+    const shown = (p.$('pl-err') && p.$('pl-err').textContent) || f.toastMsgs().join(' | ');
+    assert.match(shown, /not ticked done yet/);
+    // once every item is ticked, it clears
+    const ok = await f.ctx.FlowDocs.savePunchList('prj1', [{ text: 'a', done: true }, { text: 'b', done: true }], { clear: true });
+    assert.equal(ok.ok, true); assert.ok(f.pj().punchList.clearedAt);
   });
   it('editing a cleared list takes the cleared mark off again (an item added afterwards must be cleared too)', async () => {
     const e = env(PROD, { pj: { acceptance: acc(), punchList: punch() } });
@@ -340,7 +356,7 @@ describe('4. the screens (Client acceptance, Punch list)', () => {
   it('the forms then print what the screens wrote: the punch list lists the items and the acceptance form carries the signer, date and punch position', async () => {
     const e = env(PROD);
     await e.ctx.FlowDocs.saveAcceptance('prj1', { url: 'https://x.test/s.pdf', name: 's.pdf', signedBy: 'Maria Cruz', date: '2026-12-18' });
-    await e.ctx.FlowDocs.savePunchList('prj1', [{ text: 'Scratch on sink front', location: 'Wash area' }, { text: 'Loose shelf bracket', done: true }], { clear: true });
+    await e.ctx.FlowDocs.savePunchList('prj1', [{ text: 'Scratch on sink front', location: 'Wash area', done: true }, { text: 'Loose shelf bracket', done: true }], { clear: true });
     const stored = JSON.parse(JSON.stringify(e.pj()));
     const FC = setupForms();
     require('../js/forms-set-2.js');
