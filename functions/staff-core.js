@@ -160,7 +160,21 @@ function claimsFor(userDoc) {
   return { role: userDoc.role, departments: userDoc.departments.slice() };
 }
 
+// Next employee number (2026-11-20, owner "Yes, fix it"): one past the HIGHER of the _counters/employees count and
+// the highest BI-<year>-NNN already on a users doc. The counter alone fell behind numbers assigned by hand (it sat at
+// 7 while 009 and 010 existed) and re-issued BI-2026-008 to a third person. Any year's number counts, because the
+// counter has always been one sequence across years.
+function nextEmployeeNumber(counterCount, existingIds, year) {
+  let max = Math.max(0, Math.floor(Number(counterCount) || 0));
+  for (const id of existingIds || []) {
+    const m = /^BI-\d{4}-(\d+)$/.exec(String(id == null ? '' : id).trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  const next = max + 1;
+  return { next, employeeId: `BI-${year}-${String(next).padStart(3, '0')}` };
+}
+
 module.exports = {
   KNOWN_ROLES, SENIOR_MINTABLE_ROLES, BASIC_MINTABLE_ROLES, PRIVILEGED_DEPTS, WORKER_EMAIL_DOMAIN,
-  parseStaffRequest, authorizeStaffCreate, buildStaffUserDoc, claimsFor
+  parseStaffRequest, authorizeStaffCreate, buildStaffUserDoc, claimsFor, nextEmployeeNumber
 };
