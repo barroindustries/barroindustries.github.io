@@ -794,6 +794,16 @@ window.quoteDisplayNo = function (q) {
 // quote. Returns null when the normal status badge should stay (not filed, already ordered, or no approval state).
 window.quoteApprovalBadge = function (q) {
   if (!q || q.salesOrderId || q.status !== 'filed') return null;
+  // QUOTE-PRESIDENT-FIGURES-SPEC §10: a revision filed under the prices the President SET on a quote he returned, and a quote he approved at his own prices. (Both before the generic carried badge: a figures carry also has approvalCarriedFrom.)
+  if (q.approvalStatus === 'approved' && q.approvalCarriedKind === 'figures') {
+    const t = q.approvalCarriedOn ? new Date(q.approvalCarriedOn) : (q.approvalCarriedAt && typeof q.approvalCarriedAt.toDate === 'function' ? q.approvalCarriedAt.toDate() : null);
+    const on = t && !isNaN(t) ? t.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    return { cls: 'badge-green', label: 'Approved (President\'s prices)', title: on ? 'Filed under the prices the President set on ' + on : 'Filed under the prices the President set' };
+  }
+  const pfa = q.presidentFigures, pfn = pfa ? Number(pfa.changed) || 0 : 0;
+  if (q.approvalStatus === 'approved' && pfa && pfa.mode === 'approve' && pfn > 0) {
+    return { cls: 'badge-green', label: 'Approved at President\'s prices', title: pfn + (pfn === 1 ? ' line changed' : ' lines changed') };
+  }
   // P1 (SALES-FLOW-SPEC §6.6): a revision filed under Neil's earlier approval. The date is Neil's own approval it rides on (approvalCarriedOn; older docs fall back to the day it was carried).
   if (q.approvalStatus === 'approved' && q.approvalCarriedFrom) {
     const t = q.approvalCarriedOn ? new Date(q.approvalCarriedOn) : (q.approvalCarriedAt && typeof q.approvalCarriedAt.toDate === 'function' ? q.approvalCarriedAt.toDate() : null);
@@ -816,8 +826,11 @@ window.quoteApprovalButtonsHtml = function (q, coll) {
   if (!q || !q.id) return '';
   const a = ' data-coll="' + escHtml(coll) + '" data-id="' + escHtml(q.id) + '"';
   const count = Number(q.approvalThread && q.approvalThread.count) || 0;
+  // QUOTE-PRESIDENT-FIGURES-SPEC §10: a quote returned with the President's prices (and still reopenable) offers the one-tap "Apply President's figures" before the review button
+  const applyFig = q.approvalStatus === 'needs_revision' && q.editableState && q.presidentFigures && Number(q.presidentFigures.changed) > 0;
   return (q.approvalStatus === 'pending_review'
       ? '<button type="button" class="btn-secondary btn-sm q-approval-link-btn"' + a + ' data-qno="' + escHtml(q.fileName || q.quoteNumber || '') + '" data-client="' + escHtml(q.clientName || '') + '">Approval link</button>' : '')
+    + (applyFig ? '<button type="button" class="btn-primary btn-sm q-approval-apply-btn"' + a + '>Apply President\'s figures</button>' : '')
     + (q.reviewRequestedAt
       ? '<button type="button" class="btn-secondary btn-sm q-approval-open-btn"' + a + '>Review &amp; comments' + (count ? ' (' + count + ')' : '') + '</button>' : '');
 };
@@ -825,11 +838,14 @@ window.quoteReturnedNoteHtml = function (q) {
   if (!q || q.approvalStatus !== 'needs_revision') return '';
   const t = q.approvalThread;
   const note = String(q.presidentNotes || (t && t.lastByRole === 'president' && t.lastText) || '').slice(0, 160);
-  return '<div class="q-returned-note">Returned by the President' + (note ? ': ' + escHtml(note) : '') + '</div>';
+  const pfn = q.presidentFigures ? Number(q.presidentFigures.changed) || 0 : 0;
+  return '<div class="q-returned-note">Returned by the President' + (pfn > 0 ? ' with his prices on ' + pfn + (pfn === 1 ? ' line' : ' lines') : '') + (note ? ': ' + escHtml(note) : '') + '</div>';
 };
 window.bindQuoteApprovalButtons = function (container) {
   container.querySelectorAll('.q-approval-link-btn').forEach(b => b.addEventListener('click', e => { const d = e.currentTarget.dataset; window.showQuoteApprovalLink({ coll: d.coll, id: d.id, quoteNumber: d.qno, clientName: d.client }); }));
   container.querySelectorAll('.q-approval-open-btn').forEach(b => b.addEventListener('click', e => { const d = e.currentTarget.dataset; navigateTo('quote-approval', { subtab: window.quoteApprovalRefOf(d.coll, d.id) }); }));
+  // the same two lines as the review page's button: open the builder on the returned quote and apply his figures once it has loaded (the builder shows Undo)
+  container.querySelectorAll('.q-approval-apply-btn').forEach(b => b.addEventListener('click', e => { const d = e.currentTarget.dataset; window._qbFiguresAutoApply = true; window.reopenQuoteFromDoc(d.coll, d.id, d.coll === 'bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'); }));
 };
 const DEFAULT_SALES_SOP = {
   // Version 3 = the process of 2026-11-20: the Barro Kitchens configurators in the quote builder, the President approves every quote,
@@ -2373,7 +2389,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
               <td class="tc-detail" data-label="Agent">${escHtml(q.agentName||q.createdByName||'—')}</td>
               <td class="tc-detail" data-label="Status">
                 <span class="badge ${badge}">${window.statusLabel2('quote', status)}</span>
-                ${(() => { const ab = q.approvalCarriedFrom ? window.quoteApprovalBadge(q) : null; return ab ? `<span class="badge ${ab.cls}" style="font-size:9px;margin-left:4px" title="${escHtml(ab.title || '')}">${ab.label}</span>` : ''; })()}
+                ${(() => { const ab = (q.approvalCarriedFrom || (q.presidentFigures && q.presidentFigures.mode === 'approve')) ? window.quoteApprovalBadge(q) : null; return ab ? `<span class="badge ${ab.cls}" style="font-size:9px;margin-left:4px" title="${escHtml(ab.title || '')}">${ab.label}</span>` : ''; })()}
                 ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
                 ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
                 ${window.quoteShareChipHtml(q)}

@@ -8,6 +8,10 @@
    and prices, the options table, the totals, the terms, a President-only "Cost and margin" panel, the comment thread, and a sticky action bar
    (Approve / Return / Comment for the President; Send reply / Revise in builder for the person who sent it).
 
+   THE PRESIDENT'S FIGURES (QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20)  Beside each line's price the President may type his own unit price and a note. The totals at his prices are NOT worked out here: the page
+   hosts the quote builder in a hidden frame (the engine, spec 2.1), proves it reproduced the stored quote (P1) and landed exactly the figures asked for (P2), and shows what it answers. Approve at my figures
+   stores the builder's own totals; Return with my figures stores his prices and notes for Sales to apply. window.QuoteFigures (js/quote-figures-core.js) holds the pure rules and the three proofs.
+
    TWO HALVES
      1. PURE (window.QuoteApproval) — viewModel(q, ctx) turns the stored quote doc into a plain object, html(vm, esc) turns that into markup. They read no
         global except what ctx hands them (FormsCore and QBSpecSheet through ctx.lib), so tests/quote-approval-link.test.mjs runs them against the real
@@ -111,18 +115,32 @@
   }
 
   // ── lines ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  // a pure section-header row: the builder's "Add section" placeholder (id CUSTOM, unnamed or still "New item", no price, no configurator kind)
-  function isHeaderRow(it) {
-    return !!it && it.id === 'CUSTOM' && (!trim(it.name) || trim(it.name) === 'New item') && n0(it.amount) === 0 && !it.kcKind;
-  }
+  // a pure section-header row: the builder's "Add section" placeholder. The rule lives in js/quote-figures-core.js (spec 12: it moved there; the page calls it there).
+  const QF = () => W().QuoteFigures;
+  function isHeaderRow(it) { const f = QF(); return !!(f && f.isHeaderRow(it)); }
+  const isPresPrice = (it) => isObj(it.priceBy) && it.priceBy.role === 'president';
   function chipsOf(it) {
     const c = [];
     if (it.needsPrice) c.push('No price yet');
     if (it.needsReview && !it.reviewed) c.push('Needs review' + (arr(it.reviewReasons).length ? ': ' + arr(it.reviewReasons).map(str).join(', ') : ''));
     if (typeof it.reviewed === 'string' && it.reviewed) c.push('Reviewed by ' + it.reviewed);
-    if (it.priceBasis === 'manual') c.push('Price typed by hand');
+    if (it.priceBasis === 'manual' && !isPresPrice(it)) c.push('Price typed by hand');
     if (n0(it.volumeBreakPct) > 0) c.push('Volume break ' + it.volumeBreakPct + '%');
     return c;
+  }
+  // what the President set on THIS doc for this line (presidentFigures.lines, matched by index and name): shown to him and to the person who sent the quote
+  function presFor(q, i, it) {
+    const pf = isObj(q.presidentFigures) ? q.presidentFigures : null;
+    if (!pf) return null;
+    const r = arr(pf.lines).find((x) => isObj(x) && x.i === i && str(x.name) === str(it.name).slice(0, 120));
+    return r ? { to: num(r.to), from: num(r.from), note: trim(r.note), byName: trim(pf.byName), when: fmtTs(pf.at) } : null;
+  }
+  // a line that is already at his price (the builder stamped priceBy): a chip, with who and the price it replaced in the tooltip
+  function byPresOf(it) {
+    if (!isPresPrice(it)) return null;
+    const p = it.priceBy;
+    return p.held ? { label: 'Price held', title: 'Held at the price Sales set, because another line changed.' }
+      : { label: "President's price", title: "Sales' price was " + money(p.salesPrice) + (trim(p.name) ? '. Set by ' + trim(p.name) : '') + (p.at ? ' on ' + fmtDay(p.at) : '') + '.' };
   }
   function lineVm(q, it, i, no, lib) {
     const FC = lib.FormsCore || {}, SS = lib.QBSpecSheet || {};
@@ -139,6 +157,7 @@
       qty: num(it.qty), unit: trim(it.unit), unitPrice: num(it.unitPrice), amount: num(it.amount),
       chips: chipsOf(it),
       photos: linePhotos(q, i, it), cost: null,
+      pres: presFor(q, i, it), byPres: byPresOf(it), fig: null,
     };
     if (line.amount == null && line.unitPrice != null) line.amount = line.unitPrice * (line.qty == null ? 1 : line.qty);
     if (kc) {
@@ -239,12 +258,12 @@
   }
 
   // ── the comment thread ─────────────────────────────────────────────────────────────────────────────────────────────
-  const KIND_LABEL = { submitted: 'Sent for approval', returned: 'Returned', approved: 'Approved' };
+  const KIND_LABEL = { submitted: 'Sent for approval', returned: 'Returned', approved: 'Approved', figures: 'Prices and notes', applied: "Applied the President's prices" };
   // entries: QuoteThread.list rows (oldest first). The President's note on a quote that predates the thread is shown as a synthetic first entry (view-only: never written).
   function threadModel(q, entries, ctx) {
     ctx = isObj(ctx) ? ctx : {};
     if (ctx.commentsOff) return { off: true, items: [], empty: false };
-    const id = str(ctx.id), here = rawNo(q, id), now = ctx.now;
+    const id = str(ctx.id), here = rawNo(q, id), now = ctx.now, lineNo = isObj(ctx.lineNo) ? ctx.lineNo : {};
     const items = [];
     const list = arr(entries).filter(isObj);
     const note = trim(q.presidentNotes);
@@ -260,6 +279,8 @@
         kind: KIND_LABEL[e.kind] || '',
         rev: (trim(e.quoteNumber) && trim(e.quoteNumber) !== here) ? trim(e.quoteNumber) : '',
         text: str(e.text), rel: relTime(e.createdAt, now), abs: fmtTs(e.createdAt), synthetic: false,
+        // the per-line rows of his entry (prices and notes). `no` is the printed number of that line on THIS doc, only when the entry belongs to this doc (a revision's lines may have moved)
+        rows: arr(e.lines).filter(isObj).map((r) => ({ no: str(e.quoteId) === id && lineNo[r.i] != null ? str(lineNo[r.i]) : '', name: trim(r.name), from: num(r.from), to: num(r.to), note: trim(r.note) })),
       });
     });
     return { off: false, items, empty: !items.length };
@@ -277,11 +298,119 @@
       + (t.rel ? '<span class="qa-entry-time" title="' + e(t.abs) + '">' + e(t.rel) + '</span>' : '')
       + '</div>'
       + (t.text ? '<div class="qa-entry-text">' + e(t.text) + '</div>' : '')
+      + (t.rows && t.rows.length ? '<ul class="qa-entry-rows">' + t.rows.map((r) => '<li>' + (r.no ? '<span class="qa-row-no">' + e(r.no) + '</span> · ' : '') + '<strong>' + e(r.name || 'Item') + '</strong>'
+        + (r.to != null ? ': ' + e(money(r.from)) + ' to ' + e(money(r.to)) : '') + (r.note ? '<div class="qa-row-note">' + e(r.note) + '</div>' : '') + '</li>').join('') + '</ul>' : '')
       + '</div>').join('');
   }
 
+  // ── the President's figures: the pure model (spec 6.1) ────────────────────────────────────────────────────────────────
+  const NO_ENGINE_SENTENCE = 'Totals at your figures cannot be worked out for this quote here.';
+  const WARN_TEXT = { 'below-cost': { text: 'Below cost', cls: 'qa-fig-below' }, 'big-cut': { text: "That is less than half of Sales' price.", cls: 'qa-fig-warn' }, 'big-raise': { text: "That is more than double Sales' price.", cls: 'qa-fig-warn' } };
+  // the key a result is filed under: the valid figures it was worked out for (the page compares it with the current ones; a result for other figures is stale)
+  function figKey(rows) { return JSON.stringify(arr(rows).filter((r) => isObj(r) && r.to != null).map((r) => [r.i, r.to])); }
+  // inputs: { [lineIndex]: { price: <text>, note: <text> } }; engine: { phase: 'none' | 'loading' | 'ready' | 'unavailable', reason, result: { key, payload, costSidecar, held } | null }.
+  // -> { rows, prices, notes, anyError, belowCost, state, reason, summary, options, held, noFig }; also sets L.fig on every line of `lines` and updates the margin of a line he priced.
+  function figuresModel(q, lines, inputs, engine, sc, hasDoc) {
+    const F = QF();
+    const parsed = {};
+    let anyError = false, candidates = 0;
+    lines.forEach(({ L, it }) => {
+      const raw = isObj(inputs[L.idx]) ? inputs[L.idx] : {};
+      const can = F.eligible(it);
+      const fig = { can, value: str(raw.price), note: str(raw.note), error: '', warns: [], amount: '', to: null, over: false };
+      let to = null;
+      const text = str(raw.price).trim();
+      if (can && text) {
+        const p = F.parse(text);
+        const v = F.validate(p, it, L.costFull > 0 ? L.costFull : null);
+        if (!v.ok) { fig.error = v.error; anyError = true; }
+        else if (!v.same && !v.empty) { to = p; fig.warns = arr(v.warn).slice(); }
+      }
+      const note = trim(raw.note);
+      if (to !== null || note) {
+        candidates += 1;
+        if (candidates > F.MAX_ROWS) { fig.error = 'Too many lines for one decision. Return it with a note.'; fig.over = true; anyError = true; to = null; }
+        else parsed[L.idx] = { to, note: str(raw.note) };
+      }
+      fig.to = to;
+      if (to !== null) {
+        const qty = L.qty == null ? 1 : L.qty;
+        fig.amount = qty + ' × ' + money(to) + ' = ' + money(to * qty);
+        if (L.cost && !L.cost.none) L.cost = lineCost(Object.assign({}, L, { unitPrice: to }), sc ? rowFor(sc, it, L.idx) : null);   // his price, the same one subtraction
+      }
+      L.fig = fig;
+    });
+    const rows = F.rows(q, parsed);
+    const c = F.counts(rows);
+    const belowCost = lines.filter(({ L }) => L.fig && L.fig.to !== null && L.fig.warns.indexOf('below-cost') >= 0).length;
+    const noFig = c.prices === 0;
+    let state = 'idle', reason = '', summary = null, options = null, held = 0;
+    if (!noFig) {
+      if (!hasDoc) { state = 'unavailable'; reason = 'no-snapshot'; }
+      else if (engine.phase === 'unavailable') { state = 'unavailable'; reason = str(engine.reason) || 'mismatch'; }
+      else if (engine.phase === 'ready' && isObj(engine.result) && engine.result.key === figKey(rows)) state = 'exact';
+      else state = (engine.phase === 'loading' || engine.phase === 'ready') ? 'loading' : 'idle';
+      if (state === 'exact') {
+        const b = F.summary(q), a = F.summary(engine.result.payload);
+        summary = [['Subtotal', 'subtotal'], ['Discount', 'discountAmount'], ['Net', 'netAmount'], ['VAT', 'vatAmount'], ['Grand total', 'total'], ['Down payment', 'downPayment'], ['Balance', 'balance']]
+          .filter((r) => b[r[1]] !== null || a[r[1]] !== null)
+          .map((r) => ({ label: r[0], key: r[1], before: b[r[1]] === null ? '' : money(b[r[1]]), after: a[r[1]] === null ? '' : money(a[r[1]]), changed: b[r[1]] !== a[r[1]] }));
+        const pay = engine.result.payload;
+        if (q.optionsMode && Array.isArray(q.options) && isObj(pay) && Array.isArray(pay.options)) {
+          options = pay.options.filter(isObj).map((o, k) => ({ label: trim(o.label), before: isObj(q.options[k]) ? money(q.options[k].total) : '', after: money(o.total), basis: !!o.key && o.key === pay.optionsBasis }));
+        }
+        held = arr(engine.result.held).length;
+      }
+    }
+    return { rows, prices: c.prices, notes: c.notes, anyError, belowCost, noFig, state, reason, summary, options, held };
+  }
+  const DISCOUNT_RATE_TOL = 0.001;   // a drop in the effective discount rate of more than 0.1 percentage points is read as "the discount was capped"
+  // the confirm sentences of Approve at my figures / Return with my figures (spec 6.3); pure so the test can read them
+  function confirmText(kind, vm) {
+    const f = vm.fig || {};
+    const no = vm.number, client = vm.client || 'the client';
+    const ln = (n) => n + ' ' + (n === 1 ? 'line' : 'lines');
+    if (kind === 'return') {
+      return 'Return ' + no + ' with your prices on ' + ln(f.prices) + '? Sales applies them and re-sends. ' + (f.carry
+        ? 'A re-send at or above your prices is filed without coming back to you.' : 'The re-send will come back to you for approval.');
+    }
+    const parts = ['Approve ' + no + ' for ' + client + ' at your prices? ' + ln(f.prices) + ' change.'];
+    const ch = f.change || {};
+    if (ch.total) parts.push('Grand total ' + ch.total[0] + ' becomes ' + ch.total[1] + '.');
+    if (ch.downPayment) parts.push('Down payment ' + ch.downPayment[0] + ' becomes ' + ch.downPayment[1] + '.');
+    if (ch.discount) parts.push('Discount ' + ch.discount[0] + ' becomes ' + ch.discount[1] + '.' + (ch.capped ? ' The discount was capped at the project cost.' : ''));
+    if (f.held) parts.push(f.held + (f.held === 1 ? ' other line is' : ' other lines are') + ' held at the prices shown.');
+    if (f.belowCost) parts.push(f.belowCost + (f.belowCost === 1 ? ' line is' : ' lines are') + ' below cost.');
+    return parts.join(' ');
+  }
+  // before -> after of the headline numbers, from the engine's result against the stored quote ([money, money] or null); capped = the effective discount rate fell (a rate comparison: the cap itself lives in the builder's computeTotals)
+  function changeOf(q, payload) {
+    const F = QF();
+    const b = F.summary(q), a = F.summary(payload);
+    const pair = (k) => (b[k] !== null && a[k] !== null && b[k] !== a[k]) ? [money(b[k]), money(a[k])] : null;
+    const discount = pair('discountAmount');
+    let capped = false;
+    if (discount) {
+      const rb = b.subtotal > 0 ? b.discountAmount / b.subtotal : 0, ra = a.subtotal > 0 ? a.discountAmount / a.subtotal : 0;
+      capped = n0(q.discountPct) > 0 && ra < rb - DISCOUNT_RATE_TOL;
+    }
+    return { total: pair('total'), downPayment: pair('downPayment'), discount, capped };
+  }
+
+  // the cost card: at his prices when the engine answered (the stored quote overlaid with the engine's money fields and cost record), else the stored margin, marked "at Sales' prices" while he has typed a price
+  function costAt(q, sc, lines, fig, engine) {
+    const priced = lines.map((L) => (L.fig && L.fig.to !== null && L.fig.to !== undefined) ? Object.assign({}, L, { unitPrice: L.fig.to }) : L);
+    if (fig && !fig.noFig && fig.state === 'exact' && isObj(engine.result) && isObj(engine.result.payload)) {
+      const overlay = Object.assign({}, q, QF().moneyEdits(engine.result.payload));
+      return Object.assign(costModel(overlay, isObj(engine.result.costSidecar) ? engine.result.costSidecar : sc, priced), { label: 'at your prices' });   // (a card with no cost record stays "none")
+    }
+    const c = costModel(q, sc, priced);
+    return (fig && !fig.noFig) ? Object.assign(c, { label: "at Sales' prices" }) : c;
+  }
+
   // ── the view model ─────────────────────────────────────────────────────────────────────────────────────────────────
-  // q: the quote doc's data.  ctx: { coll, id, ref, role, uid, sidecar, comments, newer: { ref, number }, parent: { number }, commentsOff, offline, now, companyLabel, lib: { FormsCore, QBSpecSheet } }
+  // q: the quote doc's data.  ctx: { coll, id, ref, role, uid, sidecar, comments, newer: { ref, number }, parent: { number }, commentsOff, offline, now, companyLabel, lib: { FormsCore, QBSpecSheet },
+  //       figures: { inputs: { [lineIndex]: { price, note } }, engine: { phase, reason, result } } }   (the President's figures: the page's in-memory state, so this stays a function of its arguments)
   function viewModel(q, ctx) {
     q = isObj(q) ? q : {};
     ctx = isObj(ctx) ? ctx : {};
@@ -295,15 +424,28 @@
     const number = displayNo(q, id);
     const client = trim(q.clientName);
     const sc = (isApprover && isObj(ctx.sidecar)) ? ctx.sidecar : null;
+    const hasNewer = isObj(ctx.newer) && !!ctx.newer.ref;
+    // his boxes (spec 6.1): only the President, only while the quote waits for him, not when a newer revision exists (its banner says so), not when the thread cannot be written (no immutable record), and only with the core loaded
+    const figuresOn = isApprover && state === 'pending' && !hasNewer && !ctx.commentsOff && !!QF();
+    const figIn = isObj(ctx.figures) ? ctx.figures : {};
+    const pf = isObj(q.presidentFigures) ? q.presidentFigures : null;
+    const pfPrices = pf ? arr(pf.lines).filter((r) => isObj(r) && r.to != null).length : 0;
 
     // banners, in this order
     const banners = [];
     if (ctx.offline) banners.push({ kind: 'offline', text: 'You are offline. Showing the last saved copy.' });
-    if (isObj(ctx.newer) && ctx.newer.ref) banners.push({ kind: 'newer', text: 'A newer revision, ' + str(ctx.newer.number) + ', was sent for approval.', ref: str(ctx.newer.ref) });
-    if (state === 'approved') {
+    if (hasNewer) banners.push({ kind: 'newer', text: 'A newer revision, ' + str(ctx.newer.number) + ', was sent for approval.', ref: str(ctx.newer.ref) });
+    const nPrices = (n) => n + ' ' + (n === 1 ? 'line' : 'lines');
+    if (state === 'approved' && q.approvalCarriedKind === 'figures') {
+      const on = fmtDay(q.approvalCarriedOn || q.approvalCarriedAt);
+      banners.push({ kind: 'state', text: 'Filed under the prices the President set' + (on ? ' on ' + on : '') + '.' });
+    } else if (state === 'approved') {
       const who = arr(ctx.comments).filter((e) => isObj(e) && e.kind === 'approved' && trim(e.authorName)).map((e) => trim(e.authorName)).pop();
       const at = fmtTs(q.approvedAt);
-      banners.push({ kind: 'state', text: 'Approved by ' + (who || 'the President') + (at ? ' on ' + at : '') + '.' });
+      banners.push({ kind: 'state', text: 'Approved by ' + (who || 'the President') + (at ? ' on ' + at : '') + (pf && pf.mode === 'approve' && pfPrices > 0 ? ' at his own prices on ' + nPrices(pfPrices) : '') + '.' });
+    } else if (state === 'returned' && pf && pf.mode === 'return' && pfPrices > 0) {
+      const at = fmtTs(q.returnedAt);
+      banners.push({ kind: 'state', text: 'Returned' + (at ? ' on ' + at : '') + " with the President's prices on " + nPrices(pfPrices) + '. Waiting for Sales to apply them and re-send.' });
     } else if (state === 'returned') {
       const at = fmtTs(q.returnedAt);
       banners.push({ kind: 'state', text: 'Returned' + (at ? ' on ' + at : '') + '. Waiting for Sales to revise.' });
@@ -337,6 +479,11 @@
         L.costFull = u.full ? u.cost : 0;
       });
     }
+    // the President's figures: each line's box, the rows to store, the live summary
+    const lineNo = {};
+    lines.forEach(({ L }) => { lineNo[L.idx] = L.no; });
+    let fig = null;
+    if (figuresOn) fig = figuresModel(q, lines, isObj(figIn.inputs) ? figIn.inputs : {}, isObj(figIn.engine) ? figIn.engine : {}, sc, !!q.editableState);
     // photos that belong to no line
     const other = arr(q.photos).filter((p) => isObj(p) && !(p.itemIndex != null && isObj(items[p.itemIndex]) && !isHeaderRow(items[p.itemIndex])))
       .map((p) => ({ url: safeImg(p.url), caption: trim(p.caption) })).filter((p) => p.url);
@@ -403,25 +550,44 @@
 
     // what the viewer can do
     const commentsOff = !!ctx.commentsOff;
-    const actions = { compose: false, placeholder: '', buttons: [] };
+    const actions = { compose: false, placeholder: '', buttons: [], fig: null };
     if (isApprover) {
       actions.placeholder = 'Comment, or what to change before it can be approved';
-      if (state === 'pending') { actions.compose = true; actions.buttons.push('approve', 'return'); }
+      if (state === 'pending') {
+        actions.compose = true; actions.buttons.push('approve');
+        if (figuresOn) {
+          actions.buttons.push('approveFig', 'returnFig');
+          const why = () => fig.anyError ? 'Fix the price marked in red first.' : fig.noFig ? 'Type a price beside a line first.' : '';
+          actions.fig = {
+            noFig: fig.noFig,
+            approveFig: { disabled: true, title: '' }, returnFig: { disabled: !!why(), title: why() },
+          };
+          const a = actions.fig.approveFig;
+          if (why()) a.title = why();
+          else if (!hasDoc) a.title = 'This quote was filed before the builder kept an editable copy.';
+          else if (fig.state === 'unavailable') a.title = NO_ENGINE_SENTENCE;
+          else if (fig.state !== 'exact') a.title = 'Working out the totals at your prices.';
+          else a.disabled = false;
+        }
+        actions.buttons.push('return');
+      }
       if (!commentsOff) { actions.compose = true; actions.buttons.push('comment'); }
       if (!actions.buttons.length) actions.compose = false;
     } else if (isSubmitter) {
       actions.placeholder = 'Reply to the President';
       if (!commentsOff) { actions.compose = true; actions.buttons.push('comment'); }
-      if (state === 'returned' && hasDoc) actions.buttons.push('revise');
+      if (state === 'returned' && hasDoc) actions.buttons.push(pfPrices > 0 ? 'applyFig' : 'revise');
     }
     const commentLabel = isApprover ? 'Comment' : 'Send reply';
 
     return {
       ref: str(ctx.ref), coll, id, role, isApprover, isSubmitter, readOnly, state, number, client, hasDoc,
       banners, header, why: whyModel(q, sc, isApprover), groups, photoSets, other, options, totals, grand, terms,
-      cost: isApprover ? costModel(q, sc, lines.map(({ L }) => L)) : null,
-      thread: threadModel(q, ctx.comments, { commentsOff, id, now: ctx.now }),
+      cost: isApprover ? costAt(q, sc, lines.map(({ L }) => L), fig, isObj(figIn.engine) ? figIn.engine : {}) : null,
+      thread: threadModel(q, ctx.comments, { commentsOff, id, now: ctx.now, lineNo }),
       actions, commentLabel,
+      figuresOn, fig, pfPrices,
+      figSummary: (fig && !fig.noFig) ? { state: fig.state, reason: fig.reason, changed: fig.prices, notes: fig.notes, rows: fig.summary || [], options: fig.options, held: fig.held, belowCost: fig.belowCost } : null,
     };
   }
 
@@ -434,6 +600,32 @@
     return '<button type="button" class="qa-thumb" data-set="' + e(key) + '" data-i="0" aria-label="View photos">'
       + '<img class="qa-img" src="' + e(set[0].url) + '" alt="" loading="lazy" decoding="async">'
       + (set.length > 1 ? '<span class="qa-thumb-more">+' + (set.length - 1) + '</span>' : '') + '</button>';
+  }
+  // the notices under a price box: the error, else the warnings (below cost in red); every string is ours, never data
+  function figNoticeHtml(f, e) {
+    if (f.error) return '<span class="qa-fig-error">' + e(f.error) + '</span>';
+    return arr(f.warns).filter((w) => WARN_TEXT[w]).map((w) => '<span class="' + WARN_TEXT[w].cls + '">' + e(WARN_TEXT[w].text) + '</span>').join(' ');
+  }
+  // one line's boxes (spec 6.2): Your price (a unit price) and a Note; a line that cannot take a figure (an additional cost) shows the note box only
+  function figBoxHtml(L, e) {
+    const f = L.fig;
+    if (!f) return '';
+    const i = e(L.idx);
+    const note = '<textarea class="qa-fig-note" id="qa-fn-' + i + '" rows="1" maxlength="500" data-i="' + i + '" aria-label="Note for this line" placeholder="Note for this line">' + e(f.note) + '</textarea>';
+    if (!f.can) return '<div class="qa-fig qa-fig-noprice" data-fig-i="' + i + '"><div class="qa-fig-hint">Additional costs: return with a note.</div>' + note + '</div>';
+    return '<div class="qa-fig" data-fig-i="' + i + '">'
+      + '<label class="qa-fig-label" for="qa-fp-' + i + '">Your price (per ' + e(L.unit || 'unit') + ')</label>'
+      + '<div class="qa-fig-row"><input class="qa-fig-price" id="qa-fp-' + i + '" inputmode="decimal" autocomplete="off" data-i="' + i + '" placeholder="' + e(money(L.unitPrice)) + '" value="' + e(f.value) + '">'
+      + '<span class="qa-fig-amount">' + e(f.amount) + '</span>'
+      + '<button type="button" class="qa-fig-clear" aria-label="Clear your price"' + (f.value.trim() ? '' : ' hidden') + '>✕</button></div>'
+      + '<div class="qa-fig-err" role="alert">' + figNoticeHtml(f, e) + '</div>'
+      + note + '</div>';
+  }
+  function presHtml(L, e) {
+    const p = L.pres;
+    if (!p || (p.to == null && !p.note)) return '';
+    return '<div class="qa-pres">' + (p.to != null ? 'President: ' + e(money(p.to)) + (p.from != null ? " (Sales' price " + e(money(p.from)) + ')' : '') + (p.note ? ' · ' : '') : "President's note: ")
+      + (p.note ? '"' + e(p.note) + '"' : '') + '</div>';
   }
   function lineHtml(L, set, e) {
     const specs = L.specText ? '<div class="qa-specs qa-preline">' + e(L.specText) + '</div>'
@@ -451,8 +643,10 @@
       + specs + list('Includes', L.includes) + list('Not included', L.excludes)
       + (L.notes ? '<div class="qa-incl"><strong>Notes:</strong> <span class="qa-preline">' + e(L.notes) + '</span></div>' : '')
       + (L.lead ? '<div class="qa-incl"><strong>Lead time:</strong> ' + e(L.lead) + '</div>' : '')
-      + (L.chips.length ? '<div class="qa-chips">' + L.chips.map((c) => '<span class="qa-chip qa-chip-flag">' + e(c) + '</span>').join('') + '</div>' : '')
+      + ((L.chips.length || L.byPres) ? '<div class="qa-chips">' + L.chips.map((c) => '<span class="qa-chip qa-chip-flag">' + e(c) + '</span>').join('')
+        + (L.byPres ? '<span class="qa-chip qa-chip-pres" title="' + e(L.byPres.title) + '">' + e(L.byPres.label) + '</span>' : '') + '</div>' : '')
       + '<div class="qa-calc"><span>' + e(qtyText) + '</span> × <span>' + e(money(L.unitPrice)) + '</span> = <strong>' + e(money(L.amount)) + '</strong></div>'
+      + presHtml(L, e) + figBoxHtml(L, e)
       + (L.cost ? (L.cost.none ? '<div class="qa-cost-row qa-cost-none">No cost on file</div>'
         : '<div class="qa-cost-row"><span>Unit cost <strong>' + e(L.cost.unitCost) + '</strong></span><span>Unit margin <strong>' + e(L.cost.unitMargin) + '</strong></span>'
           + (L.cost.marginPct ? '<span>Margin <strong>' + e(L.cost.marginPct) + '</strong></span>' : '') + (L.cost.label ? '<span class="qa-note">' + e(L.cost.label) + '</span>' : '') + '</div>') : '')
@@ -479,18 +673,54 @@
   function actionBarHtml(vm, e) {
     const a = vm.actions;
     if (!a.buttons.length) return '';
+    const fb = a.fig || null;
+    const figAttrs = (k) => (fb && fb[k].disabled ? ' disabled' : '') + (fb && fb[k].title ? ' title="' + e(fb[k].title) + '"' : '');
     const B = {
       approve: '<button type="button" class="btn-success qa-btn" id="qa-approve">Approve</button>',
       return: '<button type="button" class="btn-primary qa-btn" id="qa-return">Return</button>',
       comment: '<button type="button" class="btn-secondary qa-btn" id="qa-comment">' + e(vm.commentLabel) + '</button>',
       revise: '<button type="button" class="btn-primary qa-btn" id="qa-revise">Revise in builder</button>',
+      approveFig: fb ? '<button type="button" class="btn-success qa-btn qa-btn-fig" id="qa-approve-fig"' + figAttrs('approveFig') + '>Approve at my figures</button>' : '',
+      returnFig: fb ? '<button type="button" class="btn-primary qa-btn qa-btn-fig" id="qa-return-fig"' + figAttrs('returnFig') + '>Return with my figures</button>' : '',
+      applyFig: '<button type="button" class="btn-primary qa-btn" id="qa-apply-fig">Apply President\'s figures</button>',
     };
+    // his two own-figures buttons are the primary row of a phone bar and are hidden there until a price is typed (CSS .qa-nofig); on a desktop all of them sit on one row
+    if (fb) {
+      const first = a.buttons.filter((k) => k === 'approveFig' || k === 'returnFig'), rest = a.buttons.filter((k) => k !== 'approveFig' && k !== 'returnFig');
+      return '<div class="qa-actionbar qa-actionbar-fig' + (fb.noFig ? ' qa-nofig' : '') + '"><div class="qa-bar-row qa-bar-primary">' + first.map((k) => B[k]).join('') + '</div><div class="qa-bar-row">' + rest.map((k) => B[k] || '').join('') + '</div></div>';
+    }
     return '<div class="qa-actionbar">' + a.buttons.map((k) => B[k] || '').join('') + '</div>';
   }
   function composeHtml(vm, e) {
     if (!vm.actions.compose) return '';
     return '<div class="qa-compose"><textarea id="qa-text" rows="3" maxlength="2000" placeholder="' + e(vm.actions.placeholder) + '"></textarea>'
-      + '<div class="qa-compose-meta"><span id="qa-err" class="qa-err" role="alert"></span><span id="qa-count" class="qa-count">0/2000</span></div></div>';
+      + '<div class="qa-compose-meta"><span id="qa-err" class="qa-err" role="alert"></span><span id="qa-count" class="qa-count">0/2000</span></div>'
+      + (vm.figuresOn ? '<label class="qa-fig-seefirst" id="qa-fig-seefirst-wrap"' + (vm.fig && !vm.fig.noFig ? '' : ' hidden') + '><input type="checkbox" id="qa-fig-seefirst"> Show me the re-send before it is filed</label>' : '')
+      + '</div>';
+  }
+  // the "At your prices" card: shown while at least one valid price is typed (spec 6.2). Idle / loading / the live before-and-after / the sentence when the builder cannot work the totals out.
+  function figSumHtml(vm, e) {
+    const f = vm.figSummary;
+    if (!f) return '';
+    let body;
+    if (f.state === 'unavailable') body = '<div class="qa-thread-note">' + e(NO_ENGINE_SENTENCE) + (f.reason ? ' <span class="qa-note">(' + e(f.reason) + ')</span>' : '') + '</div>';
+    else if (f.state !== 'exact') body = '<div class="qa-figsum-wait"><span class="qa-spin" aria-hidden="true"></span> Working out the totals at your prices…</div>';
+    else {
+      body = '<table class="qa-figsum-tbl"><thead><tr><th></th><th>Sales\' prices</th><th>Your prices</th></tr></thead><tbody>'
+        + f.rows.map((r) => '<tr' + (r.changed ? ' class="qa-changed"' : '') + '><td>' + e(r.label) + '</td><td>' + e(r.before) + '</td><td>' + e(r.after) + '</td></tr>').join('') + '</tbody></table>'
+        + (f.options && f.options.length ? '<div class="qa-sub-h">Options at your prices</div><table class="qa-figsum-tbl"><tbody>' + f.options.map((o) => '<tr><td>' + e(o.label) + (o.basis ? ' <span class="qa-chip">Basis of the total</span>' : '') + '</td><td>' + e(o.before) + '</td><td>' + e(o.after) + '</td></tr>').join('') + '</tbody></table>' : '')
+        + (f.held ? '<div class="qa-note">' + e(f.held + (f.held === 1 ? ' other line is' : ' other lines are') + ' held at the price shown.') + '</div>' : '');
+    }
+    return '<section class="qa-card qa-figsum" id="qa-figsum"><h4 class="qa-h">At your prices</h4>' + body + '</section>';
+  }
+  function costHtml(vm, e) {
+    if (!vm.cost) return '';
+    return '<section class="qa-card qa-cost"><h4 class="qa-h">Cost and margin' + (vm.cost.label ? ' <span class="qa-note">' + e(vm.cost.label) + '</span>' : '') + '</h4>'
+      + (vm.cost.none ? '<div class="qa-thread-note">No cost record was saved with this quote.</div>'
+        : '<dl class="qa-kv">' + vm.cost.rows.map((r) => '<dt class="' + (r.tone ? 'qa-' + e(r.tone) : '') + '">' + e(r.label) + '</dt>'
+          // a full-width note / warning row has no value: an empty <dd> would take the next grid cell and push every later label into the value column
+          + ((r.tone && !r.value) ? '' : '<dd>' + e(r.value) + '</dd>')).join('') + '</dl>')
+      + '</section>';
   }
   function html(vm, esc) {
     const e = typeof esc === 'function' ? esc : defaultEsc;
@@ -511,7 +741,7 @@
     out.push('</section>');
     if (vm.other.length) {
       out.push('<section class="qa-card"><h4 class="qa-h">Other photos</h4><div class="qa-other">'
-        + vm.other.map((p, i) => '<figure class="qa-fig"><button type="button" class="qa-thumb" data-set="other" data-i="' + i + '" aria-label="View photo"><img class="qa-img" src="' + e(p.url) + '" alt="" loading="lazy" decoding="async"></button>'
+        + vm.other.map((p, i) => '<figure class="qa-photo-fig"><button type="button" class="qa-thumb" data-set="other" data-i="' + i + '" aria-label="View photo"><img class="qa-img" src="' + e(p.url) + '" alt="" loading="lazy" decoding="async"></button>'
           + (p.caption ? '<figcaption>' + e(p.caption) + '</figcaption>' : '') + '</figure>').join('') + '</div></section>');
     }
     if (vm.options) {
@@ -519,6 +749,7 @@
         + vm.options.rows.map((r) => '<tr' + (r.basis ? ' class="qa-opt-basis"' : '') + '><td>' + e(r.label) + (r.basis ? ' <span class="qa-chip">Basis of the total</span>' : '') + '</td><td>' + e(r.count) + '</td><td>' + e(r.total) + '</td></tr>').join('')
         + '</tbody></table><div class="qa-note">' + e(vm.options.note) + '</div></section>');
     }
+    out.push('<div class="qa-host" id="qa-figsum-host">' + figSumHtml(vm, e) + '</div>');
     out.push('<section class="qa-card qa-totals"><h4 class="qa-h">Totals</h4>' + kv(vm.totals, e)
       + '<div class="qa-grand"><span>Grand total</span><strong>' + e(vm.grand) + '</strong></div></section>');
     const t = vm.terms;
@@ -529,19 +760,14 @@
       + (t.remarks ? '<div class="qa-sub-h">Remarks</div><div class="qa-preline">' + e(t.remarks) + '</div>' : '')
       + (!(t.payment.length || t.timeline.length || t.validUntil || t.warranty || t.remarks) ? '<div class="qa-thread-note">No terms were stored with this quote.</div>' : '')
       + '</section>');
-    if (vm.cost) {
-      out.push('<section class="qa-card qa-cost"><h4 class="qa-h">Cost and margin</h4>'
-        + (vm.cost.none ? '<div class="qa-thread-note">No cost record was saved with this quote.</div>'
-          : '<dl class="qa-kv">' + vm.cost.rows.map((r) => '<dt class="' + (r.tone ? 'qa-' + e(r.tone) : '') + '">' + e(r.label) + '</dt><dd>' + e(r.value) + '</dd>').join('') + '</dl>')
-        + '</section>');
-    }
+    out.push('<div class="qa-host" id="qa-cost-host">' + costHtml(vm, e) + '</div>');
     out.push('<section class="qa-card qa-thread" id="qa-thread"><h4 class="qa-h">Comments</h4><div id="qa-thread-list">' + threadHtml(vm.thread, e) + '</div>' + composeHtml(vm, e) + '</section>');
     out.push(actionBarHtml(vm, e));
     out.push('</div>');
     return out.join('');
   }
 
-  const QA = { viewModel, html, safeImg, thread: threadModel, threadHtml, _tsMs: tsMs };
+  const QA = { viewModel, html, safeImg, thread: threadModel, threadHtml, figSumHtml, costHtml, actionBarHtml, figNoticeHtml, figKey, confirmText, changeOf, NO_ENGINE_SENTENCE, _tsMs: tsMs };
   W().QuoteApproval = QA;
 
   // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -577,7 +803,7 @@
     const box = document.getElementById('qa-thread-list');
     if (!box) return;
     S.commentsOff = r.off; S.comments = r.entries;
-    box.innerHTML = QA.threadHtml(QA.thread(S.q, r.entries, { commentsOff: r.off, id: S.id }), ESC);
+    box.innerHTML = QA.threadHtml(QA.thread(S.q, r.entries, { commentsOff: r.off, id: S.id, lineNo: S.lineNo }), ESC);
   }
 
   window.renderQuoteApproval = async function (ref) {
@@ -634,17 +860,22 @@
     const newer = later ? { ref: window.quoteApprovalRefOf(r.coll, later.id), number: later.quoteNumber || later.id } : null;
     const parentDoc = q.parentQuoteId ? sibs.find((s) => s.id === q.parentQuoteId) : null;
 
+    // the President's figures: the boxes' text (kept in sessionStorage across a reload against the fresh doc), the engine's state (a frame is created lazily, see ensureEngine)
+    const fig = newFigState(ref, q);
     const ctx = {
       coll: r.coll, id: r.id, ref, role: currentRole, uid: currentUser.uid, sidecar, comments: thread.entries, commentsOff: thread.off,
       newer, parent: parentDoc ? { number: parentDoc.quoteNumber || '' } : null, offline: !online(),
       companyLabel: window.quoteCompanyLabel ? window.quoteCompanyLabel(q.company || 'BK') : '',
       lib: { FormsCore: window.FormsCore, QBSpecSheet: window.QBSpecSheet },
+      figures: { inputs: fig.inputs, engine: fig.engine },
     };
     const vm = QA.viewModel(q, ctx);
     c.innerHTML = QA.html(vm, ESC);
     if (window.lucide) lucide.createIcons({ nodes: [c] });
-    _cur = { ref, coll: r.coll, id: r.id, q, vm, commentsOff: thread.off, comments: thread.entries };
+    const lineNo = {}; vm.groups.forEach((g) => g.lines.forEach((L) => { lineNo[L.idx] = L.no; }));
+    _cur = { ref, coll: r.coll, id: r.id, q, vm, ctx, commentsOff: thread.off, comments: thread.entries, fig, lineNo };
     wire(c, _cur);
+    if (vm.figuresOn && vm.fig && !vm.fig.noFig) runEngine(_cur);   // prices restored from this session: work the totals out again
     if (!_visBound) {
       _visBound = true;
       document.addEventListener('visibilitychange', () => {
@@ -652,6 +883,178 @@
       });
     }
   };
+
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  //  The President's figures: state, the hidden engine frame, the proofs (QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §2, §6.3)
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  const ENGINE_BOOT_MS = 15000, ENGINE_APPLY_MS = 5000, FIG_DEBOUNCE_MS = 400;
+  const storeKey = (ref) => 'qaFig:' + ref;
+
+  // inputs: { [lineIndex]: { price, note, n, q } } — n and q (name and quantity of the line when typed) let a reload against a CHANGED quote drop a figure that no longer belongs to its line
+  function readStored(ref, q) {
+    const out = {};
+    try {
+      const raw = JSON.parse(sessionStorage.getItem(storeKey(ref)) || 'null');
+      if (!raw || typeof raw !== 'object') return out;
+      Object.keys(raw).forEach((k) => {
+        const r = raw[k], it = arr(q.items)[Number(k)];
+        if (isObj(r) && isObj(it) && str(r.n) === str(it.name).slice(0, 120) && n0(r.q) === n0(it.qty)) out[k] = { price: str(r.price), note: str(r.note), n: str(r.n), q: n0(r.q) };
+      });
+    } catch (_) { /* no storage: the boxes simply start empty */ }
+    return out;
+  }
+  function writeStored(S) {
+    try {
+      const keep = {};
+      Object.keys(S.fig.inputs).forEach((k) => { const r = S.fig.inputs[k]; if (r && (str(r.price).trim() || str(r.note).trim())) keep[k] = r; });
+      if (Object.keys(keep).length) sessionStorage.setItem(storeKey(S.ref), JSON.stringify(keep)); else sessionStorage.removeItem(storeKey(S.ref));
+    } catch (_) { /* storage blocked: the boxes still work, they are just not kept across a reload */ }
+  }
+  function clearStored(ref) { try { sessionStorage.removeItem(storeKey(ref)); } catch (_) { /* nothing to clear */ } }
+  function newFigState(ref, q) {
+    return { inputs: isObj(q) && arr(q.items).length ? readStored(ref, q) : {}, engine: { phase: 'none', reason: '', result: null, base: null, units: null }, seq: 0, timer: null, host: null, waiters: [], audited: false, seeFirst: false };
+  }
+
+  // settle: whoever awaits the engine's answer (a decision that flushed a pending run) is let go when the answer, a failure or a timeout lands
+  function settle(S) { const w = S.fig.waiters; S.fig.waiters = []; w.forEach((f) => f()); }
+  function engineDown(S, reason, detail) {
+    const F = S.fig, h = F.host;
+    F.engine.phase = 'unavailable'; F.engine.reason = reason; F.engine.result = null; F.engine.pending = null;
+    if (h) { clearTimeout(h.bootTimer); clearTimeout(h.applyTimer); try { window.removeEventListener('message', h.listener); } catch (_) { /* gone */ } try { h.frame.remove(); } catch (_) { /* gone */ } F.host = null; }
+    if (_cur !== S) { settle(S); return; }   // the page was left or redrawn meanwhile: nothing to paint or log
+    if (!F.audited) { F.audited = true; try { window.logAudit && window.logAudit('update', 'quote', S.id, { figuresEngine: reason + (detail ? ':' + detail : '') }); } catch (_) { /* the audit line is best-effort */ } }
+    paintFigures(S); settle(S);
+  }
+  function post(h, msg) { try { h.frame.contentWindow.postMessage(msg, window.location.origin); return true; } catch (_) { return false; } }
+
+  // the frame is created the FIRST time the President focuses a price box (a quote he only reads never loads the builder); it lives in #page-content, so leaving the page removes it
+  function ensureEngine(S) {
+    const F = S.fig;
+    if (F.host) return F.host;
+    if (F.engine.phase === 'unavailable') return null;
+    if (!S.q.editableState) { F.engine.phase = 'unavailable'; F.engine.reason = 'no-snapshot'; return null; }
+    const c = document.getElementById('page-content');
+    if (!c) return null;
+    const frame = document.createElement('iframe');
+    frame.id = 'qa-engine';
+    frame.setAttribute('aria-hidden', 'true'); frame.setAttribute('tabindex', '-1'); frame.setAttribute('title', 'Quote engine');
+    frame.src = 'quote-builder-v2.html?v=' + encodeURIComponent(window.APP_VERSION) + '&engine=1&reopen=1';
+    const h = { frame, bootTimer: null, applyTimer: null, listener: null, sent: false };
+    h.listener = (ev) => onEngineMessage(S, h, ev);
+    window.addEventListener('message', h.listener);
+    h.bootTimer = setTimeout(() => { if (F.engine.phase === 'loading') engineDown(S, 'timeout', 'boot'); }, ENGINE_BOOT_MS);
+    F.host = h; F.engine.phase = 'loading';
+    c.appendChild(frame);
+    return h;
+  }
+  async function onEngineMessage(S, h, ev) {
+    const F = S.fig;
+    if (!h.frame.isConnected) { clearTimeout(h.bootTimer); clearTimeout(h.applyTimer); try { window.removeEventListener('message', h.listener); } catch (_) { /* gone */ } return; }
+    if (!ev || ev.origin !== window.location.origin || ev.source !== h.frame.contentWindow) return;   // only the frame this page created (a builder page elsewhere is ignored)
+    const d = ev.data || {};
+    if (F.host !== h) return;
+    if (d.type === 'QB_READY') {
+      if (h.sent) return; h.sent = true;
+      let state = null;
+      try { state = typeof window.qbStateForDoc === 'function' ? await window.qbStateForDoc(S.coll, S.id, S.q) : null; } catch (_) { state = null; }
+      if (F.host !== h) return;
+      if (!state) { engineDown(S, 'no-snapshot'); return; }
+      post(h, { type: 'LOAD_QUOTE', payload: { editableState: state, asRevision: false } });
+    } else if (d.type === 'ENGINE_READY') {
+      if (F.engine.phase !== 'loading') return;
+      clearTimeout(h.bootTimer);
+      F.engine.base = d.base; F.engine.units = d.units;
+      const p1 = QF().baselineMatches(S.q, d.base, d.units);   // P1: before any figure the builder must reproduce what was stored
+      if (!p1.ok) { engineDown(S, 'mismatch', 'P1 ' + p1.reason); return; }
+      F.engine.phase = 'ready';
+      runEngine(S);
+    } else if (d.type === 'FIGURES_RESULT') {
+      const pend = F.engine.pending;
+      if (!pend || d.seq !== F.seq || d.seq !== pend.seq) return;   // a result for an older request is dropped
+      clearTimeout(h.applyTimer);
+      F.engine.pending = null;
+      if (!d.ok) { engineDown(S, d.error === 'unstable' ? 'unstable' : 'mismatch', 'engine ' + str(d.error)); return; }
+      const p2 = QF().verifyResult(S.q, d.payload, pend.figs);   // P2: every figure landed, nothing else moved
+      if (!p2.ok) { engineDown(S, 'mismatch', 'P2 ' + p2.reason); return; }
+      F.engine.result = { key: pend.key, payload: d.payload, costSidecar: d.costSidecar || null, held: arr(d.held), applied: arr(d.applied), summary: d.summary || null };
+      paintFigures(S); settle(S);
+    }
+  }
+  // the current view model (the page's in-memory state through the pure half)
+  function vmOf(S) {
+    S.ctx.figures = { inputs: S.fig.inputs, engine: S.fig.engine };
+    S.vm = QA.viewModel(S.q, S.ctx);
+    return S.vm;
+  }
+  // work the totals out at the valid figures now typed. Cheap to call: it does nothing without a valid figure, and waits for ENGINE_READY (which calls it again) while the frame boots.
+  function runEngine(S) {
+    const F = S.fig;
+    clearTimeout(F.timer); F.timer = null;
+    const vm = vmOf(S);
+    if (!vm.figuresOn || !vm.fig || vm.fig.noFig || vm.fig.anyError) { F.engine.result = null; paintFigures(S); settle(S); return; }
+    const figs = vm.fig.rows.filter((r) => r.to != null).map((r) => ({ i: r.i, to: r.to }));
+    const h = ensureEngine(S);
+    if (!h) { paintFigures(S); settle(S); return; }
+    if (F.engine.phase !== 'ready') { paintFigures(S); return; }
+    const key = QA.figKey(vm.fig.rows);
+    if (F.engine.result && F.engine.result.key === key) { paintFigures(S); settle(S); return; }
+    const seq = ++F.seq;
+    F.engine.pending = { seq, key, figs };
+    F.engine.result = null;
+    post(h, { type: 'APPLY_FIGURES', seq, figures: figs, by: { uid: currentUser.uid, name: who() }, at: new Date().toISOString() });
+    clearTimeout(h.applyTimer);
+    h.applyTimer = setTimeout(() => { if (F.engine.pending && F.engine.pending.seq === seq) engineDown(S, 'timeout', 'apply'); }, ENGINE_APPLY_MS);
+    paintFigures(S);
+  }
+  // a decision that needs the answer for the figures as typed NOW: a pending debounce runs at once, and the call waits for the result (or the failure / timeout that ends the wait)
+  async function flushEngine(S) {
+    const F = S.fig;
+    let vm = vmOf(S);
+    if (!vm.figuresOn || !vm.fig || vm.fig.noFig) return vm;
+    if (F.timer || vm.figSummary.state === 'loading' || vm.figSummary.state === 'idle') {
+      const wait = new Promise((res) => { F.waiters.push(res); });
+      runEngine(S);
+      if (vmOf(S).figSummary && vmOf(S).figSummary.state === 'loading') await wait; else settle(S);
+    }
+    return vmOf(S);
+  }
+
+  // repaint ONLY what the figures change: each typed line's amount / notices, the "At your prices" card, the cost card, the tick and the action bar. Never the boxes themselves (focus must not move).
+  function paintFigures(S) {
+    if (!_cur || _cur !== S) return;
+    const c = document.getElementById('page-content');
+    if (!c) return;
+    const vm = vmOf(S);
+    if (!vm.figuresOn) return;
+    vm.groups.forEach((g) => g.lines.forEach((L) => {
+      const box = c.querySelector('[data-fig-i="' + L.idx + '"]');
+      if (!box || !L.fig) return;
+      const amt = box.querySelector('.qa-fig-amount'), err = box.querySelector('.qa-fig-err'), clr = box.querySelector('.qa-fig-clear');
+      if (amt) amt.textContent = L.fig.amount;
+      if (err) err.innerHTML = QA.figNoticeHtml(L.fig, ESC);
+      if (clr) clr.hidden = !L.fig.value.trim();
+    }));
+    const sum = c.querySelector('#qa-figsum-host'), cost = c.querySelector('#qa-cost-host'), tick = c.querySelector('#qa-fig-seefirst-wrap');
+    if (sum) sum.innerHTML = QA.figSumHtml(vm, ESC);
+    if (cost) cost.innerHTML = QA.costHtml(vm, ESC);
+    if (tick) tick.hidden = !(vm.fig && !vm.fig.noFig);
+    const bar = c.querySelector('.qa-actionbar');
+    if (bar) {
+      const t = document.createElement('div');
+      t.innerHTML = QA.actionBarHtml(vm, ESC);
+      if (t.firstElementChild) { bar.replaceWith(t.firstElementChild); if (S.rewireBar) S.rewireBar(); }
+    }
+  }
+  function onFigField(S, el) {
+    const i = el.dataset.i, it = arr(S.q.items)[Number(i)];
+    if (!isObj(it)) return;
+    const row = S.fig.inputs[i] || (S.fig.inputs[i] = { price: '', note: '', n: str(it.name).slice(0, 120), q: n0(it.qty) });
+    if (el.classList.contains('qa-fig-price')) row.price = el.value; else row.note = el.value;
+    writeStored(S);
+    paintFigures(S);                                   // validation, the amount and the buttons follow at once
+    clearTimeout(S.fig.timer);
+    S.fig.timer = setTimeout(() => runEngine(S), FIG_DEBOUNCE_MS);   // the totals follow when he pauses
+  }
 
   // ── the photo viewer: one Overlay entry (Back and Escape close it, as in the chat's), previous / next, caption and count ───────────
   function openLightbox(photos, start) {
@@ -683,6 +1086,7 @@
   }
 
   // ── wiring ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  const TYPED_PRICES_SENTENCE = 'You typed prices. Use Approve at my figures or Return with my figures, or clear them.';
   function wire(c, S) {
     const $ = (sel) => c.querySelector(sel);
     // a picture that cannot load (expired link, blocked host) falls back to the placeholder
@@ -709,45 +1113,132 @@
     if (ta) ta.addEventListener('input', () => { if (cnt) cnt.textContent = ta.value.length + '/2000'; if (err) err.textContent = ''; });
     const text = () => (ta ? ta.value.trim() : '');
     const offline = () => { if (online()) return false; Notifs.showToast('You are offline. Connect to approve or return a quote.', 'error'); return true; };
-    const afterDecision = (res) => { if (res && (res.ok || res.reason === 'state')) { if (ta) ta.value = ''; window.renderQuoteApproval(S.ref); } };
+    // a taken (or already taken) decision clears the boxes and redraws the quote; a refused one because the quote CHANGED redraws too (the boxes come back from the session, checked against the fresh quote)
+    const afterDecision = (res) => {
+      if (res && (res.ok || res.reason === 'state')) { clearStored(S.ref); if (ta) ta.value = ''; window.renderQuoteApproval(S.ref); }
+      else if (res && res.reason === 'changed') window.renderQuoteApproval(S.ref);
+    };
     const common = { coll: S.coll, quoteId: S.id, agentId: S.q.createdBy, quoteNumber: S.q.quoteNumber, clientName: S.q.clientName };
 
-    // (the buttons are read once: an event's currentTarget is gone after the first await)
-    const approveBtn = $('#qa-approve'), returnBtn = $('#qa-return'), commentBtn = $('#qa-comment');
-    approveBtn?.addEventListener('click', async () => {
-      if (offline()) return;
-      const ok = await window.confirmDialog({ message: 'Approve ' + S.vm.number + ' for ' + (S.vm.client || 'the client') + '? It will be filed and Sales will be told.' });
-      if (!ok) return;
-      afterDecision(await window.busy(approveBtn, () => window.decideQuoteApproval({ ...common, action: 'approve', notes: text() })));
-    });
-    returnBtn?.addEventListener('click', async () => {
-      if (!text()) { showErr('Write what to change before you return it.'); return; }
-      if (offline()) return;
-      afterDecision(await window.busy(returnBtn, () => window.decideQuoteApproval({ ...common, action: 'return', notes: text() })));
-    });
-    commentBtn?.addEventListener('click', async () => {
-      if (!text()) { showErr('Write a comment first.'); return; }
-      if (offline()) return;
-      const body = text();
-      const isPres = S.vm.isApprover;
-      const res = await window.busy(commentBtn, () => window.QuoteThread.add({ coll: S.coll, quoteId: S.id, q: S.q, kind: 'comment', text: body, uid: currentUser.uid, name: who(), role: currentRole }));
-      if (!res || !res.ok) { Notifs.showToast('The comment was not saved. Try again.', 'error'); return; }
-      notifyComment(S, body, res.id, isPres);
-      if (ta) { ta.value = ''; if (cnt) cnt.textContent = '0/2000'; }
-      refreshThread(S);
-    });
-    $('#qa-revise')?.addEventListener('click', () => window.reopenQuoteFromDoc(S.coll, S.id, window.quoteBuilderPageFor(S.q.company)));
+    // the boxes: typing validates and recomputes at once; the first focus on a price box creates the engine frame
+    const root = $('.qa-page');
+    if (root) {
+      root.addEventListener('input', (ev) => { const el = ev.target; if (el && el.matches && el.matches('.qa-fig-price, .qa-fig-note')) onFigField(S, el); });
+      root.addEventListener('focusin', (ev) => { const el = ev.target; if (el && el.matches && el.matches('.qa-fig-price') && S.vm.figuresOn) ensureEngine(S); });
+      root.addEventListener('click', (ev) => {
+        const b = ev.target && ev.target.closest ? ev.target.closest('.qa-fig-clear') : null;
+        if (!b) return;
+        const inp = b.closest('.qa-fig').querySelector('.qa-fig-price');
+        if (inp) { inp.value = ''; onFigField(S, inp); inp.focus(); }
+      });
+    }
+
+    // his line notes without prices ride along with a plain decision (and nothing is added to the call when there are none: today's call, byte for byte)
+    const plainFigures = (mode) => {
+      const vm = vmOf(S);
+      const rows = vm.fig ? vm.fig.rows : [];
+      return rows.length ? { mode, lines: rows, changed: 0, totals: null, exact: false, carry: false } : null;
+    };
+    const pick = (x) => ({ subtotal: x.subtotal, netAmount: x.netAmount, total: x.total });
+
+    // (the buttons are read once per bar: an event's currentTarget is gone after the first await; the bar is redrawn while he types, so this runs again on every redraw)
+    const bindBar = () => {
+      const approveBtn = $('#qa-approve'), returnBtn = $('#qa-return'), commentBtn = $('#qa-comment'), approveFigBtn = $('#qa-approve-fig'), returnFigBtn = $('#qa-return-fig');
+      approveBtn?.addEventListener('click', async () => {
+        if (offline()) return;
+        const vm = vmOf(S);
+        if (vm.fig && vm.fig.prices > 0) { showErr(TYPED_PRICES_SENTENCE); return; }
+        const ok = await window.confirmDialog({ message: 'Approve ' + S.vm.number + ' for ' + (S.vm.client || 'the client') + '? It will be filed and Sales will be told.' });
+        if (!ok) return;
+        const figures = plainFigures('approve');
+        afterDecision(await window.busy(approveBtn, () => window.decideQuoteApproval({ ...common, action: 'approve', notes: text(), ...(figures ? { figures } : {}) })));
+      });
+      returnBtn?.addEventListener('click', async () => {
+        const vm = vmOf(S);
+        if (vm.fig && vm.fig.prices > 0) { showErr(TYPED_PRICES_SENTENCE); return; }
+        const figures = plainFigures('return');
+        if (!text() && !figures) { showErr('Write what to change before you return it.'); return; }
+        if (offline()) return;
+        afterDecision(await window.busy(returnBtn, () => window.decideQuoteApproval({ ...common, action: 'return', notes: text(), ...(figures ? { figures } : {}) })));
+      });
+      commentBtn?.addEventListener('click', async () => {
+        const vm = vmOf(S);
+        const noteRows = (vm.fig ? vm.fig.rows : []).filter((r) => r.note).map((r) => Object.assign({}, r, { to: null }));   // typed prices are NOT sent: they stay in their boxes
+        if (!text() && !noteRows.length) { showErr('Write a comment first.'); return; }
+        if (offline()) return;
+        const body = text();
+        const isPres = S.vm.isApprover;
+        const res = await window.busy(commentBtn, () => window.QuoteThread.add({ coll: S.coll, quoteId: S.id, q: S.q, kind: noteRows.length ? 'figures' : 'comment', text: body, uid: currentUser.uid, name: who(), role: currentRole,
+          ...(noteRows.length ? { lines: noteRows } : {}) }));
+        if (!res || !res.ok) { Notifs.showToast('The comment was not saved. Try again.', 'error'); return; }
+        notifyComment(S, body, res.id, isPres, noteRows.length);
+        if (ta) { ta.value = ''; if (cnt) cnt.textContent = '0/2000'; }
+        if (noteRows.length) {   // the notes were sent: their boxes empty, the prices stay
+          noteRows.forEach((r) => { const row = S.fig.inputs[r.i]; if (row) row.note = ''; const box = c.querySelector('#qa-fn-' + r.i); if (box) box.value = ''; });
+          writeStored(S); paintFigures(S);
+        }
+        refreshThread(S);
+      });
+      // Approve at my figures: the engine must be exact for the figures as typed now (a pending debounce runs first), then the confirm with the totals, then ONE decision carrying the builder's own money fields
+      approveFigBtn?.addEventListener('click', async () => {
+        if (offline() || S.fig.busy) return;
+        S.fig.busy = true;
+        try {
+          const vm = await flushEngine(S);
+          if (!vm.fig || vm.fig.noFig || vm.fig.anyError || vm.figSummary.state !== 'exact') { paintFigures(S); return; }
+          const rs0 = S.fig.engine.result;
+          const ok = await window.confirmDialog({ message: QA.confirmText('approve', { number: vm.number, client: vm.client, fig: { prices: vm.fig.prices, held: vm.figSummary.held, belowCost: vm.fig.belowCost, change: QA.changeOf(S.q, rs0.payload) } }) });
+          if (!ok) return;
+          const vm2 = vmOf(S), rs = S.fig.engine.result;
+          if (vm2.figSummary.state !== 'exact' || !rs || QA.figKey(vm2.fig.rows) !== rs.key) { Notifs.showToast('Your prices changed while you were confirming. Check them and try again.', 'info'); return; }
+          const F = QF(), FV = firebase.firestore.FieldValue;
+          afterDecision(await window.busy(approveFigBtn, () => window.decideQuoteApproval({ ...common, action: 'approve', notes: text(),
+            edits: { ...F.moneyEdits(rs.payload), editedByPresident: true, editedAt: FV.serverTimestamp(), editedBy: currentUser.uid },
+            figures: { mode: 'approve', lines: vm2.fig.rows, changed: vm2.fig.prices, totals: { before: pick(F.summary(S.q)), after: pick(F.summary(rs.payload)) }, exact: true, carry: false, held: arr(rs.held) },
+            expectSig: F.sig(S.q), costSidecar: rs.costSidecar || null })));
+        } finally { S.fig.busy = false; }
+      });
+      // Return with my figures: the bottom box may be empty (the figures are the instruction). A re-send at or above his prices is filed without coming back to him only when the engine proved the totals and the tick is off.
+      returnFigBtn?.addEventListener('click', async () => {
+        if (offline() || S.fig.busy) return;
+        S.fig.busy = true;
+        try {
+          const vm = await flushEngine(S);
+          if (!vm.fig || vm.fig.noFig || vm.fig.anyError) { paintFigures(S); return; }
+          const seeFirst = !!($('#qa-fig-seefirst') && $('#qa-fig-seefirst').checked);
+          const exact0 = vm.figSummary.state === 'exact';
+          const ok = await window.confirmDialog({ message: QA.confirmText('return', { number: vm.number, client: vm.client, fig: { prices: vm.fig.prices, carry: exact0 && !seeFirst } }) });
+          if (!ok) return;
+          const vm2 = vmOf(S), rs = S.fig.engine.result;
+          const exact = vm2.figSummary.state === 'exact' && !!rs && QA.figKey(vm2.fig.rows) === rs.key;
+          if (exact !== exact0) { Notifs.showToast('Your prices changed while you were confirming. Check them and try again.', 'info'); return; }
+          const F = QF();
+          afterDecision(await window.busy(returnFigBtn, () => window.decideQuoteApproval({ ...common, action: 'return', notes: text(),
+            figures: { mode: 'return', lines: vm2.fig.rows, changed: vm2.fig.prices, totals: exact ? { before: pick(F.summary(S.q)), after: pick(F.summary(rs.payload)) } : null, exact, carry: exact && !seeFirst },
+            expectSig: F.sig(S.q) })));
+        } finally { S.fig.busy = false; }
+      });
+      $('#qa-apply-fig')?.addEventListener('click', () => { window._qbFiguresAutoApply = true; window.reopenQuoteFromDoc(S.coll, S.id, window.quoteBuilderPageFor(S.q.company)); });
+      $('#qa-revise')?.addEventListener('click', () => window.reopenQuoteFromDoc(S.coll, S.id, window.quoteBuilderPageFor(S.q.company)));
+    };
+    S.rewireBar = bindBar;
+    bindBar();
   }
 
   // The other side hears about a comment (best-effort: the comment stays saved if this fails). The President's comment goes to the person who sent the quote; the sender's reply goes to the President.
-  async function notifyComment(S, body, commentId, byPresident) {
+  // A President's entry with line notes (kind figures) says how many lines, never what is on them (QUOTE-PRESIDENT-FIGURES-SPEC §9).
+  async function notifyComment(S, body, commentId, byPresident, noteCount) {
     const ref = window.quoteApprovalRefOf(S.coll, S.id);
     const link = ref ? 'quote-approval/' + ref : 'approvals';
     const no = S.vm.number, client = S.vm.client || 'the client';
     try {
       if (byPresident) {
         if (S.q.createdBy && S.q.createdBy !== currentUser.uid) {
-          await Notifs.send(S.q.createdBy, { title: '💬 The President commented on your quote', body: ('"' + no + '" for ' + client + ': ' + body.slice(0, 300)), icon: '💬', type: 'quote_comment', link });
+          if (noteCount > 0) {
+            await Notifs.send(S.q.createdBy, { title: '💬 The President left notes on your quote', body: ('"' + no + '" for ' + client + ': notes on ' + noteCount + (noteCount === 1 ? ' line.' : ' lines.') + (body ? ' ' + body.slice(0, 300) : '')), icon: '💬', type: 'quote_comment', link });
+          } else {
+            await Notifs.send(S.q.createdBy, { title: '💬 The President commented on your quote', body: ('"' + no + '" for ' + client + ': ' + body.slice(0, 300)), icon: '💬', type: 'quote_comment', link });
+          }
         }
       } else {
         await Notifs.sendToOwner({ title: '💬 Reply on a quote awaiting your approval', body: (who() + ' on "' + no + '": ' + body.slice(0, 300)), icon: '💬', type: 'quote_comment', link, dedupKey: 'quote_comment|' + commentId });

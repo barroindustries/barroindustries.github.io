@@ -2241,6 +2241,9 @@ function renderQuoteBuilderIframe() {
   // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 — read-once, like reviewCtx: the note of a returned quote (reopenQuoteFromDoc), and a fresh page forgets the quote the previous
   // builder page sent for approval (the bridge sets _qbLastApproval; the builder's Pending Approval badge asks for it again).
   const returnNote = window._qbReturnNote; window._qbReturnNote = null;
+  // QUOTE-PRESIDENT-FIGURES-SPEC 7.2 — read once too: his figures for a returned quote, and whether to apply them the moment the builder has loaded ("Apply President's figures" on the review page / the Quotes list)
+  const presFigures = window._qbFigures; window._qbFigures = null;
+  const figuresAutoApply = !!window._qbFiguresAutoApply; window._qbFiguresAutoApply = false;
   window._qbLastApproval = null;
   const reviewBanner = reviewCtx ? `
     <div id="qb-review-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,159,10,.12),transparent);border:1.5px solid var(--warning,#ff9f0a);border-radius:12px;padding:10px 14px;margin-bottom:10px">
@@ -2299,6 +2302,7 @@ function renderQuoteBuilderIframe() {
       if (qbSent || !frame?.contentWindow) return;
       qbSent = true;
       try { frame.contentWindow.postMessage({ type:'LOAD_QUOTE', payload:{ editableState: reopenState, asRevision: reopenAsRevision } }, '*'); } catch(_){}
+      if (presFigures) { try { frame.contentWindow.postMessage({ type:'PRESIDENT_FIGURES', payload:{ ...presFigures, autoApply: figuresAutoApply } }, '*'); } catch(_){} }
     };
     const onQbReady = (ev) => {
       if (ev.origin !== window.location.origin) return;
@@ -2316,12 +2320,13 @@ function renderQuoteBuilderIframe() {
   }
 }
 
-// Ask the builder iframe for its current edited state (resolves with the payload).
+// Ask the builder iframe for its current edited state (resolves with { payload, costSidecar }).
 function requestBuilderState(frame, timeoutMs = 4000) {
   return new Promise((resolve, reject) => {
     if (!frame || !frame.contentWindow) return reject(new Error('Builder not ready'));
     const to = setTimeout(() => { window.removeEventListener('message', h); reject(new Error('Builder did not respond')); }, timeoutMs);
-    function h(ev) { if (ev.origin !== window.location.origin) return; if (ev.data && ev.data.type === 'QUOTE_STATE') { clearTimeout(to); window.removeEventListener('message', h); resolve(ev.data.payload || {}); } }
+    // QUOTE-PRESIDENT-FIGURES-SPEC 6.4: resolves { payload, costSidecar } — the builder's own answer, so "Save edits & Approve" can store the cost record that goes with the prices it saves
+    function h(ev) { if (ev.origin !== window.location.origin) return; if (ev.data && ev.data.type === 'QUOTE_STATE') { clearTimeout(to); window.removeEventListener('message', h); resolve({ payload: ev.data.payload || {}, costSidecar: ev.data.costSidecar || null }); } }
     window.addEventListener('message', h);
     try { frame.contentWindow.postMessage({ type: 'REQUEST_STATE' }, '*'); } catch (e) { clearTimeout(to); window.removeEventListener('message', h); reject(e); }
   });
@@ -2335,30 +2340,29 @@ function requestBuilderState(frame, timeoutMs = 4000) {
 // decision (already decided, offline, a failed write) keeps the President in the builder; a taken one ends on the review page of the quote.
 async function saveReviewedPartnerQuote(ctx, action) {
   const frame = document.getElementById('qb-frame');
-  let payload;
-  try { payload = await requestBuilderState(frame); }
+  let payload, costSidecar = null;
+  try { const st = await requestBuilderState(frame); payload = st.payload || {}; costSidecar = st.costSidecar || null; }
   catch (e) { Notifs.showToast('Could not read the edited quote — try again', 'error'); return; }
   const notes = action === 'return'
     ? ((await promptDialog({message:'Notes for the submitter (what changed / what to confirm)?', multiline:true})) || '')
     : '';
+  const coll = ctx.quoteColl || 'bs_quotes';
+  try { await window.ensureScript('js/screens/approvals.js'); await window.ensureScript('js/quote-figures-core.js'); }
+  catch (e) { Notifs.showToast('Could not load the approval tools — try again', 'error'); return; }
+  // QUOTE-PRESIDENT-FIGURES-SPEC 6.4 / F-10: the money he saves is the builder's WHOLE answer (items, subtotal, discount, net, VAT, delivery, payment split, commission, options, editable copy), never just
+  // items + total: before this the saved quote kept Sales' subtotal, net, VAT and payment split under his new total, and KCLive then read the stale net as the approval's bar.
   const edits = {
     clientName:    payload.clientName || ctx.clientName || '',
     clientCompany: payload.clientCompany || '',
     clientAddress: payload.clientAddress || '',
     clientPhone:   payload.clientPhone || '',
     clientEmail:   payload.clientEmail || '',
-    items:         payload.items || [],
-    total:         payload.total || payload.grandTotal || 0,
-    grandTotal:    payload.grandTotal || payload.total || 0,
-    editableState: payload.editableState || null,
+    ...window.QuoteFigures.moneyEdits(payload),
     editedByPresident: true,
     editedAt: firebase.firestore.FieldValue.serverTimestamp(),
     editedBy: currentUser.uid,
   };
-  const coll = ctx.quoteColl || 'bs_quotes';
-  try { await window.ensureScript('js/screens/approvals.js'); }
-  catch (e) { Notifs.showToast('Could not load the approval tools — try again', 'error'); return; }
-  const r = await window.decideQuoteApproval({ coll, quoteId: ctx.quoteId, action, notes, edits,
+  const r = await window.decideQuoteApproval({ coll, quoteId: ctx.quoteId, action, notes, edits, costSidecar,
     agentId: ctx.partnerUid, quoteNumber: ctx.quoteNumber, clientName: edits.clientName, toastOk: false });
   if (!r || !r.ok) return;
   Notifs.success(action === 'approve' ? 'Approved with edits + submitter notified' : 'Edited & returned');
@@ -2390,6 +2394,39 @@ async function graftQuoteCosts(collection, docId, state){
   } catch(_){ /* no access or not deployed yet — reopen works as before */ }
 }
 
+// QUOTE-COSTS (owner ruling 2026-09-21) — THE cost sidecar writer: the body of the bridge's former saveCostSidecar closure, extracted unchanged so decideQuoteApproval (approve at the President's figures,
+// QUOTE-PRESIDENT-FIGURES-SPEC 3.3) stores the builder's cost record the same way the builder's own saves do. sc = the builder's costSidecar { items: [...], ... }; opts = { parentId, createdBy }:
+// parentId = the doc a new revision was reopened from (keepTypedCosts, below, may take a line's typed costs from it); createdBy = the uid stamped on the record (default the signed-in user). A decision the
+// President takes on SOMEONE ELSE'S quote passes the quote's creator: the quote_costs rule lets an agent read only records he created. Best-effort: it never throws and never blocks the write it rides with.
+window.qbSaveCostSidecar = async function (coll, id, sc, opts) {
+  if (!sc || !Array.isArray(sc.items) || !sc.items.length || !coll || !id) return;
+  opts = opts || {};
+  try {
+    let rows = sc.items;
+    // F7 — a kc row sent with typed: null keeps the typed costs already stored (see keepTypedCosts): those of this very doc (an update in place, a draft) or, for a new revision, of the doc the quote was reopened from
+    // (opts.parentId). One read per doc, and only when such a row is there; no answer in 4 s, no access or nothing stored: the rows go as they are.
+    if (typeof keepTypedCosts === 'function' && rows.some(r => r && r.kc && r.kc.typed === null)) {
+      const from = [id]; const parent = opts.parentId; if (parent && String(parent) !== String(id)) from.push(String(parent));
+      for (const sid of from) {
+        let timer = null;
+        try {
+          const prev = await Promise.race([
+            db.collection('quote_costs').doc(coll + '_' + sid).get(),
+            new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('no answer')), 4000); }),
+          ]);
+          if (prev && prev.exists) { rows = keepTypedCosts(rows, (prev.data() || {}).items); break; }
+        } catch (_) { /* no access, or no answer: try the next doc */ }
+        finally { clearTimeout(timer); }
+      }
+    }
+    await db.collection('quote_costs').doc(coll + '_' + id).set({
+      ...sc, items: rows, quoteColl: coll, quoteDocId: id,
+      createdBy: opts.createdBy || currentUser.uid,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) { console.warn('[QB bridge] quote_costs save failed (non-blocking)', err); }
+};
+
 // Fable review F7 (2026-11-20) — the cost sidecar is REPLACED as a whole on every save (set, no merge), and a kc line's typed costs (the materials / labor the President typed on a custom item) live in it and nowhere
 // else: the quote payload never carries them. A line the builder does not hold the typed costs of (reopened or resumed, and its graft has not run, failed, or never reads: a draft) is sent with kc.typed === null
 // ("not known", qb/d7/d7-adapter.js sidecarRow); keep what the stored sidecar has for the same line (kcId, kind and name all match). kc.typed as an object, even a row of nulls, is the builder's own word and replaces.
@@ -2407,6 +2444,40 @@ function keepTypedCosts(rows, prevRows) {
   });
 }
 
+// The editable snapshot of a stored quote, prepared for the builder: the quote's place in the revision chain stamped on it, a filed quote marked filed, the privately-stored cost basis grafted back.
+// ONE preparation for both users (QUOTE-PRESIDENT-FIGURES-SPEC 2.3): reopenQuoteFromDoc (below) and the review page's hidden engine frame (js/screens/quote-approval.js, LOAD_QUOTE). Pure apart from the
+// sidecar read; it navigates nowhere and sets no window global. -> the state, or null when the quote has no editable snapshot.
+window.qbStateForDoc = async function(collection, id, q){
+  if (!q || !q.editableState) return null;
+  // Wave 3 Q4/Q5 — stamp the source doc + its place in the revision chain onto
+  // the editableState we hand the builder, so the File flow can offer
+  // "update original" (QUOTE_UPDATE) vs "file as new revision" (QUOTE_FILED),
+  // and so a new revision correctly inherits the chain's root id.
+  // Bridge-side safeguard: always hand the builder a real base quote number.
+  // editableState.quoteNo is normally present (buildQuotePayload always sets
+  // it), but older/partial snapshots could lack it — if we passed that
+  // through blank, loadEditableState()'s `if(state.quoteNo){...}` guard
+  // would skip setting #quoteNo, leaving the builder in auto-number mode,
+  // which regenerates a FRESH (today-dated) number instead of preserving the
+  // original. Fall back to the doc's own top-level quoteNumber field so the
+  // base number is always frozen/correct, never builder-regenerated.
+  const qNo = q.editableState.quoteNo || q.quoteNumber || '';
+  const state = { ...q.editableState, quoteNo: qNo, sourceDocId: id, sourceCollection: collection, rootQuoteId: q.rootQuoteId || id };
+  // Owner 2026-11-20 ("make the approved quote PDF one tap"): the saved snapshot never carries the filing time (it is built before the quote is stamped filed),
+  // so a reopened filed / approved quote came back as a draft and Download PDF asked to file it again. A quote whose record is filed — and not waiting for or
+  // refused approval — reopens as filed. The builder still asks to re-file if anything is changed after the reopen (filedChangedSinceFiling in the builder).
+  // A quote that is still waiting for approval has status 'pending_approval', so it is never stamped filed here.
+  try {
+    const appr = String(q.approvalStatus || '');
+    if (!state.filedAt && q.status === 'filed' && !['pending_review', 'returned', 'rejected'].includes(appr)) {
+      const t = q.approvedAt || q.filedAt || q.createdAt;
+      const d = t && t.toDate ? t.toDate() : (t ? new Date(t) : null);
+      state.filedAt = (d && !isNaN(d)) ? d.toISOString() : new Date().toISOString();
+    }
+  } catch (_) {}
+  await graftQuoteCosts(collection, id, state);   // QUOTE-COSTS
+  return state;
+};
 // Reopen a filed quote into the builder from anywhere (Quotations list, Client
 // data view, etc.). Loads the quote's editable snapshot and navigates to the
 // matching builder. Re-filing then saves a NEW versioned copy (per the SOP).
@@ -2414,40 +2485,22 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
   try {
     const snap = await db.collection(collection).doc(id).get();
     const q = snap.data() || {};
-    if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
-    // Wave 3 Q4/Q5 — stamp the source doc + its place in the revision chain onto
-    // the editableState we hand the builder, so the File flow can offer
-    // "update original" (QUOTE_UPDATE) vs "file as new revision" (QUOTE_FILED),
-    // and so a new revision correctly inherits the chain's root id.
-    // Bridge-side safeguard: always hand the builder a real base quote number.
-    // editableState.quoteNo is normally present (buildQuotePayload always sets
-    // it), but older/partial snapshots could lack it — if we passed that
-    // through blank, loadEditableState()'s `if(state.quoteNo){...}` guard
-    // would skip setting #quoteNo, leaving the builder in auto-number mode,
-    // which regenerates a FRESH (today-dated) number instead of preserving the
-    // original. Fall back to the doc's own top-level quoteNumber field so the
-    // base number is always frozen/correct, never builder-regenerated.
-    const qNo = q.editableState.quoteNo || q.quoteNumber || '';
-    window._qbReopenState = { ...q.editableState, quoteNo: qNo, sourceDocId: id, sourceCollection: collection, rootQuoteId: q.rootQuoteId || id };
-    // Owner 2026-11-20 ("make the approved quote PDF one tap"): the saved snapshot never carries the filing time (it is built before the quote is stamped filed),
-    // so a reopened filed / approved quote came back as a draft and Download PDF asked to file it again. A quote whose record is filed — and not waiting for or
-    // refused approval — reopens as filed. The builder still asks to re-file if anything is changed after the reopen (filedChangedSinceFiling in the builder).
-    try {
-      const appr = String(q.approvalStatus || '');
-      if (!window._qbReopenState.filedAt && q.status === 'filed' && !['pending_review', 'returned', 'rejected'].includes(appr)) {
-        const t = q.approvedAt || q.filedAt || q.createdAt;
-        const d = t && t.toDate ? t.toDate() : (t ? new Date(t) : null);
-        window._qbReopenState.filedAt = (d && !isNaN(d)) ? d.toISOString() : new Date().toISOString();
-      }
-    } catch (_) {}
-    await graftQuoteCosts(collection, id, window._qbReopenState);   // QUOTE-COSTS
+    if (!q.editableState) { window._qbFiguresAutoApply = false; Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
+    window._qbReopenState = await window.qbStateForDoc(collection, id, q);
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
     // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §8.2 — a quote the President RETURNED reopens with his note in view: renderQuoteBuilderIframe reads this once (a strip above the
     // builder on a desktop, a toast on a phone, where the builder is full screen and hides shell strips). Any other quote clears it, so a note never follows a different quote.
     window._qbReturnNote = (q.approvalStatus === 'needs_revision')
       ? { text: String(q.presidentNotes || '').slice(0, 300), ref: window.quoteApprovalRefOf(collection, id) } : null;
+    // QUOTE-PRESIDENT-FIGURES-SPEC 7.2 — a quote the President returned WITH HIS FIGURES (prices and/or per-line notes) hands them to the builder: renderQuoteBuilderIframe reads this once, like the note above,
+    // and posts PRESIDENT_FIGURES right after LOAD_QUOTE. Any other quote clears it (and the one-shot auto-apply flag the review page's "Apply President's figures" button set).
+    const pf = q.presidentFigures;
+    window._qbFigures = (q.approvalStatus === 'needs_revision' && pf && Array.isArray(pf.lines) && pf.lines.length)
+      ? { lines: pf.lines.slice(0, 60), by: String(pf.by || ''), byName: String(pf.byName || ''), at: String(pf.at || ''), changed: Number(pf.changed) || 0, ref: window.quoteApprovalRefOf(collection, id) } : null;
+    if (!window._qbFigures) window._qbFiguresAutoApply = false;
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) {
+    window._qbFiguresAutoApply = false;
     // QUOTE-BUILDER-CONFIGURATOR-SPEC §8.3: the Quotes card on a request / brief offers Open on every quote filed from it, but a filed quote
     // is readable only by its author or an admin (firestore.rules) — say so instead of a raw "Missing or insufficient permissions".
     if (ex && ex.code === 'permission-denied') Notifs.showToast('Only its author or an admin can open this quote', 'error');
@@ -5163,16 +5216,24 @@ function _qbRevOf(no) { const m = /R(\d+)\s*(?:\(\d+\))?$/i.exec(String(no || ''
 // The reasons of a gate result in one plain sentence for the review page and the notification (the R style, no "Rev.").
 function _qbGateText(g) {
   const p = x => '₱' + window.fmtN2(x);
+  const verb = g.figures ? 'you set' : 'you approved';   // QUOTE-PRESIDENT-FIGURES-SPEC §8: against his own figures the bar is "the price you set"
   const bits = (g.reasons || []).slice(0, 6).map(r => (r.level === 'total' ? 'Total' : (r.name || 'A line')) + ' ' + p(r.price)
-    + (r.approved === null || r.approved === undefined ? ' (new line)' : ' is below the ' + p(r.approved) + ' you approved')
+    + (r.approved === null || r.approved === undefined ? ' (new line)' : ' is below the ' + p(r.approved) + ' ' + verb)
     + (r.std === null || r.std === undefined ? ', cost unknown' : ', and below the standard ' + p(r.std)));
   const head = g.error ? 'Could not check the earlier approval.' : (g.approveAll ? 'Every quote needs your approval (switch).' : (g.builderDisagrees ? 'The builder and the price check disagree.' : ''));
   return [head, bits.length ? 'Price check: ' + bits.join('; ') + '.' : ''].filter(Boolean).join(' ').slice(0, 600);
 }
+// QUOTE-PRESIDENT-FIGURES-SPEC §9 — the tail of the notification for a re-send that his figures do NOT cover: how many lines are below the prices he set, never an amount (the detailed reasons, with amounts, stay in
+// approvalWhy.text on the review page).
+function _qbFiguresNote(g) {
+  const rs = (g && g.reasons) || [];
+  const lines = rs.filter(r => r.level === 'line').length, total = rs.some(r => r.level === 'total');
+  return (lines ? ' ' + lines + (lines === 1 ? ' line is' : ' lines are') + ' below the prices you set.' : '') + (total ? ' The total is below the total at your prices.' : '');
+}
 // The gate (§6.6). Runs only for a revision (the payload names its chain) filed by someone other than the President.
 //   -> { mode: 'none' }  nothing in the chain was approved by Neil: file as today, the gate does not run
-//      { mode: 'carry', fromId, approvedOn, approvedTotal }  the revision rides Neil's approval
-//      { mode: 'approve', reasons, error?, approveAll?, builderDisagrees? }  it goes to Neil, whatever the "send for approval" tick said
+//      { mode: 'carry', fromId, approvedOn, approvedTotal, kind? }  the revision rides Neil's approval (kind 'figures': the prices he set on a quote he returned, QUOTE-PRESIDENT-FIGURES-SPEC §8)
+//      { mode: 'approve', reasons, error?, approveAll?, builderDisagrees?, figures?, offered? }  it goes to Neil, whatever the "send for approval" tick said (offered: his figures were on offer for this revision)
 // approveAll ON never carries. builderCovered is the builder's own verdict when its payload carries one (true / false / null); a disagreement goes to Neil. A failed read goes to Neil too.
 async function _qbChainGate(coll, data, builderCovered) {
   if (!data.rootQuoteId) return { mode: 'none' };
@@ -5180,6 +5241,17 @@ async function _qbChainGate(coll, data, builderCovered) {
     const PG = window.PriceGate;
     if (!PG) throw new Error('price gate not loaded');
     const [flags, chain] = await Promise.all([db.collection('settings').doc('quote_builder').get(), _qbChainQuotes(coll, data.rootQuoteId)]);
+    // QUOTE-PRESIDENT-FIGURES-SPEC §8: a revision of a quote he returned WITH HIS FIGURES is judged against those figures first (figuresOfferFor: the direct parent, still returned, still offering the carry, no later
+    // decision of his in the chain). The same rule as below (PG.evaluate): a price that holds or rises never needs him. No offer: today's logic, unchanged.
+    const offer = PG.figuresOfferFor(data, chain);
+    if (offer) {
+      if (flags && flags.exists && flags.data().approveAll === true) return { mode: 'approve', reasons: [], approveAll: true, offered: true };
+      const bar = PG.figuresBar(offer);
+      const fres = PG.evaluate({ priceCheck: data.priceCheck, items: data.items, total: data.total, grandTotal: data.grandTotal }, bar);
+      if (fres.needsApproval) return { mode: 'approve', reasons: fres.reasons, figures: true, offered: true };
+      if (builderCovered === false) return { mode: 'approve', reasons: [], builderDisagrees: true, offered: true };
+      return { mode: 'carry', kind: 'figures', fromId: offer.id, approvedOn: String(offer.presidentFigures.at || ''), approvedTotal: bar.total };
+    }
     const approved = chain.filter(x => x.approvalStatus === 'approved');   // only an approved doc can be named by approvalCarriedFrom (rules C3)
     const best = PG.pickLastApprovedQuote(approved);
     if (!best) return { mode: 'none' };
@@ -5305,6 +5377,13 @@ window.addEventListener('message', async (e) => {
     return;
   }
 
+  // QUOTE-PRESIDENT-FIGURES-SPEC 7.2 — "See comments" in the builder's figures banner: open the quote's review page. No write; the ref is re-validated here (collection allowlist, id pattern).
+  if (type === 'QB_OPEN_APPROVAL') {
+    const ref = window.parseQuoteApprovalRef(payload.ref) ? String(payload.ref) : '';
+    if (ref) navigateTo('quote-approval', { subtab: ref });
+    return;
+  }
+
   // QUOTE-COSTS (owner ruling 2026-09-21): the builder ships the cost basis
   // its payload strip removes (BOM rows, lump materials, crew-days, capital
   // costs) as e.data.costSidecar — persist it PRIVATELY in
@@ -5315,30 +5394,7 @@ window.addEventListener('message', async (e) => {
   const saveCostSidecar = async (coll, id) => {
     const sc = e.data.costSidecar;
     if (!sc || !Array.isArray(sc.items) || !sc.items.length || !coll || !id) return;
-    try {
-      let rows = sc.items;
-      // F7 — a kc row sent with typed: null keeps the typed costs already stored (see keepTypedCosts): those of this very doc (an update in place, a draft) or, for a new revision, of the doc the quote was reopened from
-      // (payload.parentQuoteId). One read per doc, and only when such a row is there; no answer in 4 s, no access or nothing stored: the rows go as they are.
-      if (typeof keepTypedCosts === 'function' && rows.some(r => r && r.kc && r.kc.typed === null)) {
-        const from = [id]; const parent = payload && payload.parentQuoteId; if (parent && String(parent) !== String(id)) from.push(String(parent));
-        for (const sid of from) {
-          let timer = null;
-          try {
-            const prev = await Promise.race([
-              db.collection('quote_costs').doc(coll + '_' + sid).get(),
-              new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('no answer')), 4000); }),
-            ]);
-            if (prev && prev.exists) { rows = keepTypedCosts(rows, (prev.data() || {}).items); break; }
-          } catch (_) { /* no access, or no answer: try the next doc */ }
-          finally { clearTimeout(timer); }
-        }
-      }
-      await db.collection('quote_costs').doc(coll + '_' + id).set({
-        ...sc, items: rows, quoteColl: coll, quoteDocId: id,
-        createdBy: currentUser.uid,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      });
-    } catch (err) { console.warn('[QB bridge] quote_costs save failed (non-blocking)', err); }
+    await window.qbSaveCostSidecar(coll, id, sc, { parentId: payload && payload.parentQuoteId });   // the writer is window.qbSaveCostSidecar (above the bridge): the decision on the review page uses it too
   };
   // Companion cleanup for the draft-deletion paths below — a deleted draft's
   // sidecar goes with it (best-effort; an orphan is harmless but untidy).
@@ -5489,14 +5545,17 @@ window.addEventListener('message', async (e) => {
     try {
       let src = null, srcReadFailed = false;
       try { const sn = await db.collection(collection).doc(docId).get(); src = sn && sn.exists ? sn.data() : null; } catch (_) { srcReadFailed = true; }
-      if (srcReadFailed || (src && src.approvalStatus === 'approved')) {
+      // QUOTE-PRESIDENT-FIGURES-SPEC §8: a quote RETURNED WITH HIS PRICES is converted the same way (the in-place save would leave it returned, with his offer on a doc that changed, and nothing would reach anyone)
+      const pfLines = src && src.approvalStatus === 'needs_revision' && src.presidentFigures && Array.isArray(src.presidentFigures.lines) ? src.presidentFigures.lines : [];
+      const figuresSrc = pfLines.some(r => r && r.to !== null && r.to !== undefined);
+      if (srcReadFailed || (src && src.approvalStatus === 'approved') || figuresSrc) {
         const root = (src && src.rootQuoteId) || (payload && payload.rootQuoteId) || docId;
         let chain = []; try { chain = await _qbChainQuotes(collection, root); } catch (_) {}
         const base = String((payload && payload.quoteNumber) || (src && src.quoteNumber) || '').replace(/R\d+\s*(?:\(\d+\))?$/i, '');
         const next = Math.max(_qbRevOf(payload && payload.quoteNumber), _qbRevOf(src && src.quoteNumber), ...chain.map(c => _qbRevOf(c.quoteNumber))) + 1;
         payload = Object.assign({}, payload, { quoteNumber: base + 'R' + next, rootQuoteId: root, parentQuoteId: docId, company: (payload && payload.company) || (src && src.company) || 'BK' });
         type = 'QUOTE_FILED';
-        try { Notifs.showToast('This quote is approved, so your changes were filed as a new revision (R' + next + ').', 'info'); } catch (_) {}
+        try { Notifs.showToast(figuresSrc ? 'This quote was returned with the President\'s prices, so your changes were filed as a new revision (R' + next + ').' : 'This quote is approved, so your changes were filed as a new revision (R' + next + ').', 'info'); } catch (_) {}
       }
     } catch (err) { console.error('[QB bridge] approved-source check failed', err); type = 'QUOTE_FILED'; }
   }
@@ -5709,13 +5768,28 @@ window.addEventListener('message', async (e) => {
     // deletes ITS OWN doc, not just the slot above.
     const deleteNamedDraft = async () => { const id0 = e.data.draftDocId; if (id0) { try { await db.collection(coll).doc(id0).delete(); } catch(_){} await deleteCostSidecar(coll, id0); } };
 
+    // QUOTE-PRESIDENT-FIGURES-SPEC §8: the revision carries lines at the President's prices (the builder stamped priceBy; a line only HELD at Sales' price does not count) and its parent holds his figures: ONE
+    // "applied" entry in the thread of the new doc. Best-effort: its failure never fails the filing. Never written by the President himself.
+    const noteApplied = async (newId) => {
+      try {
+        if (currentRole === 'president' || !data.parentQuoteId) return;
+        const n = (Array.isArray(data.items) ? data.items : []).filter(it => it && it.priceBy && it.priceBy.role === 'president' && !it.priceBy.held).length;
+        if (!n) return;
+        const ps = await db.collection(coll).doc(String(data.parentQuoteId)).get();
+        if (!ps || !ps.exists || !ps.data() || !ps.data().presidentFigures) return;
+        const sent = await window.QuoteThread.add({ coll, quoteId: newId, q: { ...data, rootQuoteId: data.rootQuoteId || newId }, kind: 'applied',
+          text: 'Applied the President\'s prices on ' + n + (n === 1 ? ' line.' : ' lines.'), uid: currentUser.uid, name: agentName, role: currentRole });
+        if (sent && sent.ok === false) console.warn('[QB bridge] the "applied" thread entry was not saved (non-blocking)', sent.error);
+      } catch (err) { console.warn('[QB bridge] the "applied" thread entry failed (non-blocking)', err); }
+    };
+
     const carried = route === 'QUOTE_FILED' && gate.mode === 'carry';
     if (route === 'QUOTE_FILED') {
       Object.assign(data, window.quoteStateFields(carried ? 'approved' : 'filed'));
       data.filedAt = firebase.firestore.FieldValue.serverTimestamp();
       // Filed under Neil's earlier approval (§6.6): the doc that approval is on, when it was filed under it, and the date of Neil's own approval (for the "carried" badge). Carried approvals never become
       // the bar for the next revision (PriceGate.lastApprovedFromChain skips approvalCarriedFrom), and no approvedBy / approvedSnapshot is written: this is not a new approval.
-      if (carried) { data.approvalCarriedFrom = gate.fromId; data.approvalCarriedAt = firebase.firestore.FieldValue.serverTimestamp(); data.approvalCarriedOn = gate.approvedOn || ''; }
+      if (carried) { data.approvalCarriedFrom = gate.fromId; data.approvalCarriedAt = firebase.firestore.FieldValue.serverTimestamp(); data.approvalCarriedOn = gate.approvedOn || ''; if (gate.kind === 'figures') data.approvalCarriedKind = 'figures'; }
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
@@ -5724,8 +5798,19 @@ window.addEventListener('message', async (e) => {
       await saveCostSidecar(coll, docRef.id);   // QUOTE-COSTS — the filed quote's cost basis, stored privately
       await deleteDraftSlot();
       await deleteNamedDraft();
+      await noteApplied(docRef.id);
       // Notify president so they're aware of filed quotes
-      if (carried) {
+      if (carried && gate.kind === 'figures') {
+        // QUOTE-PRESIDENT-FIGURES-SPEC §9: filed under HIS OWN figures; the FYI says so, names the date he set them and carries no amount
+        const on = gate.approvedOn ? new Date(gate.approvedOn) : null;
+        const date = on && !isNaN(on) ? on.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' }) : 'earlier';
+        const aref = window.quoteApprovalRefOf(coll, docRef.id);
+        await Notifs.sendToOwner({
+          title: '📋 Quote re-sent at your prices (no action)',
+          body: `${agentName}: ${data.fileName} was filed under the prices you set on ${date}. No action needed.`.slice(0, 2000),
+          icon: '📋', type: 'quote_carried', link: aref ? 'quote-approval/' + aref : ((coll === 'bk_quotes') ? 'bk-quotations' : 'bs-quotations')
+        });
+      } else if (carried) {
         // the control behind the carry (§6.6, §12): Neil is told every time, in the R style, and nothing is asked of him
         const rn = _qbRevOf(data.quoteNumber), on = gate.approvedOn ? new Date(gate.approvedOn) : null;
         const date = on && !isNaN(on) ? on.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' }) : 'earlier';
@@ -5759,6 +5844,7 @@ window.addEventListener('message', async (e) => {
       await saveCostSidecar(coll, docRef.id);   // QUOTE-COSTS — same private store on the approval path
       await deleteDraftSlot();
       await deleteNamedDraft();
+      await noteApplied(docRef.id);
       await db.collection('approval_requests').add({
         type: 'bs_quote',            // legacy type value kept — readers filter on it
         quoteId: docRef.id,
@@ -5779,9 +5865,13 @@ window.addEventListener('message', async (e) => {
           text: (data.approvalWhy && data.approvalWhy.text) || '', uid: currentUser.uid, name: agentName, role: currentRole });
         if (sent && sent.ok === false) console.warn('[QB bridge] approval thread entry was not saved (non-blocking)', sent.error);
       } catch (thErr) { console.warn('[QB bridge] approval thread entry failed (non-blocking)', thErr); }
+      // QUOTE-PRESIDENT-FIGURES-SPEC §9: a re-send his figures were on offer for says how many lines are below the prices he set, never an amount (approvalWhy.text keeps the detailed reasons for the page)
+      const figOffered = gate.mode === 'approve' && gate.offered === true;
       await Notifs.sendToOwner({
         title: '📤 Quote Awaiting Approval',
-        body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.${gateText ? ' ' + gateText : ''}`.slice(0, 2000),
+        body: (figOffered
+          ? `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — please review.${gate.figures ? _qbFiguresNote(gate) : ''}`
+          : `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.${gateText ? ' ' + gateText : ''}`).slice(0, 2000),
         icon: '📤', type: 'quote_review_request', link: approvalRef ? 'quote-approval/' + approvalRef : 'approvals'
       });
       // The shell owns the link (D5): the doc id exists only here. Remembered for the builder's "Pending Approval" badge (QB_SHOW_APPROVAL_LINK).

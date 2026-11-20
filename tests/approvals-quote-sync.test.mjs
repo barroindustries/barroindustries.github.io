@@ -103,7 +103,8 @@ function makeApp(opts) {
     firebase: { firestore: { FieldValue: { serverTimestamp: () => stamp } } },
     currentUser: { uid: opts.me || 'u-pres' }, currentRole: 'president', userProfile: { displayName: 'The President' },
     navigator: { onLine: !opts.offline }, navigateTo: (page, o) => navs.push([page, o]), document: { getElementById: () => ({}) },
-    requestBuilderState: async () => opts.builderState || {}, promptDialog: async () => opts.returnNotes || '',
+    requestBuilderState: async () => ({ payload: opts.builderState || {}, costSidecar: opts.costSidecar || null }),   // the builder's whole answer (QUOTE-PRESIDENT-FIGURES-SPEC 6.4): payload + cost record
+    promptDialog: async () => opts.returnNotes || '',
     Notifs: {
       showToast: (m, t) => toasts.push({ m, t }), success: (m) => toasts.push({ m, t: 'success' }), error: (m) => toasts.push({ m, t: 'error' }),
       send: async (uid, n) => { ops.push('notify'); notes.push({ uid, n }); },
@@ -111,6 +112,7 @@ function makeApp(opts) {
     dbCacheInvalidate: (k) => invalidated.push(k),
     openPage: () => panel, closeModal: () => closed.push(true), emojiIcon: () => '',
   });
+  vm.runInContext(read('js/quote-figures-core.js'), ctx, { filename: 'js/quote-figures-core.js' });   // window.QuoteFigures: the builder bar hands its payload through moneyEdits
   vm.runInContext([STATE_FIELDS, ESC_HTML, REF_OF, SYNC, IN_FLIGHT, DECIDE, 'window.decideQuoteApproval = decideQuoteApproval;', APPROVE, RETURN, REVIEW, BAR].join('\n'), ctx);
   const call = (code, ...args) => { ctx.__a = args; return vm.runInContext(code, ctx); };
   return { ctx, win, store, ops, updates, toasts, warns, invalidated, notes, audits, closed, panel, controls, threads, navs,

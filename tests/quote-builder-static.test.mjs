@@ -91,7 +91,7 @@ const gAt = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key)
 
 // ═══════════════════════════════════════ the harness: the real builder script in a vm context ═══════════════════════════════════════
 const COMPILED = new vm.Script(SCRIPT, { filename: 'quote-builder-v2.html<script>' });   // parsed once; every environment below only RUNS it
-function makeEnv({ search = '', protocol = 'http:', script = SCRIPT, db = undefined } = {}) {
+function makeEnv({ search = '', protocol = 'http:', script = SCRIPT, db = undefined, extra = {} } = {}) {
   const els = new Map();
   const removed = new Set();
   const posted = [];
@@ -134,6 +134,7 @@ function makeEnv({ search = '', protocol = 'http:', script = SCRIPT, db = undefi
   win.ProductFamilies = PF; win.QR_FAMILIES = FAM; win.PricingCore = PC; win.QBConfigured = QB; win.QBSpecSheet = QS;
   Object.assign(win, { priceCatalogItem: PC.priceCatalogItem, validateSelection: PC.validateSelection, estimateRange: PC.estimateRange, estimateGate: PC.estimateGate });
   if (db) win.db = db;
+  Object.assign(win, extra);     // e.g. the QuoteFigures core (QUOTE-PRESIDENT-FIGURES-SPEC), loaded on `window` before the builder's script runs
   const ctx = vm.createContext(win);
   (script === SCRIPT ? COMPILED : new vm.Script(script, { filename: 'quote-builder-v2.html<script>' })).runInContext(ctx);
   const run = (code) => vm.runInContext(code, ctx);
@@ -254,9 +255,14 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
 
   it('TUTORIAL_VERSION is 52: the newest What\'s New entry is version 52 (the approval link to the quote itself, QUOTE-APPROVAL-LINK-SPEC-2026-11-20), then 51 (the Barro Kitchens configurators in the live builder, dated the day they open), then 50 (Preview\'s Back to the form stays on screen, owner Q70); entry 49 (the timeline rule, quotations "as issued", the printed page tail), 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 53);
+    assert.equal(b.run('TUTORIAL_VERSION'), 54);
     const wn52 = b.plain('WHATS_NEW');
-    assert.equal(wn52[0].ver, 53, 'owner 2026-11-20: the 12-month warranty note is the newest entry'); assert.equal(wn52[0].kc, true); wn52.shift();
+    // 54 — QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20: the President's own prices on a returned or approved quote. One item, plain language, no figure; kc:true like 52 and 53.
+    assert.equal(wn52[0].ver, 54, 'the President\'s figures note is the newest entry'); assert.equal(wn52[0].kc, true); assert.equal(wn52[0].date, '2026-11-20'); assert.equal(wn52[0].items.length, 1);
+    for (const must of ['returns a quote with his own prices', 'beside each line with his notes', 'Apply President\'s figures', 'send again', 'filed as approved', 'ready to send as a PDF']) assert.ok(wn52[0].items[0].includes(must), `What's New 54 does not say "${must}"`);
+    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b|\bD7\b|engine|Firestore|rules/i.test(wn52[0].items[0]), false, 'What\'s New 54: plain user language, no figure');
+    wn52.shift();
+    assert.equal(wn52[0].ver, 53, 'owner 2026-11-20: the 12-month warranty note'); assert.equal(wn52[0].kc, true); wn52.shift();
     // 52 — QUOTE-APPROVAL-LINK-SPEC-2026-11-20: Send for approval gives a link to the quote itself. One bullet, plain user language, no figure; held like 51 until the configurators are on (kc:true: Addendum 2 B5).
     assert.equal(wn52[0].ver, 52);
     assert.equal(wn52[0].date, '2026-11-20');
@@ -579,7 +585,7 @@ describe('static — what the builder may name (spec §2.3 / the pricing-core gu
 
   it('the strip list, the auto-pricer and the cost basis name what the spec says they name', () => {
     const b = makeEnv();
-    assert.match(b.run('buildQuotePayload.toString()'), /priceManual, _bomOpen, _uid, _miscId, _cfg, _kc, \.\.\.rest/);   // _kc: a configured (KC) line's runtime figures are stripped too (the configurators port, D7:E18)
+    assert.match(b.run('buildQuotePayload.toString()'), /priceManual, _bomOpen, _uid, _miscId, _cfg, _kc, _pf, \.\.\.rest/);   // _kc: a configured (KC) line's runtime figures are stripped too (the configurators port, D7:E18)
     assert.match(b.run('applyComputedPricing.toString()'), /QBConfigured\.isAutoPriceable/);
     assert.equal(/item\.id==='MISCFEE' \|\| item\.priceManual\) return/.test(b.run('applyComputedPricing.toString()')), false, 'the old two-clause test is still there');
     assert.match(b.run('itemCostBasis.toString()'), /item\.familyId[\s\S]*QBConfigured\.costBasisFor/);
@@ -2955,14 +2961,15 @@ const priceFields = (b) => b.plain('items.map(i => [i.unitPrice, i.amount, i.qty
 const fillVerifySell = (b) => { for (const [id, v] of Object.entries({ quoteNo: 'BKMLWB261105-001R1', quoteDate: '2026-11-05', salesperson: 'A', clientName: 'Client', clientPhone: '1', clientEmail: 'a@b.c' })) b.el(id).value = v; };
 
 describe('SELLING QUOTE — the markup, the loader and the constants', () => {
-  it('js/qb-spec-sheet.js loads last in the builder\'s own script list (after qb-configured.js, ahead of the main script) and is NOT an app-kit script', () => {
+  it('js/quote-figures-core.js loads last in the builder\'s own script list (QUOTE-PRESIDENT-FIGURES-SPEC), after js/qb-spec-sheet.js (after qb-configured.js, ahead of the main script); neither is an app-kit script', () => {
     const loader = (HTML.match(/<script>\(function\(\)\{var v=new URLSearchParams[^\n]*?<\/script>\n/) || [''])[0];
     const tags = [...loader.matchAll(/'(js\/[a-z-]+\.js)'/g)].map((m) => m[1]);
-    assert.deepEqual(tags.slice(-2), ['js/qb-configured.js', 'js/qb-spec-sheet.js']);
-    assert.equal(tags.length, 7);
+    assert.deepEqual(tags.slice(-3), ['js/qb-configured.js', 'js/qb-spec-sheet.js', 'js/quote-figures-core.js']);
+    assert.equal(tags.length, 8);
     assert.equal(typeof makeEnv().run('window.QBSpecSheet.rows'), 'string' === typeof 1 ? 'x' : 'function');
     assert.equal(/<script[^>]*src="js\/qb-spec-sheet/.test(HTML), false, 'never a bare <script src> in the builder: the loader writes it with ?v=');
     assert.equal(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').includes('qb-spec-sheet'), false, 'not an app-kit script of index.html');
+    assert.equal(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').includes('quote-figures-core'), false, 'the figures core is lazy: not an app-kit script either');
   });
 
   it('the new blocks are in the markup, in print order: …terms → footer → "Our standard" → (internal panel) → photo annex; and the Terms tab carries the warranty plan and the tick', () => {
@@ -4295,3 +4302,147 @@ describe('AS ISSUED — a quotation filed before the warranty plan existed keeps
 });
 
 const WARRANTY_SERVICE = '12-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.';
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §7 / §13.5 — the builder's two halves of the President's figures: ENGINE MODE (the hidden frame the review page hosts) and Sales' banner / Apply / Undo.
+// MUTATION LOG (2026-11-20, scratch copy of quote-builder-v2.html, this file run; each mutant KILLED by the test named):
+//   Q1  a QB_ENGINE guard removed from _flushSaveToStorage / scheduleDraftSave / sendQuoteDraft / fileQuotation   -> "engine mode keeps NOTHING ..."
+//   Q2  _pf left in the payload / the localStorage replacer                                                      -> "_pf is runtime only ..."
+//   Q3  updatePrice no longer goes through setLinePrice / setLinePrice drifts from applyToItems                   -> "updatePrice goes through setLinePrice ..."
+//   Q4  engineApply does not restore from the snapshot first                                                      -> "engine: every APPLY_FIGURES starts from Sales' prices ..."
+//   Q5  engineApply does not hold a moved line / does not fail on an unstable one                                 -> "engine: a line the auto-pricer moved is held ..."
+//   Q6  Apply forgets the undo snapshot                                                                           -> "Sales: Apply President's figures ... Undo puts every price key back"
+//   Q7  a hand-typed price keeps priceBy                                                                          -> "a hand-typed price or a reset is no longer his figure"
+//   Q8  ENGINE_READY is sent before the catalogue and prices are in                                               -> "engine: ENGINE_READY waits for the quote, the prices and the settings ..."
+//   Q9  the engine posts to any origin ('*')                                                                      -> "engine: a figure the builder would not put on its line ... posted to the page's own origin only"
+const QFC = require('../js/quote-figures-core.js');
+describe('QUOTE-PRESIDENT-FIGURES-SPEC 7 · the builder: engine mode and the President\'s figures', () => {
+  const fnText = (name) => { const i = SCRIPT.indexOf(`function ${name}(`); assert.ok(i >= 0, `${name} not found`); let d = 0, j = SCRIPT.indexOf('{', i); for (; j < SCRIPT.length; j++) { if (SCRIPT[j] === '{') d++; else if (SCRIPT[j] === '}' && --d === 0) break; } return SCRIPT.slice(i, j + 1); };
+  const line = (over) => Object.assign({ id: 'CUSTOM', category: 'extras', catLabel: 'Extras', name: 'Cart', specs: [], qty: 1, unit: 'pc', unitPrice: 1000, amount: 1000 }, over || {});
+  const mk = (search, over) => { const b = builder({ search: search || '', extra: { QuoteFigures: QFC } }); b.run(`items.length = 0; items.push(...${JSON.stringify(over || [line({ name: 'Cart' }), line({ name: 'Rack', qty: 2, unitPrice: 300, amount: 600 })])});`); return b; };
+  const tick = () => new Promise((r) => setImmediate(r));
+  const ready = (b) => { b.run('_engineLoaded = true; _engineLoadDone = true; _uiReadyOnce = true;'); b.run('engineMaybeReady()'); return b.posted.filter((x) => x.msg.type === 'ENGINE_READY').pop(); };
+
+  it('QB_ENGINE reads ?engine, and each guard is the FIRST statement of its function (engine mode keeps NOTHING of its own)', () => {
+    assert.match(SCRIPT, /const QB_ENGINE = new URLSearchParams\(location\.search\)\.has\('engine'\);/);
+    for (const name of ['_flushSaveToStorage', 'scheduleDraftSave', 'sendQuoteDraft', 'fileQuotation', 'setSavedDraft', 'checkDraftResume', 'showToast', 'initTutorial']) {
+      const body = fnText(name).replace(/\/\/[^\n]*/g, '');
+      assert.ok(/^function [^{]*\{\s*(_saveToStorageTimer=null;\s*|savedDraftDocId = id\|\|null;\s*savedDraftClientKey = id \? \(key\|\|''\) : '';\s*)?if\(QB_ENGINE\) return;/.test(body), `${name}: the QB_ENGINE guard is not its first statement`);
+    }
+    assert.equal(/QB_ENGINE/.test(fnText('updatePrice')), false, 'outside engine mode nothing above changes behaviour');
+  });
+  it('engine mode keeps NOTHING: a change writes no localStorage, schedules no cloud draft, posts no draft, files nothing, shows no toast — and the same change outside engine mode does write', async () => {
+    const on = mk('?engine=1&reopen=1'), off = mk('');
+    for (const b of [on, off]) { b.run('saveToStorage(); flushSaveToStorageNow(); sendQuoteDraft(); showToast("hello")'); }
+    assert.equal(on.store.has('bkqb_items'), false); assert.equal(on.store.size, 0); assert.equal(on.posted.filter((x) => /^QUOTE_/.test(x.msg.type)).length, 0);
+    assert.equal(on.el('qbToast').textContent, '', 'no toast');
+    assert.equal(off.store.has('bkqb_items'), true, 'control: a normal builder writes its draft'); assert.ok(off.posted.some((x) => x.msg.type === 'QUOTE_DRAFT'));
+    await on.run('fileQuotation()'); assert.equal(on.posted.filter((x) => /^QUOTE_(FILED|APPROVAL_REQUESTED)$/.test(x.msg.type)).length, 0);
+    on.run('setSavedDraft("d1","k")'); assert.equal(on.store.has('bkqb_draft_docid'), false);
+    on.run('initTutorial()'); assert.equal(on.el('qbTutBanner').style.display === 'flex', false);
+  });
+  it('_pf is runtime only: it never rides the payload (items or editableState) and never the local draft; priceBy does ride', () => {
+    const b = mk('', [line({ _pf: { to: 5, note: 'x' }, priceBy: { role: 'president', uid: 'u', name: 'N', at: 'a', salesPrice: 9 } })]);
+    const pl = b.plain('buildQuotePayload()');
+    for (const row of [pl.items[0], pl.editableState.items[0]]) { assert.equal('_pf' in row, false); assert.equal(row.priceBy.salesPrice, 9); }
+    b.run('flushSaveToStorageNow()'); assert.equal(b.store.get('bkqb_items').includes('_pf'), false); assert.equal(b.store.get('bkqb_items').includes('priceBy'), true);
+  });
+  it('updatePrice goes through setLinePrice, and the keys it touches are EXACTLY the keys QuoteFigures.applyToItems touches (the pure twin)', () => {
+    assert.match(fnText('updatePrice'), /setLinePrice\(idx,el\.value\);\s*saveToStorage\(\);renderItems\(\);flashItemSaved\(\);/);
+    const keys = (src) => [...new Set([...src.matchAll(/\bit\.(\w+)\s*=(?!=)/g)].map((m) => m[1]).concat([...src.matchAll(/delete it\.(\w+)/g)].map((m) => m[1])))].filter((k) => QFC.PRICE_KEYS.includes(k)).sort();
+    const core = fs.readFileSync(path.join(ROOT, 'js/quote-figures-core.js'), 'utf8');
+    const applySrc = core.slice(core.indexOf('function applyToItems('), core.indexOf('// The eligible lines'));
+    assert.deepEqual(keys(fnText('setLinePrice')), keys(applySrc), 'setLinePrice and applyToItems write the same price keys');
+    assert.deepEqual(keys(applySrc), [...QFC.PRICE_KEYS].sort(), 'and those are exactly the keys snapshot / restore carry');
+    assert.match(fnText('setLinePrice'), /D7\.h\('adapter\.afterItemsChange','updatePrice',idx\);/);
+  });
+  it('engine: ENGINE_READY waits for the quote, the prices and the settings (once), and answers with the totals as stored and every unit price by index', () => {
+    const b = mk('?engine=1&reopen=1');
+    b.run('engineMaybeReady()'); assert.equal(b.posted.filter((x) => x.msg.type === 'ENGINE_READY').length, 0, 'nothing is loaded yet');
+    b.run('_engineLoaded = true; engineMaybeReady()'); b.run('_engineLoadDone = true; engineMaybeReady()'); assert.equal(b.posted.filter((x) => x.msg.type === 'ENGINE_READY').length, 0, 'the catalogue and prices are not in yet');
+    const m = ready(b).msg; assert.equal(b.posted.filter((x) => x.msg.type === 'ENGINE_READY').length, 1); b.run('engineMaybeReady()'); assert.equal(b.posted.filter((x) => x.msg.type === 'ENGINE_READY').length, 1, 'sent once');
+    assert.deepEqual(JSON.parse(JSON.stringify(m.units)), [1000, 300]); assert.equal(m.base.total, 1600); assert.equal(m.base.subtotal, 1600); assert.equal(m.kc, false); assert.equal(m.kcState, '');
+    assert.equal(ready(mk('')), undefined, 'outside engine mode nothing is ever posted');
+  });
+  it('engine: every APPLY_FIGURES starts from Sales\' prices, lands exactly the figure (unit price, amount, priceBy), and the answer passes P2; a second request does not accumulate on the first', () => {
+    const b = mk('?engine=1&reopen=1'); ready(b);
+    const base = b.plain('buildQuotePayload()');
+    const meta = { by: { uid: 'u-pres', name: 'The President' }, at: '2026-11-20T01:00:00.000Z' };
+    b.run(`engineApply(${JSON.stringify(Object.assign({ seq: 1, figures: [{ i: 0, to: 900 }] }, meta))})`);
+    const r1 = b.posted.filter((x) => x.msg.type === 'FIGURES_RESULT').pop().msg;
+    assert.equal(r1.seq, 1); assert.equal(r1.ok, true); assert.deepEqual(r1.applied, [0]); assert.deepEqual(r1.held, []);
+    assert.equal(r1.payload.items[0].unitPrice, 900); assert.equal(r1.payload.items[0].amount, 900); assert.equal(r1.payload.total, 1500); assert.equal(r1.summary.total, 1500);
+    assert.deepEqual(JSON.parse(JSON.stringify(r1.payload.items[0].priceBy)), { role: 'president', uid: 'u-pres', name: 'The President', at: meta.at, salesPrice: 1000 });
+    assert.deepEqual(QFC.verifyResult(base, r1.payload, [{ i: 0, to: 900 }]), { ok: true }, 'P2 passes on the builder\'s own answer');
+    b.run(`engineApply(${JSON.stringify(Object.assign({ seq: 2, figures: [{ i: 1, to: 250 }] }, meta))})`);
+    const r2 = b.posted.filter((x) => x.msg.type === 'FIGURES_RESULT').pop().msg;
+    assert.equal(r2.payload.items[0].unitPrice, 1000, 'line 0 went back to Sales\' price'); assert.equal('priceBy' in r2.payload.items[0], false); assert.equal(r2.payload.items[1].unitPrice, 250); assert.equal(r2.payload.items[1].amount, 500); assert.equal(r2.payload.total, 1500);
+    b.run(`engineApply(${JSON.stringify(Object.assign({ seq: 3, figures: [] }, meta))})`);
+    const r3 = b.posted.filter((x) => x.msg.type === 'FIGURES_RESULT').pop().msg; assert.equal(r3.ok, true); assert.deepEqual(r3.summary, QFC.summary(base), 'no figures: back to the base');
+  });
+  it('engine: a figure the builder would not put on its line, a changed line count, or no ENGINE_READY yet answers ok:false (fail closed), never a guess', () => {
+    const early = mk('?engine=1&reopen=1'); early.run('engineApply({ seq: 1, figures: [{ i: 0, to: 5 }] })');
+    assert.deepEqual([early.posted.pop().msg].map((m) => [m.ok, m.error]), [[false, 'not-ready']]);
+    const b = mk('?engine=1&reopen=1'); ready(b);
+    b.run('engineApply({ seq: 4, figures: [{ i: 7, to: 5 }] })'); assert.deepEqual(b.posted.pop().msg.error, 'not-applied');
+    b.run('engineApply({ seq: 5, figures: [{ i: 0, to: 0 }] })'); assert.deepEqual(b.posted.pop().msg.error, 'not-applied');
+    b.run('items.pop()'); b.run('engineApply({ seq: 6, figures: [{ i: 0, to: 5 }] })'); assert.deepEqual(b.posted.pop().msg.error, 'lines-changed');
+    assert.equal(b.posted.every((x) => x.origin === 'http://localhost'), true, 'posted to the page\'s own origin only');
+  });
+  it('engine: a line the auto-pricer moved is held at its snapshot price (priceBy.held, manual), and a line that still differs after one hold pass fails the answer as "unstable"', () => {
+    const b = mk('?engine=1&reopen=1'); ready(b);
+    // stand-in for the builder's re-price: after a figure, line 1 moves (an additional cost spread across the non-manual lines)
+    b.run(`(function(){ const real = renderItems; let moved = false; globalThis.renderItems = function(){ real(); if (items[0] && items[0].priceBy && !moved){ moved = true; items[1].unitPrice = 330; items[1].amount = 660; } }; })()`);
+    b.run('engineApply({ seq: 1, figures: [{ i: 0, to: 900 }], by: { uid: "u", name: "N" }, at: "t" })');
+    const r = b.posted.pop().msg;
+    assert.equal(r.ok, true); assert.deepEqual(r.held, [1]); assert.equal(r.payload.items[1].unitPrice, 300, 'held at Sales\' price'); assert.equal(r.payload.items[1].priceBy.held, true); assert.equal(r.payload.items[1].priceBy.salesPrice, 300);
+    const c = mk('?engine=1&reopen=1'); ready(c);
+    c.run(`(function(){ const real = renderItems; globalThis.renderItems = function(){ real(); if (items[0] && items[0].priceBy){ items[1].unitPrice += 10; items[1].amount = items[1].unitPrice * items[1].qty; } }; })()`);
+    c.run('engineApply({ seq: 1, figures: [{ i: 0, to: 900 }], by: {}, at: "t" })'); assert.equal(c.posted.pop().msg.error, 'unstable');
+  });
+  it('Sales: the figures arrive as PRESIDENT_FIGURES: the banner counts prices and notes, a row is shown beside its line (and only that line), an unmatched row is listed by name, "See comments" asks the app for the review page', async () => {
+    const b = mk('');
+    const rows = [{ i: 0, name: 'Cart', qty: 1, unit: 'pc', from: 1000, to: 900, note: 'a lower price' }, { i: 1, name: 'Rack', qty: 2, unit: 'pc', from: 300, to: null, note: 'check the top' }, { i: 5, name: 'Gone', qty: 1, unit: 'pc', from: 50, to: 40, note: '' }];
+    b.run(`qbOnMessage({ type: 'PRESIDENT_FIGURES', payload: ${JSON.stringify({ lines: rows, by: 'u-pres', byName: 'The President', at: '2026-11-20T01:00:00.000Z', changed: 2, ref: 'bk.qd1', autoApply: false })} })`); await tick();
+    const bar = b.el('presFigBar'); assert.equal(bar.style.display, '');
+    assert.ok(bar.innerHTML.includes('The President set prices on 2 lines and left notes on 2.')); assert.ok(bar.innerHTML.includes("Apply President's figures") && bar.innerHTML.includes('See comments'));
+    assert.ok(bar.innerHTML.includes('Could not be matched to a line (the line changed): Gone: ')); assert.ok(bar.innerHTML.includes("Send from this quote, not from a draft, to keep the President's prices."));
+    assert.deepEqual(b.plain('items.map(i => !!i._pf)'), [true, true]);
+    const r0 = b.run('presFigRowHtml(items[0])'), r1 = b.run('presFigRowHtml(items[1])');
+    assert.ok(r0.includes('President: ') && r0.includes('a lower price') && r0.includes('no-print')); assert.ok(r1.includes("President&#39;s note: ") && r1.includes('check the top') && r1.includes('President: ') === false);
+    b.run('openPresidentComments()'); assert.deepEqual(JSON.parse(JSON.stringify(b.posted.pop().msg)), { type: 'QB_OPEN_APPROVAL', payload: { ref: 'bk.qd1' } });
+    // another quote loaded: the previous figures never follow it
+    b.run(`loadEditableState({ items: [], quoteNo: 'X' }, { asRevision: false })`); assert.equal(b.el('presFigBar').style.display, 'none');
+  });
+  it('Sales: Apply President\'s figures puts his prices on the lines exactly as typed prices (priceBy, the chip, saved), the banner turns to "applied to N lines" with Undo, and Undo puts every price key back', async () => {
+    const b = mk('');
+    b.run(`qbOnMessage({ type: 'PRESIDENT_FIGURES', payload: ${JSON.stringify({ lines: [{ i: 0, name: 'Cart', qty: 1, unit: 'pc', from: 1000, to: 900, note: '' }], by: 'u-pres', byName: 'The President', at: '2026-11-20T01:00:00.000Z', changed: 1, ref: 'bk.qd1', autoApply: false })} })`); await tick();
+    const before = b.plain('items');
+    b.run('applyPresidentFigures()');
+    const pl = b.plain('buildQuotePayload()');
+    assert.equal(pl.items[0].unitPrice, 900); assert.equal(pl.items[0].amount, 900); assert.equal(pl.items[0].priceBy.salesPrice, 1000); assert.equal(pl.items[0].priceBy.uid, 'u-pres'); assert.equal(pl.items[0].priceBy.at, '2026-11-20T01:00:00.000Z', 'attribution is his, the time is his decision\'s');
+    assert.equal(pl.items[1].unitPrice, 300); assert.equal('priceBy' in pl.items[1], false); assert.equal(pl.total, 1500);
+    assert.ok(b.el('presFigBar').innerHTML.includes("The President's prices are applied to 1 line.") && b.el('presFigBar').innerHTML.includes('Undo'));
+    assert.ok(b.run('presPriceChipHtml(items[0])').includes("President's price") && b.run('priceBasisChipHtml(items[0], true)').includes("President's price"));
+    assert.ok(b.toast().includes('Applied to 1 line.')); assert.equal(b.run('presFigRowHtml(items[0])'), '', 'his price is on the line: the "President: X" note is gone');
+    b.run('flushSaveToStorageNow()'); assert.ok(JSON.parse(b.store.get('bkqb_items'))[0].priceBy, 'the local draft keeps priceBy');
+    b.run('applyPresidentFigures()'); assert.equal(b.plain('items[0].priceBy.salesPrice'), 1000, 'a second Apply is a no-op');
+    b.run('undoPresidentFigures()');
+    const after = b.plain('items'); for (const k of QFC.PRICE_KEYS) assert.deepEqual(after.map((i) => i[k]), before.map((i) => i[k]), k);
+    assert.ok(b.el('presFigBar').innerHTML.includes("Apply President's figures"));
+  });
+  it('Sales: autoApply (from "Apply President\'s figures" on the review page / the Quotes list) applies once the load and the settings have settled — not before', async () => {
+    const b = mk('');
+    b.run(`qbOnMessage({ type: 'PRESIDENT_FIGURES', payload: ${JSON.stringify({ lines: [{ i: 0, name: 'Cart', qty: 1, unit: 'pc', from: 1000, to: 900, note: '' }], by: 'u-pres', byName: 'N', at: 'A', changed: 1, ref: 'bk.qd1', autoApply: true })} })`); await tick();
+    assert.equal(b.plain('items[0].unitPrice'), 1000, 'the settings have not settled: not applied yet');
+    b.run('qbMarkUiReady()'); assert.equal(b.plain('items[0].unitPrice'), 900); assert.equal(b.plain('_presFig.applied'), 1);
+  });
+  it('a hand-typed price or a reset is no longer his figure: setLinePrice, "↺" (re-apply) and "Apply cost-based to all" let go of priceBy', () => {
+    const b = mk('', [line({ priceBy: { role: 'president', uid: 'u', name: 'N', at: 'a', salesPrice: 9 } })]);
+    b.run('setLinePrice(0, "700")'); assert.equal(b.plain('"priceBy" in items[0]'), false); assert.equal(b.plain('items[0].unitPrice'), 700);
+    const c = mk('', [line({ priceBy: { role: 'president' } })]); c.run('resetPricesToComputed()'); assert.equal(c.plain('"priceBy" in items[0]'), false);
+    const src = fs.readFileSync(path.join(ROOT, 'qb/d7/d7-pricing.js'), 'utf8'); assert.equal((src.match(/delete i\.priceBy/g) || []).length, 2, 'the D7 "back to the formula" paths drop it too');
+    assert.match(fnText('applyCostBasedToAll'), /delete i\.priceBy/);
+  });
+});

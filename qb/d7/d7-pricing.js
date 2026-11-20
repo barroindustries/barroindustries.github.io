@@ -338,10 +338,10 @@
     const lc = lineCost(i);
     if (isKc(i)) {
       if (!lc.hasBasis) return false;                          // "priced after review" / as filed: nothing to go back to, the typed price stays
-      delete i.priceManual; i.priceBasis = 'configured'; delete i.needsPrice;
+      delete i.priceManual; delete i.priceBy; i.priceBasis = 'configured'; delete i.needsPrice;   // priceBy: back on the formula, so no longer the President's figure (QUOTE-PRESIDENT-FIGURES-SPEC 5.2)
       return true;
     }
-    delete i.priceManual;
+    delete i.priceManual; delete i.priceBy;
     if ((i.priceBasis === 'manual' || i.priceBasis === 'website') && lc.hasBasis) i.priceBasis = 'cost';   // R4: the line goes back to the cost rule; one without a basis keeps its price
     return true;
   }

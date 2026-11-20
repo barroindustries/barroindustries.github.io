@@ -123,6 +123,69 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     return { needsApproval: reasons.length > 0, reasons: reasons };
   }
 
+  // ── QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §8 (additive; lastApprovedFromChain, pickLastApprovedQuote and evaluate above are not changed) ──────────────────────────────────────────────────────
+  // A quote the President RETURNED WITH HIS OWN PRICES (presidentFigures.carry === true) offers a bar of its own: a revision that is at or above those prices needs no second approval.
+  // evaluate() judges the revision against figuresBar() exactly as it judges one against an approval (the same rule, the same "equal is never below", the same unknown-standard reading).
+
+  // a Firestore Timestamp, { seconds }, a Date, an ISO string or a number -> milliseconds; null when it is none of those (callers decide what an unknown time means)
+  function toMs(t) {
+    if (t === null || t === undefined || t === '') return null;
+    if (typeof t === 'number') return isFinite(t) ? t : null;
+    if (typeof t === 'string') { const ms = Date.parse(t); return isFinite(ms) ? ms : null; }
+    if (typeof t === 'object') {
+      try {
+        if (typeof t.toMillis === 'function') { const m = t.toMillis(); return isFinite(m) ? m : null; }
+        if (typeof t.toDate === 'function') { const d = t.toDate(); const m = d && typeof d.getTime === 'function' ? d.getTime() : NaN; return isFinite(m) ? m : null; }
+        if (typeof t.getTime === 'function') { const m = t.getTime(); return isFinite(m) ? m : null; }
+      } catch (e) { return null; }
+      if (typeof t.seconds === 'number') return t.seconds * 1000 + Math.floor((Number(t.nanoseconds) || 0) / 1e6);
+    }
+    return null;
+  }
+  // the moment of his decision: the server stamp when it is there (it is comparable with approvedAt / returnedAt, which are server stamps too), else the client's ISO time
+  function decisionMs(pf) {
+    const a = toMs(pf && pf.atTs);
+    return a !== null ? a : toMs(pf && pf.at);
+  }
+
+  // { total, lines: [{ key, unit }], at } | null. null unless the quote offers the carry (carry true) and says what its total is at his prices. A line takes his figure where he set one,
+  // else the price he saw (a note changes nothing).
+  function figuresBar(quote) {
+    const pf = quote && quote.presidentFigures;
+    if (!pf || pf.carry !== true) return null;
+    const after = pf.totals && pf.totals.after;
+    if (!after || typeof after.total !== 'number' || !isFinite(after.total)) return null;
+    const to = {};
+    (Array.isArray(pf.lines) ? pf.lines : []).forEach(function (r) { if (r && typeof r.to === 'number' && isFinite(r.to)) to[r.i] = r2(r.to); });
+    const items = Array.isArray(quote.items) ? quote.items : [];
+    return {
+      total: r2(after.total),
+      lines: items.map(function (it, i) { return { key: lineKey(it), unit: Object.prototype.hasOwnProperty.call(to, i) ? to[i] : r2(itemUnit(it || {})) }; }),
+      at: String(pf.at || ''),
+    };
+  }
+
+  // The offer that covers the revision being filed, or null. ALL must hold: data.parentQuoteId names a chain doc p; p is still returned (needs_revision); p offers a bar (figuresBar); and no OTHER
+  // chain doc carries a decision by the President later than p's own: an approval he made himself (approvedBy, not carried) or any return. A later decision whose time is unknown counts as later
+  // (fail closed: the revision then goes to him). chain: [{ id, ...data }] (the revision chain, the parent included).
+  function figuresOfferFor(data, chain) {
+    const parentId = data && data.parentQuoteId;
+    if (!parentId) return null;
+    const list = Array.isArray(chain) ? chain : [];
+    let p = null;
+    for (let i = 0; i < list.length; i++) { if (list[i] && list[i].id === parentId) { p = list[i]; break; } }
+    if (!p || p.approvalStatus !== 'needs_revision' || !figuresBar(p)) return null;
+    const at = decisionMs(p.presidentFigures);
+    if (at === null) return null;
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      if (!d || d.id === p.id) continue;
+      if (d.approvedBy && !d.approvalCarriedFrom) { const t = toMs(d.approvedAt); if (t === null || t > at) return null; }
+      if (d.returnedAt) { const t = toMs(d.returnedAt); if (t === null || t > at) return null; }
+    }
+    return p;
+  }
+
   window.PriceGate = {
     REQUIRE_APPROVAL_FOR_PAYMENT: REQUIRE_APPROVAL_FOR_PAYMENT,
     lineKey: lineKey,
@@ -130,6 +193,9 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     lastApprovedFromChain: lastApprovedFromChain,
     pickLastApprovedQuote: pickLastApprovedQuote,
     evaluate: evaluate,
+    figuresBar: figuresBar,
+    figuresOfferFor: figuresOfferFor,
+    toMs: toMs,
   };
 })();
 
