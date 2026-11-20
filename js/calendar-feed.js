@@ -160,10 +160,11 @@ window.CalendarFeed = (function () {
     const isAdmin = (typeof window.isAdminPriv === 'function') && window.isAdminPriv();
     if (!inGovDept && !isAdmin) return [];   // D7 audience gate — never even reads otherwise
     const TERMINAL = ['won', 'lost', 'cancelled', 'archived'];
+    // gov_archive is NOT read (2026-11-20): it holds won / closed bids, which never have an upcoming deadline to show
+    // — reading the whole archive on every dashboard open only to skip every doc was the cost.
     const fetcher = () => Promise.all([
       db.collection('gov_philgeps').get(),
-      db.collection('gov_active_bids').get(),
-      db.collection('gov_archive').get()
+      db.collection('gov_active_bids').get()
     ]).then(function (snaps) {
       const docs = [];
       snaps.forEach(function (s) { (s.docs || []).forEach(function (d) { docs.push(d); }); });

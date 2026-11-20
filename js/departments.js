@@ -157,8 +157,11 @@ window.Projects = (function() {
   // listAll(): both collections in one list, cached (key invalidated on any project write).
   async function listAll() {
     const fetch = async () => {
-      const jobSnap = await db.collection('job_projects').get().catch(() => ({ docs: [] }));
-      const desSnap = await db.collection('projects').get().catch(() => ({ docs: [] }));
+      // in parallel (2026-11-20): the two reads used to run one after the other on every dashboard open
+      const [jobSnap, desSnap] = await Promise.all([
+        db.collection('job_projects').get().catch(() => ({ docs: [] })),
+        db.collection('projects').get().catch(() => ({ docs: [] }))
+      ]);
       const jobs = jobSnap.docs.map(d => normalize(d, 'job'));
       const designs = desSnap.docs.map(d => normalize(d, 'design'));
       return [...jobs, ...designs];
