@@ -1152,6 +1152,46 @@ describe('D · My Finance (renderPersonalFinance) — the employee\'s own page',
   });
 });
 
+describe('D · Progress Reports › Standings (openEmpStandingsModal) — the KPI tile', () => {
+  const STANDINGS = extract(DASH, 'async function openEmpStandingsModal(uid, name, preloaded)');
+  const run = async (env) => {
+    const { ctx } = env;
+    const body = { innerHTML: '' };
+    ctx.openPage = () => ({ querySelector: (q) => (q === '.page-panel-body' ? body : null) });
+    ctx.window.openPage = ctx.openPage;
+    ctx.getAttendanceScore = async () => 0.9;
+    ctx.bizDow = () => 1;
+    Object.assign(ctx.window, { attRecKind: () => 'present', attRecScore: () => 1, attKindBadge: () => ({ c: '', m: '' }) });
+    const realDb = ctx.db;
+    // the two side reads this tile does not depend on (cash advances, the attendance grid) answer empty; every other read is the shared fake
+    ctx.db = new Proxy(realDb, { get: (t, k) => (k === 'collection' ? (c) => (c === 'attendance' || c === 'cash_advances'
+      ? { doc: () => ({ collection: () => ({ where: () => ({ get: async () => ({ docs: [] }) }) }) }), where: () => ({ get: async () => ({ docs: [] }) }) }
+      : t.collection(c)) : t[k]) });
+    ctx.firebase = ctx.firebase || {};
+    ctx.firebase.firestore = ctx.firebase.firestore || {};
+    ctx.firebase.firestore.FieldPath = ctx.firebase.firestore.FieldPath || { documentId: () => '__id' };
+    vm.runInContext(STANDINGS, ctx);
+    await ctx.openEmpStandingsModal('u-sales', 'Uriel Sales', { salary: 10000, allowance: 8000, deductions: 0, mDone: 4, mTotal: 4 });
+    return text(body.innerHTML);
+  };
+  it('Sales KPI in force: "Sales KPI 62% confirmed sales + client rating" — not the task 100%', async () => {
+    const t = await run(makeUiEnv({ who: PRES }));
+    assert.ok(t.includes('Sales KPI 62% confirmed sales + client rating'), t.slice(0, 300));
+    assert.ok(!t.includes('Task KPI') && !t.includes('4/4 done') && !t.includes('100%'));
+  });
+  it('cannot be read (or no target): "KPI — KPI unavailable", never the task KPI', async () => {
+    for (const env of [makeUiEnv({ who: PRES, fail: RATINGS_DOWN }), makeUiEnv({ who: PRES, data: uiSeed({ sales_kpi: { 'u-sales': { ...CARD, defaultTarget: null } } }) })]) {
+      const t = await run(env);
+      assert.ok(/KPI — KPI unavailable/.test(t), t.slice(0, 300));
+      assert.ok(!t.includes('Task KPI') && !t.includes('4/4 done') && !t.includes('62%'));
+    }
+  });
+  it('someone the Sales KPI does not apply to: the task tile exactly as before ("Task KPI 100% 4/4 done")', async () => {
+    const t = await run(makeUiEnv({ who: PRES, data: uiSeed({ sales_kpi: {} }) }));
+    assert.ok(t.includes('Task KPI 100% 4/4 done') && !t.includes('Sales KPI') && !t.includes('KPI unavailable'));
+  });
+});
+
 describe('D · the employee dashboard\'s KPI card', () => {
   const run = async (env) => { await env.ctx.renderEmployeeDashboard(); return text(env.page.innerHTML); };
   it('Sales KPI in force: 62% and what it is made of — not the task 100%', async () => {

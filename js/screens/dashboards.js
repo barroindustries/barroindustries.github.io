@@ -3503,12 +3503,16 @@ async function openEmpStandingsModal(uid, name, preloaded) {
     const monthLabel = new Date(bzY, bzM, 1).toLocaleString('en-PH', { month: 'long', year: 'numeric' });
     const monthStart = `${_bz.slice(0,7)}-01`;
 
-    const [attScore, caSnap, attRecSnap] = await Promise.all([
+    // SALES MANAGER KPI (rollout step 6 follow-up) — one person, one KPI: for the person whose Sales KPI is in force this month the KPI tile shows
+    // the Sales KPI pay uses; if it cannot be read, "KPI unavailable" — never the task KPI. salesKpiState never rejects; anyone else gets 'tasks'
+    // and the tile below is exactly what it always was.
+    const [attScore, caSnap, attRecSnap, kpiSt] = await Promise.all([
       getAttendanceScore(uid),
       (uid === currentUser.uid ? db.collection('cash_advances').where('userId','==',currentUser.uid) : window.caScope(db.collection('cash_advances')).where('userId','==',uid)).get().catch(()=>({docs:[]})),
       db.collection('attendance').doc(uid).collection('records')
         .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart).get()
-        .catch(()=>({docs:[]}))
+        .catch(()=>({docs:[]})),
+      (typeof window.salesKpiState === 'function') ? window.salesKpiState(uid, _bz.slice(0,7)) : Promise.resolve({ state: 'tasks' })
     ]);
 
     const caList  = caSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -3525,10 +3529,17 @@ async function openEmpStandingsModal(uid, name, preloaded) {
     // this role IS granted, so it stays real.
     const payHidden = !!preloaded.payHidden;
     const net    = preloaded.salary + preloaded.allowance - preloaded.deductions;
-    const kpiPct = preloaded.mTotal ? Math.round(preloaded.mDone / preloaded.mTotal * 100) : 0;
+    const kpiSrc = kpiSt && kpiSt.state === 'sales' ? 'sales' : (kpiSt && kpiSt.state === 'unavailable' ? 'unavailable' : 'tasks');
+    const kpiPct = kpiSrc === 'sales'
+      ? Math.round(Math.min(1, Math.max(0, Number(kpiSt.kpi.kpiScore) || 0)) * 100)
+      : (preloaded.mTotal ? Math.round(preloaded.mDone / preloaded.mTotal * 100) : 0);
     const attPct = Math.round(attScore * 100);
     const attColor = attPct >= 80 ? 'var(--success,#30d158)' : attPct >= 50 ? 'var(--warning,#ffa040)' : 'var(--danger,#ff4444)';
-    const kpiColor = kpiPct >= 80 ? 'var(--success,#30d158)' : kpiPct >= 50 ? 'var(--warning,#ffa040)' : 'var(--danger,#ff4444)';
+    const kpiColor = kpiSrc === 'unavailable' ? 'var(--text-muted)' : (kpiPct >= 80 ? 'var(--success,#30d158)' : kpiPct >= 50 ? 'var(--warning,#ffa040)' : 'var(--danger,#ff4444)');
+    const kpiLabel = kpiSrc === 'sales' ? 'Sales KPI' : (kpiSrc === 'unavailable' ? 'KPI' : 'Task KPI');
+    const kpiValue = kpiSrc === 'unavailable' ? '—' : kpiPct + '%';
+    const kpiSub = kpiSrc === 'sales' ? 'confirmed sales + client rating'
+      : (kpiSrc === 'unavailable' ? 'KPI unavailable' : `${preloaded.mDone}/${preloaded.mTotal} done`);
 
     // Build attendance day grid
     const attRecords = {};
@@ -3562,9 +3573,9 @@ async function openEmpStandingsModal(uid, name, preloaded) {
             <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${attRecSnap.docs.length} days logged</div>
           </div>
           <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;text-align:center">
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Task KPI</div>
-            <div style="font-size:26px;font-weight:800;color:${kpiColor}">${kpiPct}%</div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${preloaded.mDone}/${preloaded.mTotal} done</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${kpiLabel}</div>
+            <div style="font-size:26px;font-weight:800;color:${kpiColor}">${kpiValue}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${escHtml(kpiSub)}</div>
           </div>
           <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;text-align:center">
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">CA Balance</div>
