@@ -1872,6 +1872,8 @@ function openJobProjectDetail(p, opts){
     ${/* FLOW-FORM-HOOK (P4): the Operations forms (QC checklist, installation checklist, punch list, client acceptance), drawn by js/forms.js when it loads. */''}
     ${/* FLOW-DOCS-HOOK (J8): client acceptance + punch list, lazy (js/screens/flow-docs.js). Flow-2 jobs only. */''}
     ${Number(p.flowVersion)>=2 && !isBsOnlyU?'<div id="jpd-flowdocs"></div>':''}
+    ${/* CHANGE-ORDER-HOOK (Phase 5, §5.7): the job's change requests with their status words for everyone (never a price), "Record change request" for any staff, pricing and signing for Sales — lazy (js/screens/change-orders.js). Flow-2 jobs only. */''}
+    ${Number(p.flowVersion)>=2 && !isBsOnlyU?'<div id="jpd-chgorders"></div>':''}
     <div id="jpd-forms"></div>
     ${(showMoney && (p.invoices||[]).length)?`
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🧾',16)} Billing Invoices</div>
@@ -2015,6 +2017,11 @@ function openJobProjectDetail(p, opts){
     if (_docsHost) window.ensureScript('js/screens/flow-docs.js').then(()=>{
       const _paintDocs = async ()=>{ let pj = p; try { const fr = await db.collection('job_projects').doc(p.id).get(); if (fr.exists) pj = { id:p.id, ...fr.data() }; } catch (_) {} if (panelLive(jpdPanel)) await window.FlowDocs.renderJobDocs(_docsHost, pj, _paintDocs); };
       return _paintDocs();
+    }).catch(()=>{});
+    const _chgHost = jpdPanel.querySelector('#jpd-chgorders');
+    if (_chgHost) window.ensureScript('js/screens/change-orders.js').then(()=>{
+      const _paintChg = async ()=>{ let pj = p; try { const fr = await db.collection('job_projects').doc(p.id).get(); if (fr.exists) pj = { id:p.id, ...fr.data() }; } catch (_) {} if (panelLive(jpdPanel)) await window.ChangeOrders.renderJobChanges(_chgHost, pj, _paintChg); };
+      return _paintChg();
     }).catch(()=>{});
     const _rateHost = jpdPanel.querySelector('#jpd-rating');
     if (_rateHost) window.ensureScript('js/screens/sales-kpi.js').then(()=>{ if (panelLive(jpdPanel) && window.SalesKpiUI) return window.SalesKpiUI.renderJobRating(_rateHost, p); }).catch(()=>{});
@@ -2690,6 +2697,7 @@ async function renderProdOrders(el, currentUser, currentRole, showAll=false) {
   };
 
   el.innerHTML = `
+    <div id="prod-sitevisits"></div>
     <div class="kpi-row" style="margin-bottom:12px">
       <div class="kpi-card" style="${incoming.length?'border-color:var(--warning)':''}"><div class="kpi-label">Incoming</div><div class="kpi-value" style="${incoming.length?'color:var(--warning)':''}">${incoming.length}</div></div>
       <div class="kpi-card"><div class="kpi-label">Active Orders</div><div class="kpi-value">${active.length}</div></div>
@@ -2745,6 +2753,8 @@ async function renderProdOrders(el, currentUser, currentRole, showAll=false) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [el] });
   document.getElementById('prod-show-all')?.addEventListener('click', ()=>renderProdOrders(el, currentUser, currentRole, true));
+  // SITE-VISIT-HOOK (Phase 5, §5.6 V4): the booked site visits with "Write site visit report", lazy (js/screens/site-visits.js). Reads site_visits only (no peso, no payment). Silent on any failure.
+  try { const _svHost = el.querySelector('#prod-sitevisits'); if (_svHost) window.ensureScript('js/screens/site-visits.js').then(()=>window.SiteVisits.renderProductionList(_svHost)).catch(()=>{}); } catch (_) {}
 
   el.querySelectorAll('.prod-labor').forEach(b=>b.addEventListener('click', (ev)=>{
     ev.stopPropagation();

@@ -118,8 +118,10 @@ describe('placement, size and neighbours', () => {
     const between = RULES.slice(RULES.indexOf('match /kpi_targets/{uid}'), RULES.indexOf('match /settings/{docId}'));
     assert.deepEqual([...between.matchAll(/match\s+\/([A-Za-z_]+)\//g)].map((m) => m[1]), ['kpi_targets', 'sales_kpi', 'client_ratings']);
   });
-  it('payment_claims is still the LAST block of the file (its own test pins that), so nothing was appended after it', () => {
-    assert.match(norm(RULES.slice(RULES.indexOf('match /payment_claims/{id}'))), /allow delete: if isAuth\(\) && isPresident\(\); \} \} \}$/);
+  it('payment_claims is still the LAST block of the file apart from the Phase 5 blocks that follow it (tests/phase5-rules.test.mjs), so nothing of the KPI was appended after it', () => {
+    // Phase 5 (change_orders … job_money) is appended after payment_claims, still at the end of the section.
+    assert.match(norm(RULES.slice(RULES.indexOf('match /job_money/{id}'))), /\} \} \}$/);
+    assert.deepEqual([...RULES.slice(RULES.indexOf('match /payment_claims/{id}')).matchAll(/match\s+\/([A-Za-z_]+)\//g)].map((m) => m[1]), ['payment_claims', 'change_orders', 'change_requests', 'site_visits', 'job_money']);
   });
   it('kpi_targets is untouched: the owner and any admin read, any admin writes — which is exactly why the Sales KPI does not live there', () => {
     const kt = blockOf(RULES, 'match /kpi_targets/{uid}');

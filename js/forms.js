@@ -61,10 +61,11 @@
     const rec = await window.FormsCore.loadRecords(fdb, entry, ref);
     const ctx = { order: rec.order, project: rec.project, claim: rec.claim, client: ref.client || null, quote: ref.quote || null, preparer: ref.preparer || null,
       workOrders: Array.isArray(ref.workOrders) ? ref.workOrders : [], drawings: Array.isArray(ref.drawings) ? ref.drawings : [], today: today(), viewer: currentViewer() };
+    Object.assign(ctx, rec.extra || {});                        // PHASE 5: a form's own doc (ctx.visit, ctx.changeOrder, ctx.changeRequest) — see FormsCore.loadRecords
     const soft = async (fn) => { try { return await fn(); } catch (_) { return null; } };
     const get = async (coll, id) => { if (!fdb || !id) return null; const s = await fdb.collection(coll).doc(String(id)).get(); return s.exists ? Object.assign({ id: s.id }, s.data()) : null; };
-    const main = ctx.order || ctx.claim || ctx.project || {};
-    const clientId = [ctx.order, ctx.claim, ctx.project].map((r) => r && r.clientId).filter(Boolean)[0];
+    const main = ctx.order || ctx.claim || ctx.project || ctx.visit || {};
+    const clientId = [ctx.order, ctx.claim, ctx.project, ctx.visit].map((r) => r && r.clientId).filter(Boolean)[0];
     const jobs = [];
     if (!ctx.client && clientId) jobs.push(soft(() => get('clients', clientId)).then((c) => { ctx.client = c; }));
     // the filed quote: its Subject line, totals ladder, payment terms and timeline
@@ -72,7 +73,7 @@
     const quoteColl = ref.quoteColl || (ctx.project && ctx.project.quoteCollection) || (window.quoteCollectionFor ? window.quoteCollectionFor(main.company || 'BK') : 'bk_quotes');
     if (!ctx.quote && quoteId) jobs.push(soft(() => get(quoteColl, quoteId)).then((q) => { ctx.quote = q; }));
     // who prepared it, with the job title on their profile (users/{uid}.title)
-    const preparerUid = (ctx.order && ctx.order.createdBy) || (ctx.project && ctx.project.createdBy);
+    const preparerUid = (ctx.order && ctx.order.createdBy) || (ctx.project && ctx.project.createdBy) || (ctx.visit && ctx.visit.requestedBy) || (ctx.changeOrder && ctx.changeOrder.pricedBy);
     if (!ctx.preparer && preparerUid) jobs.push(soft(() => get('users', preparerUid)).then((u) => { if (u) ctx.preparer = { name: u.displayName || u.name || '', title: u.title || u.jobTitle || '' }; }));
     if ((entry.id === 'job_order' || entry.id === 'handoff_pack') && fdb && ctx.project && ctx.project.id && !ref.workOrders) {
       jobs.push(soft(async () => (await fdb.collection('production_orders').where('projectId', '==', ctx.project.id).get()).docs.map((d) => Object.assign({ id: d.id }, d.data())))

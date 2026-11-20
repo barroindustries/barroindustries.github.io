@@ -2749,5 +2749,34 @@ service cloud.firestore {
                   'receiptUrl','receiptName','kind','status','paymentConfirm','updatedAt']) ) );
       allow delete: if isAuth() && isPresident();
     }
+
+    // ── Sales flow Phase 5 (specs/SALES-FLOW-SPEC-2026-11-19.md §5.6, §5.7, §11.1) ──
+    // Change orders (pesos): Sales prices and signs; Ops users cannot read. An applied one is frozen except for the books tier.
+    match /change_orders/{id} {
+      allow read: if isAuth() && hasProfile() && (canFinance() || isAdmin() || inDept('Sales'));
+      allow create: if isAuth() && hasProfile() && !isSecretary() && (inDept('Sales') || canFinance())
+        && request.resource.data.get('status', '') != 'applied';
+      allow update: if isAuth() && hasProfile() && !isSecretary() && (inDept('Sales') || canFinance())
+        && ( resource.data.get('status', '') != 'applied' || canFinance() );
+      allow delete: if isAuth() && isPresident();
+    }
+    // Change requests: peso-free, any staff ("Operations never quotes prices on site"), so no price key may ever land here.
+    match /change_requests/{id} {
+      allow read: if isAuth() && hasProfile();
+      allow create, update: if isAuth() && hasProfile() && !isSecretary()
+        && !request.resource.data.keys().hasAny(['pricing', 'price', 'unitPrice', 'amount', 'addedDownPayment']);
+      allow delete: if isAuth() && isAdmin();
+    }
+    // Site visits: peso-free (the fee lives on its payment_claims doc), any staff.
+    match /site_visits/{id} {
+      allow read: if isAuth() && hasProfile();
+      allow create, update: if isAuth() && hasProfile() && !isSecretary()
+        && !request.resource.data.keys().hasAny(['fee', 'amount', 'paymentReceived', 'recordedAmount']);
+      allow delete: if isAuth() && isAdmin();
+    }
+    // Job money (budget, incentive, close-out pesos): books tier only.
+    match /job_money/{id} {
+      allow read, write: if isAuth() && canFinance();
+    }
   }
 }

@@ -70,6 +70,16 @@
     } catch (_) { return []; }
   }
 
+  // The order's signed change orders that ask for a down payment and are not applied yet (§5.7 C4). Never throws: a failed read is "none".
+  async function loadChangeOrders(orderId) {
+    if (!orderId) return [];
+    try {
+      const snap = await fsDb().collection('change_orders').where('orderId', '==', orderId).get();
+      return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); })
+        .filter(function (c) { return c.status === 'signed' && !c.appliedContractRev && c.pricing && Number(c.pricing.addedDownPayment) > 0; });
+    } catch (_) { return []; }
+  }
+
   // ── Record payment (later-payment mode of the form, P-1 and P-4) ───────────────────────────────────────────────
   // arg = { orderId } | { projectId } | { claim } (a sent-back claim, edit and resend). Never throws.
   async function openRecordSheet(arg, onDone) {
@@ -100,11 +110,16 @@
     if (project.stage === 'cancelled') { toast('The job is cancelled.', 'error'); return; }
     const fees = await loadFees(order.clientId || project.clientId);
     const due0 = PC.balanceDue(project, fees);
-    if (!claim && !(due0 > 0)) { toast('Nothing is owed on this job.', 'error'); return; }
+    const cos = await loadChangeOrders(order.id);
+    if (!claim && !(due0 > 0) && !cos.length) { toast('Nothing is owed on this job.', 'error'); return; }
 
     const v0 = claim || {};
     const kindSel = v0.kind && v0.kind !== 'site_visit' ? v0.kind : 'balance';
-    const kinds = ['balance', 'progress', 'change_order'];
+    // A sent-back claim keeps its change order (the rules let Sales resend only the payment fields), so its type is one or the other family.
+    const kinds = claim ? (claim.kind === 'change_order' ? ['change_order'] : ['balance', 'progress']) : ['balance', 'progress', 'change_order'];
+    const coSel = (claim && claim.changeOrderId) || (cos[0] && cos[0].id) || '';
+    const coPrice = function (c) { return { price: c && c.pricing && c.pricing.price }; };
+    const coDp = function (c) { return Number(c && c.pricing && c.pricing.addedDownPayment) || 0; };
     const vat0 = v0.vatTreatment || order.vatTreatment || 'inclusive';
     const methods = ['Bank Transfer', 'GCash', 'Cash', 'Cheque', 'Other'];
     const pcr = (claim && claim.paymentConfirm) || {};
@@ -114,6 +129,9 @@
       '<div id="pr-due" style="font-size:15px;font-weight:700;margin-bottom:12px">Balance due ' + money(due0) + '</div>' +
       '<div class="form-group"><label>This payment is for</label><select id="pr-type" style="' + FIELD + '">' +
         kinds.map(function (k) { return '<option value="' + k + '"' + (k === kindSel ? ' selected' : '') + '>' + esc(PC.kindLabel(k)) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="form-group' + (kindSel === 'change_order' ? '' : ' hidden') + '" id="pr-co-wrap"><label>Which change order?</label><select id="pr-co" style="' + FIELD + '"' + (claim ? ' disabled' : '') + '>' +
+        cos.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === coSel ? ' selected' : '') + '>' + esc(c.coNumber || c.id) + ' · down payment ' + money(coDp(c)) + '</option>'; }).join('') + '</select>' +
+        '<div id="pr-co-hint" style="font-size:11px;color:var(--text-muted);margin-top:3px">' + (cos.length ? 'The signed change order this down payment is for.' : 'No signed change order is waiting for a down payment on this job.') + '</div></div>' +
       '<div class="form-row"><div class="form-group"><label>Amount paid (₱)</label><input id="pr-amount" type="number" step="0.01" min="0" inputmode="decimal" style="' + FIELD + '" value="' + esc(claim ? String(claim.paymentReceived == null ? '' : claim.paymentReceived) : '') + '"/></div>' +
       '<div class="form-group"><label>Date paid</label><input id="pr-date" type="date" style="' + FIELD + '" value="' + esc(v0.paymentDate || window.today()) + '"/></div></div>' +
       '<div class="form-group"><label>Payment method</label><select id="pr-method" style="' + FIELD + '">' +
@@ -140,14 +158,29 @@
     const $ = function (id) { return panel.querySelector('#' + id); };
     let receipt = null;
     if (window.Drive && window.Drive.renderUploadArea) window.Drive.renderUploadArea('pr-upload', function (r) { receipt = r; }, { label: 'Upload receipt (photo/PDF)', accept: 'image/*,.pdf', dept: 'Finance', subfolder: 'Collections' });
+    const pickedCo = function () { const id = ($('pr-co') && $('pr-co').value) || coSel; return cos.find(function (c) { return c.id === id; }) || null; };
+    let amountTouched = !!claim;       // the amount is pre-filled from the change order's down payment until the person types their own
     const recompute = function () {
-      const val = PC.validateRecord({ kind: $('pr-type').value, entered: parseFloat($('pr-amount').value) || 0, vatTreatment: $('pr-vat').value, hasReceipt: true, project: project, fees: fees });
+      const isCo = $('pr-type').value === 'change_order';
+      const co = isCo ? pickedCo() : null;
+      const val = PC.validateRecord({ kind: $('pr-type').value, entered: parseFloat($('pr-amount').value) || 0, vatTreatment: $('pr-vat').value, hasReceipt: true, project: project, fees: fees, changeOrder: co ? coPrice(co) : null });
       $('pr-sum-rec').textContent = money(val.recorded);
       $('pr-sum-net').textContent = money(val.net);
       $('pr-sum-vat').textContent = money(val.vat);
       $('pr-sum-bal').textContent = money(Math.max(0, (val.balanceDue || 0) - val.recorded));
+      $('pr-due').textContent = isCo ? (co ? 'Down payment asked ' + money(coDp(co)) : 'No signed change order is waiting for a down payment') : 'Balance due ' + money(due0);
     };
-    ['input', 'change'].forEach(function (ev) { $('pr-amount').addEventListener(ev, recompute); $('pr-vat').addEventListener(ev, recompute); $('pr-type').addEventListener(ev, recompute); });
+    const onKind = function () {
+      const isCo = $('pr-type').value === 'change_order';
+      $('pr-co-wrap').classList.toggle('hidden', !isCo);
+      const co = isCo ? pickedCo() : null;
+      if (co && !amountTouched) $('pr-amount').value = String(coDp(co));
+      recompute();
+    };
+    ['input', 'change'].forEach(function (ev) {
+      $('pr-amount').addEventListener(ev, function () { amountTouched = true; recompute(); });
+      $('pr-vat').addEventListener(ev, recompute); $('pr-type').addEventListener(ev, onKind); $('pr-co').addEventListener(ev, onKind);
+    });
     recompute();
 
     let sending = false;
@@ -168,7 +201,15 @@
         try { freshProject = await readDoc('job_projects', project.id); freshFees = await loadFees(order.clientId || project.clientId); }
         catch (ex) { fail('Could not check the balance — try again.'); return; }
         if (!freshProject) { fail('This job no longer exists.'); return; }
-        const val = PC.validateRecord({ kind: kind, entered: entered, vatTreatment: vatTreatment, hasReceipt: !!receiptUrl, project: freshProject, fees: freshFees });
+        // §5.7 C4: a change-order down payment names its change order (signed, asking for a down payment, not applied), re-read FRESH here.
+        let freshCo = null;
+        const coId = kind === 'change_order' ? ((claim && claim.changeOrderId) || ($('pr-co') && $('pr-co').value) || '') : '';
+        if (kind === 'change_order') {
+          if (!coId) { fail('Choose the signed change order this payment is for.'); return; }
+          try { freshCo = await readDoc('change_orders', coId); } catch (ex) { fail('Could not check the change order — try again.'); return; }
+          if (!freshCo || freshCo.status !== 'signed' || freshCo.appliedContractRev || freshCo.orderId !== order.id || !(coDp(freshCo) > 0)) { fail('That change order is no longer waiting for a down payment.'); return; }
+        }
+        const val = PC.validateRecord({ kind: kind, entered: entered, vatTreatment: vatTreatment, hasReceipt: !!receiptUrl, project: freshProject, fees: freshFees, changeOrder: freshCo ? coPrice(freshCo) : null });
         if (!val.ok) { fail(val.error + (val.error.indexOf('balance') >= 0 ? ' Balance due ' + money(val.balanceDue) + '.' : '')); return; }
         const vNow = viewer();
         const who = whoName();
@@ -192,7 +233,7 @@
           } else {
             const doc = {
               kind: kind, orderId: order.id, projectId: project.id, quoteNumber: order.quoteNumber || '', clientId: order.clientId || project.clientId || null,
-              clientName: order.clientName || project.clientName || '', company: order.company || project.company || '', siteVisitId: null, changeOrderId: null, area: null,
+              clientName: order.clientName || project.clientName || '', company: order.company || project.company || '', siteVisitId: null, changeOrderId: coId || null, area: null,
               paymentReceived: entered, paymentMethod: paymentMethod, vatTreatment: vatTreatment, orRef: orRef, paymentDate: paymentDate, receiptUrl: receiptUrl, receiptName: receiptName,
               status: 'pending',
               paymentConfirm: { requestedAt: nowIso, requestedBy: vNow.uid, requestedByName: who, decision: null, resubmits: 0 },
@@ -236,6 +277,7 @@
       getClaim: function (id) { return readDoc('payment_claims', id); },
       getProject: function (id) { return readDoc('job_projects', id); },
       getUncreditedFees: function (claim) { return loadFees(claim.clientId); },
+      getChangeOrder: function (id) { return readDoc('change_orders', id); },
       ledgerPost: function (entry) { return window.Ledger.post(entry); },
       ledgerAmount: async function (ref) { const s = await db.collection('ledger').doc(window.Ledger._sanitize(ref)).get(); const n = s.exists ? Number(s.data().amount) : NaN; return Number.isFinite(n) ? n : null; },
       updateClaim: function (id, patch) { return db.collection('payment_claims').doc(id).update(patch); },
@@ -268,7 +310,9 @@
       if (accounts.length) bankOpts = await window.BankAccounts.optionsHTML(saved);
     } catch (e) { toast('Could not load the company bank accounts — check your connection and try again.', 'error'); return; }
     const hasBanks = accounts.length > 0;
-    const val = PC.validateRecord({ kind: o.kind, entered: o.paymentReceived, vatTreatment: o.vatTreatment || 'inclusive', hasReceipt: true, project: project, fees: await loadFees(o.clientId) });
+    let coDue = null;
+    if (o.kind === 'change_order' && o.changeOrderId) { try { const co = await readDoc('change_orders', o.changeOrderId); if (co && co.status !== 'applied' && !co.appliedContractRev) coDue = { price: co.pricing && co.pricing.price }; } catch (_) { coDue = null; } }
+    const val = PC.validateRecord({ kind: o.kind, entered: o.paymentReceived, vatTreatment: o.vatTreatment || 'inclusive', hasReceipt: true, project: project, fees: await loadFees(o.clientId), changeOrder: coDue });
     const pc = o.paymentConfirm || {};
     const body =
       (standIn ? '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">The President normally confirms payments. Confirm only if he cannot be reached. He will be told that you confirmed it.</div>' : '') +
@@ -337,6 +381,8 @@
     await step(async function () { if (o.createdBy && o.createdBy !== vNow.uid) await N.send(o.createdBy, { title: '✅ Payment confirmed', body: client + ' — ₱' + amt + ' (' + label + ') confirmed by ' + whoLabel + '. The Payment Acknowledgement is ready.', icon: '✅', type: 'payment_confirmed', link: 'sales-orders', dedupKey: 'payok-claim-' + o.id }); });
     await step(async function () { await N.sendToDept('Finance', { title: '💵 Payment confirmed', body: client + ' — ₱' + amt + ' (' + label + ') confirmed by ' + whoLabel + ' and posted to the ledger. No action needed.', icon: '💵', type: 'payment_confirmed', link: 'sales-orders', dedupKey: 'payfin-claim-' + o.id }); });
     await step(async function () { if (!vNow.isPresident) await N.sendToOwner({ title: '✅ Payment confirmed by ' + who + ' (Finance)', body: client + ' — ₱' + amt + ' (' + label + '), recorded by ' + (o.createdByName || '') + '. Confirmed in your place and posted to the ledger.', icon: '✅', type: 'payment_confirmed', link: 'sales-orders', dedupKey: 'payown-claim-' + o.id }); });
+    // V3 (spec §5.6): a confirmed site-visit fee books its visit and tells Production (date, address, contact; NO amount). That notification is sent from js/screens/site-visits.js.
+    await step(async function () { if (o.kind === 'site_visit' && o.siteVisitId) { await window.ensureScript('js/screens/site-visits.js'); await window.SiteVisits.afterFeeConfirmed(o); } });
     // J9 (spec §5.4, §13.2 Phase 4): a confirmed payment can settle a COMPLETED job, which then closes by itself. Last, best-effort, never undoes the post.
     await step(async function () { if (o.projectId) { await window.ensureScript('js/screens/flow-docs.js'); await window.FlowDocs.closeIfSettled(o.projectId, who); } });
     invalidate();
@@ -401,7 +447,7 @@
       '<div class="card-body" style="display:flex;flex-direction:column;gap:8px">' +
       (standIn ? '<div style="font-size:12px;color:var(--text-muted)">The President normally confirms payments. Confirm only if he cannot be reached. He will be told that you confirmed it.</div>' : '') +
       list.map(function (c) {
-        return '<div class="item-card pcu-item"><div class="item-title" style="font-size:13px">' + esc(c.clientName || '') + ' — ' + esc(c.quoteNumber || '') + '</div>' +
+        return '<div class="item-card pcu-item"><div class="item-title" style="font-size:13px">' + esc(c.clientName || '') + ' — ' + esc(c.quoteNumber || c.svNumber || '') + '</div>' +
           '<div class="item-meta" style="margin-top:4px"><span>' + money(shownAmount(c)) + '</span><span>' + esc(PC.kindLabel(c.kind)) + '</span><span>' + esc(c.paymentMethod || '') + '</span><span>recorded by ' + esc(c.createdByName || '') + '</span><span>' + esc(c.paymentDate || '') + '</span></div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn-success btn-sm pcu-open" data-id="' + esc(c.id) + '" style="' + BTN + '">Confirm payment</button>' +
           '<button class="btn-secondary btn-sm pcu-back" data-id="' + esc(c.id) + '" style="' + BTN + '">Send back</button></div></div>';

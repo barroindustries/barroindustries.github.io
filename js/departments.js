@@ -5116,6 +5116,8 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   // quoteColl/builderNav are GONE: the hub joins quotes via clientId/nameKey across
   // all collections (Spec 2c) and derives the builder per quote (Spec 4).
   const COLL = 'clients';
+  // SITE-VISIT-HOOK (Phase 5, §5.6 V1): "Request site visit" on a lead / prospect card, Sales book only, Sales members and the President.
+  const canSiteVisit = brand === 'barro' && canEditDept('Sales') && currentRole !== 'secretary';
   const brandKey = window.Clients.brandOf(brand);           // 'sales' | 'design' | 'bs'
   const clients  = await window.Clients.listAll({ brand: brandKey });
   const legacyMode = clients.some(c => c._legacy);          // migration not yet run
@@ -5162,9 +5164,11 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
           ${fu?`<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">${emojiIcon('⏰',16)} ${escHtml(fu)}${fuOverdue?' · due':''}</span>`:''}
         </div>
         <div style="font-size:11px;color:var(--primary);margin-top:4px">${emojiIcon('📄',11)} View quotes / reopen →</div>
+        ${canSiteVisit?`<div class="sv-slot" data-client-id="${cl.id}"></div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
         ${canAdd?`<button class="btn-secondary btn-sm cl-edit-btn" data-id="${cl.id}" title="Edit / set stage">${emojiIcon('✎',16)}</button>`:''}
+        ${(canSiteVisit && isOpen(cl))?`<button class="btn-secondary btn-sm cl-sv-btn" data-id="${cl.id}" title="Request site visit" aria-label="Request site visit">${emojiIcon('📍',16)}</button>`:''}
         ${canDeleteDirect
           ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger)" aria-label="Delete client">${emojiIcon('trash-2',14)}</button>`
           : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?`${emojiIcon('⏳',16)}`:emojiIcon('trash-2',14)}</button>`}
@@ -5222,11 +5226,19 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 
   const bindCards = () => {
     container.querySelectorAll('.cl-card').forEach(card => card.addEventListener('click', (e) => {
-      if (e.target.closest('.cl-del-btn, .cl-delreq-btn, .cl-edit-btn')) return;
+      if (e.target.closest('.cl-del-btn, .cl-delreq-btn, .cl-edit-btn, .cl-sv-btn, .sv-slot')) return;
       const cl = clients.find(c=>c.id===card.dataset.id); if(!cl) return;
       openClientHub(cl, { canEdit: canAdd, onChange: () => renderClientProfiles(container, currentUser, currentRole, brand) });
     }));
     container.querySelectorAll('.cl-edit-btn').forEach(b => b.addEventListener('click', () => openClientEditor(clients.find(c=>c.id===b.dataset.id))));
+    // SITE-VISIT-HOOK (Phase 5, §5.6 V1): the visit request, and each visit's status under its lead. Lazy (js/screens/site-visits.js); a failure never breaks the list.
+    container.querySelectorAll('.cl-sv-btn').forEach(b => b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const cl = clients.find(c=>c.id===b.dataset.id); if (!cl) return;
+      window.ensureScript('js/screens/site-visits.js').then(() => window.SiteVisits.openRequestSheet({ client: cl }, () => window.SiteVisits.fillSlots(container)))
+        .catch(() => Notifs.showToast('Could not open the site visit screen.', 'error'));
+    }));
+    try { if (container.querySelector('.sv-slot')) window.ensureScript('js/screens/site-visits.js').then(() => window.SiteVisits.fillSlots(container)).catch(() => {}); } catch (_) {}
     container.querySelectorAll('.cl-del-btn').forEach(b => b.addEventListener('click', async () => {
       if (!(await confirmDialog({message:`Delete client "${escHtml(b.dataset.name)}"? This cannot be undone.`, danger:true, html:true}))) return;
       try {

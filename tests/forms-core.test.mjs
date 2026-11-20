@@ -184,7 +184,8 @@ describe('3. the peso wall (§9.7)', () => {
   it('the four Phase 1 entries are registered with the spec\'s titles and audiences', () => {
     const got = Object.fromEntries(FC.list().filter((e) => ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id)).map((e) => [e.id, [e.title, e.audience]]));
     assert.deepEqual(got, { sales_order: ['SALES ORDER', 'sales'], payment_ack: ['PAYMENT ACKNOWLEDGEMENT', 'sales'], job_order: ['JOB ORDER', 'ops'], handoff_pack: ['HANDOFF PACK', 'ops'] });
-    for (const e of FC.list()) { assert.equal(e.bodySet, ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id) ? 'js/forms-set-1.js' : 'js/forms-set-2.js'); assert.equal(e.orientation, 'portrait'); }
+    // set 1 = the four Phase 1 forms; set 5 = the two Phase 5 Sales forms with pesos (tests/forms-set-5.test.mjs); everything else, incl. the money-free site visit report, is set 2
+    for (const e of FC.list()) { assert.equal(e.bodySet, ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id) ? 'js/forms-set-1.js' : ['site_visit_request', 'change_order'].includes(e.id) ? 'js/forms-set-5.js' : 'js/forms-set-2.js'); assert.equal(e.orientation, 'portrait'); }
     for (const id of ['job_order', 'handoff_pack']) assert.deepEqual(FC.get(id).needs, ['js/screens/production.js']);
   });
   it('registering an ops entry with a money:true field throws, and registers nothing', () => {

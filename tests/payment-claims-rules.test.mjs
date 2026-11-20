@@ -26,7 +26,9 @@ describe('payment_claims block (§11.1)', () => {
   it('exists exactly once, at the END of the collections section (after company_year_review, before the closing braces)', () => {
     assert.equal((RULES.match(/match \/payment_claims\/\{id\}/g) || []).length, 1);
     assert.ok(RULES.indexOf('match /payment_claims/{id}') > RULES.indexOf('match /company_year_review/{year}'));
-    assert.match(norm(RULES.slice(RULES.indexOf('match /payment_claims/{id}'))), /allow delete: if isAuth\(\) && isPresident\(\); \} \} \}$/);
+    // Phase 5 appends its blocks after this one (change_orders … job_money), still at the end of the section.
+    assert.match(norm(block('match /payment_claims/{id}')), /allow delete: if isAuth\(\) && isPresident\(\); \}$/);
+    assert.match(norm(RULES.slice(RULES.indexOf('match /job_money/{id}'))), /\} \} \}$/);
   });
   it('read: books tier, admins (the secretary through isAdmin), Sales, or the creator — and needs a profile', () => {
     const r = arm('read');

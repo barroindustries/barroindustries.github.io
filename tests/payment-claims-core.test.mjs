@@ -70,7 +70,7 @@ function world({ c = claim(), p = project(), existing = null, failClaimOnce = fa
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('the module itself', () => {
   it('exposes the documented API and attaches window.PaymentClaims', () => {
-    assert.deepEqual(Object.keys(PC).sort(), ['KINDS', 'balanceDue', 'kindLabel', 'planConfirmation', 'planFeeCredit', 'runConfirmation', 'validateRecord']);
+    assert.deepEqual(Object.keys(PC).sort(), ['KINDS', 'balanceDue', 'dueFor', 'kindLabel', 'planConfirmation', 'planFeeCredit', 'runConfirmation', 'validateRecord']);
     assert.equal(globalThis.window.PaymentClaims, PC);
   });
   it('keeps the file contract: shim on line 1, module.exports at the end, pure', () => {

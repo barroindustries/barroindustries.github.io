@@ -28,6 +28,9 @@
     "hrp-stat-sss-mode": "read via the bare-id helper _wpModeOf('hrp-stat-sss-mode') at js/screens/hr.js:3463 — a non-$-prefixed helper, so outside the $helper('id') convention the scanner understands.",
     "hrp-stat-ph-mode": "same _wpModeOf(...) call site as hrp-stat-sss-mode (js/screens/hr.js:3463)",
     "hrp-stat-pib-mode": "same _wpModeOf(...) call site as hrp-stat-sss-mode (js/screens/hr.js:3463)",
-    "hrp-stat-tax-mode": "same _wpModeOf(...) call site as hrp-stat-sss-mode (js/screens/hr.js:3463)"
+    "hrp-stat-tax-mode": "same _wpModeOf(...) call site as hrp-stat-sss-mode (js/screens/hr.js:3463)",
+
+    "cr-more-": "rendered as id=\"cr-more-\" + prefix ('add' / 'rem') in itemRows() of js/screens/change-orders.js; bound with $('cr-more-' + k) in openRequestSheet (Phase 5, the change-request sheet)",
+    "cp-kind-": "rendered as id=\"cp-kind-\" + i in the line loop of openPriceSheet (js/screens/change-orders.js); read back with $('cp-kind-' + i) in read() and bound in the same paint loop (Phase 5, the change-order pricing sheet)"
   }
 }

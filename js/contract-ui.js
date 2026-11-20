@@ -39,6 +39,12 @@
     await window.ensureScript('js/contract-core.js');
     if (!window.ContractCore || !window.PriceGate) throw new Error('The contract engine did not load.');
   }
+  // Phase 5: FlowCore.claimStatusFor (is a change order's down payment in the books?) and planBudgetAdd (C6) — loaded only where a change order is involved, so
+  // a plain revision never waits for it. null when it cannot be loaded (the callers then treat the change order as not ready / skip the budget step).
+  async function flowCore() {
+    try { await window.ensureScript('js/flow-core.js'); } catch (_) { /* below */ }
+    return window.FlowCore || null;
+  }
 
   const soLabel = function (o) { return o.soNumber || o.quoteNumber || ''; };
   const joLabel = function (p, o) { return (p && p.joNumber) || (o && o.joNumber) || (p && typeof window.jobOrderNoFor === 'function' ? window.jobOrderNoFor(p) : '') || 'JO'; };
@@ -65,15 +71,40 @@
       }).join('') + '</div>';
   }
 
+  // §5.7 C5: is this change order's added down payment in the books? Reads the payment_claims that name it (the confirmer is the books tier, who may read
+  // them). A failed read is null = "not ready": the apply refuses rather than guessing.
+  async function changeOrderClaimStatus(coId, addedDownPayment) {
+    try {
+      const FCore = await flowCore();
+      if (!FCore) return null;
+      const snap = await fsDb().collection('payment_claims').where('changeOrderId', '==', coId).get();
+      return FCore.claimStatusFor(addedDownPayment, snap.docs.map(function (d) { return d.data(); }));
+    } catch (_) { return null; }
+  }
+  // C6 (§5.7, owner S12): the budget rises by half the change order's price (a negative price lowers it), ONCE per change order. job_money is the books tier's
+  // (the confirmer is). One transaction on the job's money doc; FlowCore.planBudgetAdd decides the numbers.
+  async function addBudgetShare(projectId, coId, price) {
+    const FCore = await flowCore();
+    if (!FCore) throw new Error('The flow engine did not load.');
+    const ref = fsDb().collection('job_money').doc(projectId);
+    await fsDb().runTransaction(async function (tx) {
+      const snap = await tx.get(ref);
+      const plan = FCore.planBudgetAdd(snap.exists ? snap.data() : null, { changeOrderId: coId, price: price });
+      if (plan.skip) return;
+      tx.set(ref, { budget: plan.budget, updatedAt: FV().serverTimestamp() }, { merge: true });
+    });
+  }
+
   // ── the apply: real dependencies for ContractCore.runApply ────────────────────────────────────────────────────
   function buildApplyDeps(vNow) {
     const db = fsDb();
     const who = whoName();
+    let coRead = null;                                         // the change order runApply just read: getClaimStatus needs its added down payment
     return {
       getOrder: function (id) { return readDoc('sales_orders', id); },
       getProject: function (id) { return readDoc('job_projects', id); },
-      getChangeOrder: function (id) { return readDoc('change_orders', id); },
-      getClaimStatus: async function () { return null; },     // payment_claims does not exist until Phase 4: a change order with an added down payment stays "not ready"
+      getChangeOrder: async function (id) { coRead = await readDoc('change_orders', id); return coRead; },
+      getClaimStatus: function (id) { return changeOrderClaimStatus(id, coRead && coRead.pricing && coRead.pricing.addedDownPayment); },
       getQuote: async function (coll, id) { const q = await readDoc(coll || 'bk_quotes', id); return q; },
       ledgerPost: function (entry) { return window.Ledger.post(entry); },
       updateOrder: function (id, patch) { return db.collection('sales_orders').doc(id).update(patch); },
@@ -115,6 +146,8 @@
         await fsDb().collection('change_requests').doc(pr.changeOrderId).update(patch);
       }
     });
+    // C6: budget.changeOrderAdds += 0.5 × price. The applied delta IS the change order's price (toAmount = from + price). Its own step: a failure never undoes the apply.
+    await step(async function () { if (pr.kind === 'change_order' && pr.changeOrderId && order.projectId) await addBudgetShare(order.projectId, pr.changeOrderId, result.delta); });
     const N = window.Notifs;
     // Production: NO amounts, opens the job order.
     await step(async function () { await N.sendToDept('Production', { title: '🏭 Job order updated', body: client + ' — ' + jo + ' ' + rLabel(n) + '. Open the new job order.', icon: '🏭', type: 'contract_applied', link: 'projects-lifecycle', dedupKey: 'ccprod-' + order.id + '-' + n }, { fallbackToOwner: true }); });
@@ -324,6 +357,18 @@
       const cs = await fsDb().collection('change_orders').where('orderId', '==', order.id).get();
       cos = cs.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (c) { return c.status === 'signed' && !c.appliedContractRev && c.pricing && isFinite(Number(c.pricing.price)); });
     } catch (_) { cos = []; }
+    // §5.7 C5 (Matrix §2: no work before the signature AND the added down payment): a change order is READY when it asks for no down payment, or its payment is
+    // recorded. The others are listed but cannot be picked yet. One read of this order's change-order payments.
+    let coClaims = [];
+    if (cos.some(function (c) { return Number(c.pricing.addedDownPayment) > 0; })) {
+      try { coClaims = (await fsDb().collection('payment_claims').where('orderId', '==', order.id).get()).docs.map(function (d) { return d.data(); }); } catch (_) { coClaims = []; }
+    }
+    const FCore = cos.length ? await flowCore() : null;
+    cos.forEach(function (c) {
+      const dp = Number(c.pricing.addedDownPayment) || 0;
+      c._ready = dp <= 0 || (!!FCore && FCore.claimStatusFor(dp, coClaims.filter(function (x) { return x.changeOrderId === c.id; })) === 'recorded');
+    });
+    const firstReady = cos.findIndex(function (c) { return c._ready; });
 
     const prefill = existing || null;
     const chk = function (k, first) { return (prefill ? prefill.kind === k : first) ? ' checked' : ''; };
@@ -335,8 +380,8 @@
         '<span style="font-size:12px">' + esc(q.quoteNumber || q.fileName || q.id) + ' · ' + money(t) + ' · ' + (d >= 0 ? '+' : '−') + money(Math.abs(d)) + '</span></label>';
     }).join('');
     const coRows = cos.map(function (c, i) {
-      return '<label style="display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;min-height:44px"><input type="radio" name="rv-co" value="' + esc(c.id) + '"' + (i === 0 ? ' checked' : '') + '>' +
-        '<span style="font-size:12px">' + esc(c.coNumber || c.id) + ' · ' + (Number(c.pricing.price) >= 0 ? '+' : '−') + money(Math.abs(Number(c.pricing.price))) + '</span></label>';
+      return '<label style="display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;min-height:44px' + (c._ready ? '' : ';opacity:.6') + '"><input type="radio" name="rv-co" value="' + esc(c.id) + '"' + ((prefill && prefill.kind === 'change_order' && prefill.changeOrderId ? (c.id === prefill.changeOrderId && c._ready) : i === firstReady) ? ' checked' : '') + (c._ready ? '' : ' disabled') + '>' +
+        '<span style="font-size:12px">' + esc(c.coNumber || c.id) + ' · ' + (Number(c.pricing.price) >= 0 ? '+' : '−') + money(Math.abs(Number(c.pricing.price))) + (c._ready ? '' : ' — waiting for the added down payment (' + money(c.pricing.addedDownPayment) + ')') + '</span></label>';
     }).join('');
     const field = 'padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text);min-height:44px;font-family:inherit';
     const choice = function (id, key, title, bodyHtml, checked) {
@@ -349,7 +394,7 @@
       choice('rv-ch-b', 'manual', 'Enter the change',
         '<div style="display:grid;gap:6px"><select id="rv-mode" style="' + field + '"><option value="amount"' + (prefill && prefill.kind === 'manual' ? '' : ' selected') + '>New contract amount</option><option value="diff">Difference (+ or −)</option></select>' +
         '<input id="rv-val" type="number" step="0.01" inputmode="decimal" style="' + field + '" value="' + (prefill && prefill.kind === 'manual' ? esc(String(prefill.toAmount)) : '') + '" placeholder="e.g. 120000"></div>', chk('manual', !picks.length)) +
-      (cos.length ? choice('rv-ch-c', 'change_order', 'From a signed change order', coRows, chk('change_order', false)) : '') +
+      (cos.length ? choice('rv-ch-c', 'change_order', 'From a signed change order', coRows, chk('change_order', false) + (firstReady >= 0 ? '' : ' disabled')) : '') +
       '<div class="form-group"><label>Reason (5–300 characters)</label><textarea id="rv-reason" rows="3" maxlength="300" style="' + field + '">' + esc(prefill ? prefill.changeReason || '' : '') + '</textarea></div>' +
       '<div id="rv-summary" style="font-size:13px;display:grid;gap:4px;margin:10px 0;padding:10px;border:1px solid var(--border);border-radius:8px"></div>' +
       '<div id="rv-verdict" style="font-size:12px;margin-bottom:8px"></div>' +
@@ -362,7 +407,8 @@
     const radios = function () { return panel.querySelectorAll('input[name="rv-choice"]'); };
     const kind = function () { const c = panel.querySelector('input[name="rv-choice"]:checked'); return c ? c.value : (picks.length ? 'quote_revision' : 'manual'); };
     const pickedQuote = function () { const r = panel.querySelector('input[name="rv-quote"]:checked'); return r ? picks.find(function (q) { return q.id === r.value; }) : picks[0]; };
-    const pickedCo = function () { const r = panel.querySelector('input[name="rv-co"]:checked'); return r ? cos.find(function (c) { return c.id === r.value; }) : cos[0]; };
+    // never a change order that is not ready (a disabled radio cannot be checked; with none ready there is nothing to pick)
+    const pickedCo = function () { const r = panel.querySelector('input[name="rv-co"]:checked'); return r ? cos.find(function (c) { return c.id === r.value; }) : (cos.find(function (c) { return c._ready; }) || null); };
 
     // → { kind, toAmount, quote?, co?, stdTotal } | null while the inputs are incomplete
     function current() {
@@ -409,7 +455,8 @@
         if (!cur) { fail('Choose or enter the new amount.'); return; }
         if (!(cur.toAmount > 0)) { fail('The new contract amount must be more than zero.'); return; }
         if (reason.length < 5 || reason.length > 300) { fail('Give a reason of 5 to 300 characters.'); return; }
-        if (cur.kind !== 'quote_revision' && r2(cur.toAmount) === from) { fail('That is the same as the current contract amount.'); return; }
+        // A typed amount equal to the contract is no change. A signed change order at a zero price is (it moves scope, not money: the apply posts no ledger row).
+        if (cur.kind === 'manual' && r2(cur.toAmount) === from) { fail('That is the same as the current contract amount.'); return; }
         // Fresh read: nothing may have moved while the sheet was open.
         const fresh = await readDoc('sales_orders', order.id);
         if (!fresh || fresh.status !== 'recorded') { fail('This order is not in a state that can be revised.'); return; }
