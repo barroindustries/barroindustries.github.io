@@ -547,7 +547,7 @@ describe('the FAQ: the owner\'s questions, answered only with confirmed facts, a
   const REQUIRED = [
     ['What material do you use?', ['Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request. Our standard finish is hairline, with brushed, mirror or satin on request.']],
     ['Can you build to custom sizes?', ['Yes', 'made to order', 'exact dimensions']],
-    ['What warranty do you give?', ['6-month warranty on workmanship', '12 months', 'preventive maintenance service (PMS)', 'KitchenShield™']],
+    ['What warranty do you give?', ['12-month warranty on workmanship', '12 months', 'preventive maintenance service (PMS)', 'KitchenShield™']],
     ['Do you supply government agencies and schools?', ['PhilGEPS-registered', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Ilocos Sur Polytechnic State College (ISPSC)', 'procurement rules']],
     ['How do I get a quote?', ['online', 'estimated range', 'final quotation', 'No account is needed']],
     ['Do you install?', ['design, fabricate, deliver and install']],
@@ -587,7 +587,7 @@ describe('the FAQ: the owner\'s questions, answered only with confirmed facts, a
       assert.ok(!/\b(lead[- ]?times?|turnaround|within \d+|deposits?|down[- ]?payments?|installments?|payments?|delivery fees?|shipping|freight|free delivery|discounts?|prices?|pricing|cost|costs|₱|PHP)\b/i.test(text), `a lead time, payment term, fee or price is in "${q}"`);
       assert.ok(!/\b\d+\s*(?:%|percent)/.test(text), q);
       const durations = [...text.matchAll(/\b(\d+)[ -]?(minutes?|hours?|days?|weeks?|months?|years?)\b/gi)].map((m) => `${m[1]} ${m[2].replace(/s$/, '')}`);
-      if (q === WARRANTY) assert.deepEqual(durations, ['6 month', '12 month'], q);
+      if (q === WARRANTY) assert.deepEqual(durations, ['12 month', '12 month'], q);
       else if (q === 'How long has Barro Kitchens been in business?') assert.deepEqual(durations, ['23 year'], q);
       else assert.deepEqual(durations, [], `a duration in "${q}"`);
     }
