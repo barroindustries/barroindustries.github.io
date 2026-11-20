@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.40';
+window.APP_VERSION = '15.0.42';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1598,7 +1598,7 @@ window.PAGE_SCRIPTS = {
   // ── Quote review page (QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §2.3) — reached by link, notification and card buttons only (no nav entry).
   // approvals.js carries decideQuoteApproval (the one Approve / Return function), forms-core.js the section headings and item codes the page
   // prints, qb-spec-sheet.js the spec rows of a legacy line. ──
-  'quote-approval': ['js/screens/quote-approval.js', 'js/screens/approvals.js', 'js/forms-core.js', 'js/qb-spec-sheet.js'],
+  'quote-approval': ['js/screens/quote-approval.js', 'js/screens/approvals.js', 'js/forms-core.js', 'js/qb-spec-sheet.js', 'js/quote-figures-core.js'],
 
   'notes': ['js/screens/notes.js'],
   'personal-todo': ['js/screens/todo.js'],

@@ -4,7 +4,7 @@
 //   * One document per thread entry, in a top-level collection (D7: a resubmission creates a NEW quote doc, so a subcollection of the quote would strand the thread).
 //   * READ needs a signed-in profile AND (an admin — president, manager, secretary — OR the entry's own `submitterUid`): a Sales user reads only the threads of quotes he sent,
 //     and the list query that is provable under it carries the submitterUid filter (js/svc-approvals.js QuoteThread.list).
-//   * CREATE: exactly the twelve keys (hasOnly) and the ten required ones (hasAll); the author is the caller and the time is the server's; the collection is one of the two quote
+//   * CREATE: exactly the thirteen keys (hasOnly: the twelve and `lines`, QUOTE-PRESIDENT-FIGURES-SPEC 4.2) and the ten required ones (hasAll); the author is the caller and the time is the server's; the collection is one of the two quote
 //     collections; threadKey is "<coll>_<rootQuoteId>"; ids and strings are bounded; a `comment` has text. Then ONE of two branches: the President (any of the four kinds, role
 //     'president') or a non-President who IS the quote's creator (role 'sales', kinds comment / submitted only, and the quote doc named in the entry says createdBy == the caller).
 //   * UPDATE is refused outright; DELETE is the President's (console use).
@@ -12,6 +12,9 @@
 //   * What js/svc-approvals.js writes (QuoteThread.entry + createdAt) is exactly what the create rule accepts: no key the rule would refuse, none it requires missing.
 //
 // Textual pins (no Java here -> no emulator; the block is compile-checked with `firebase deploy --only firestore:rules --dry-run`, which the build session does not run). Pure text, price-free.
+// QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 mutation log (scratch copy of firestore.rules / js/svc-approvals.js, 2026-11-20; every one KILLED here): `lines` allowed for anyone / without its size bound / missing from hasOnly; the President's branch without kind
+// 'figures'; the Sales branch without kind 'applied'; QuoteThread.entry writing `lines` for a Sales entry; its rows uncapped. (The bk_quotes / bs_quotes pins live in tests/quote-carry.test.mjs: figuresWriteOk prefix removed, figuresCarryOk arm removed,
+// the direct-parent test removed — each KILLED.)
 // Mutation-tested in scratch copies (listed in the commit message): every clause removed or loosened must fail this file.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,7 +50,7 @@ const allowFor = (method) => {
 const CREATE = allowFor('create');
 const listOf = (expr, fn) => { const m = new RegExp(`request\\.resource\\.data\\.keys\\(\\)\\.${fn}\\(\\[([^\\]]*)\\]\\)`).exec(expr); assert.ok(m, `${fn} list not found`); return m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')); };
 
-const ONLY = ['threadKey', 'coll', 'quoteId', 'rootQuoteId', 'quoteNumber', 'kind', 'text', 'authorUid', 'authorName', 'authorRole', 'submitterUid', 'createdAt'];
+const ONLY = ['threadKey', 'coll', 'quoteId', 'rootQuoteId', 'quoteNumber', 'kind', 'text', 'authorUid', 'authorName', 'authorRole', 'submitterUid', 'createdAt', 'lines'];
 const ALL = ['threadKey', 'coll', 'quoteId', 'rootQuoteId', 'kind', 'text', 'authorUid', 'authorRole', 'submitterUid', 'createdAt'];
 
 describe('quote_comments: the statements', () => {
@@ -74,7 +77,7 @@ describe('quote_comments: read', () => {
 describe('quote_comments: create', () => {
   const E = () => CREATE;
   it('needs a signed-in profile first', () => assert.ok(E().startsWith('isAuth() && hasProfile() && ')));
-  it('the key list: hasOnly the twelve, hasAll the ten required (quoteNumber and authorName may be absent)', () => {
+  it('the key list: hasOnly the thirteen (the twelve + lines), hasAll the ten required (quoteNumber, authorName and lines may be absent)', () => {
     assert.deepEqual(listOf(E(), 'hasOnly'), ONLY);
     assert.deepEqual(listOf(E(), 'hasAll'), ALL);
     for (const k of ALL) assert.ok(ONLY.includes(k), k + ' is required but not allowed');
@@ -98,15 +101,20 @@ describe('quote_comments: create', () => {
     assert.ok(E().includes('isBoundedString(request.resource.data.submitterUid, 128)'));
     assert.ok(E().includes("(request.resource.data.kind != 'comment' || request.resource.data.text.size() > 0)"));
   });
+  it('QUOTE-PRESIDENT-FIGURES-SPEC 4.2: `lines` is optional, the President\'s alone, a list of at most 60 rows — and the clause sits BEFORE the text rule so the two branches stay the last thing in the expression', () => {
+    assert.ok(E().includes("(!('lines' in request.resource.data) || (isPresident() && request.resource.data.lines is list && request.resource.data.lines.size() <= 60))"));
+    assert.ok(E().indexOf("'lines' in request.resource.data") < E().indexOf("(request.resource.data.kind != 'comment'"), 'before the text rule');
+    assert.equal(listOf(E(), 'hasAll').includes('lines'), false, 'never required');
+  });
   it('then ONE of two author branches, and nothing after them', () => {
     const tail = E().slice(E().indexOf("(request.resource.data.kind != 'comment'"));
     const m = /^\(request\.resource\.data\.kind != 'comment' \|\| request\.resource\.data\.text\.size\(\) > 0\) && \( \((.*)\) \|\| \((.*)\) \)$/.exec(tail);
     assert.ok(m, 'the two branches are not the last thing in the create rule: ' + tail);
     const [, pres, sales] = m;
     // the President: his own role and any of the four kinds
-    assert.equal(pres, "isPresident() && request.resource.data.authorRole == 'president' && request.resource.data.kind in ['comment', 'returned', 'approved', 'submitted']");
+    assert.equal(pres, "isPresident() && request.resource.data.authorRole == 'president' && request.resource.data.kind in ['comment', 'returned', 'approved', 'submitted', 'figures']");
     // everyone else: role 'sales', the entry's submitter is himself, the two kinds Sales may write, and the QUOTE named in the entry was created by him
-    assert.equal(sales, "!isPresident() && request.resource.data.authorRole == 'sales' && request.resource.data.submitterUid == request.auth.uid && request.resource.data.kind in ['comment', 'submitted'] && get(/databases/$(database)/documents/$(request.resource.data.coll)/$(request.resource.data.quoteId)).data.get('createdBy', '') == request.auth.uid");
+    assert.equal(sales, "!isPresident() && request.resource.data.authorRole == 'sales' && request.resource.data.submitterUid == request.auth.uid && request.resource.data.kind in ['comment', 'submitted', 'applied'] && get(/databases/$(database)/documents/$(request.resource.data.coll)/$(request.resource.data.quoteId)).data.get('createdBy', '') == request.auth.uid");
   });
   it('a Sales entry can never be "returned" or "approved": those two kinds exist only in the President\'s branch', () => {
     const m = /\(!isPresident\(\)[\s\S]*$/.exec(CREATE);
@@ -129,9 +137,9 @@ describe('quote_comments: placement and the neighbours', () => {
   it('no composite index: two equality filters (threadKey, submitterUid) need none', () => {
     assert.ok(!/quote_comments/.test(read('firestore.indexes.json')));
   });
-  it('the file is still far under the rules size cap (this adds under 2 KB)', () => {
+  it('the file is still far under the rules size cap (this adds under 3 KB)', () => {
     assert.ok(Buffer.byteLength(RAW) < 262144 * 0.8, 'firestore.rules is within 80% of the 262,144-byte cap');
-    assert.ok(Buffer.byteLength(BLOCK) < 2200, 'the block is small');
+    assert.ok(Buffer.byteLength(BLOCK) < 2700, 'the block is small');
   });
 });
 
@@ -146,11 +154,30 @@ describe('what the client writes is what the rule accepts (js/svc-approvals.js Q
   const entry = (kind, over) => plain(QT.entry(Object.assign({ coll: 'bk_quotes', quoteId: 'qd00000000000000001', q: { createdBy: 'u-agent', rootQuoteId: 'qd00000000000000000', quoteNumber: 'BK-X-1' }, kind, text: 'hello', uid: 'u-pres', name: 'The President', role: 'president' }, over || {})));
 
   it('an entry has the rule\'s keys: every written key is allowed (+ createdAt), every required key is there', () => {
-    for (const kind of ['comment', 'returned', 'approved', 'submitted']) {
+    for (const kind of ['comment', 'returned', 'approved', 'submitted', 'figures', 'applied']) {
       const keys = Object.keys(entry(kind)).concat(['createdAt']);
       for (const k of keys) assert.ok(ONLY.includes(k), `${kind}: ${k} is not on the hasOnly list`);
       for (const k of ALL) assert.ok(keys.includes(k), `${kind}: ${k} is required and missing`);
     }
+  });
+  it('an entry with rows adds exactly the one key `lines` (the rule allows it), only for the President; a Sales entry never carries it, whatever it is handed', () => {
+    const rows = [{ i: 1, name: 'Sink', from: 100, to: 90, note: 'ok', extra: 'x' }, { i: 2, name: 'Rack', from: 5, to: null, note: 'wrong colour' }, { i: 3 }];
+    const e = entry('figures', { lines: rows });
+    assert.ok(ONLY.includes('lines') && 'lines' in e);
+    for (const k of Object.keys(e).concat(['createdAt'])) assert.ok(ONLY.includes(k), k);
+    assert.deepEqual(e.lines, [{ i: 1, name: 'Sink', from: 100, to: 90, note: 'ok' }, { i: 2, name: 'Rack', from: 5, to: null, note: 'wrong colour' }], 'the row keys are exactly the rule-independent five; an empty row is dropped');
+    assert.equal('lines' in entry('comment'), false, 'no rows, no key');
+    assert.equal('lines' in entry('applied', { role: 'sales', lines: rows }), false, 'the Sales role never writes lines');
+    assert.equal(entry('figures', { lines: Array.from({ length: 90 }, (_, k) => ({ i: k, to: 1 })) }).lines.length, 60, 'at most 60 (the rule\'s bound)');
+    assert.equal('lines' in entry('figures', { lines: [{ i: 1 }, null, 'x'] }), false);
+  });
+  it('the preview of an entry is its text, else "Prices on N lines" / "Notes on N lines" (never an amount)', () => {
+    assert.equal(QT.preview({ text: 'hello' }), 'hello');
+    assert.equal(QT.preview({ text: '', lines: [{ to: 5 }, { to: 6 }, { to: null, note: 'x' }] }), 'Prices on 2 lines');
+    assert.equal(QT.preview({ text: '', lines: [{ to: 5 }] }), 'Prices on 1 line');
+    assert.equal(QT.preview({ text: '', lines: [{ to: null, note: 'a' }, { to: null, note: 'b' }] }), 'Notes on 2 lines');
+    assert.equal(QT.preview({ text: '' }), '');
+    assert.equal(QT.preview({ text: 'y'.repeat(300) }).length, 200);
   });
   it('the thread key equation holds for an entry on a revision (root differs from the quote) and on a first filing (root is the quote itself)', () => {
     const rev = entry('comment'); assert.equal(rev.threadKey, rev.coll + '_' + rev.rootQuoteId);

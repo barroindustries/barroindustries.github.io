@@ -2,6 +2,16 @@
 // js/price-gate-core.js decides whether a revised price needs Neil again. MONEY-adjacent: every rule is mutation-tested
 // (&& -> ||; unknown treated as "above"; lastApproved from a carried revision; fee lines checked at line level).
 //
+//
+// QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §8 / §13.2 (appended at the end of this file): figuresBar and figuresOfferFor, the bar a quote returned WITH THE PRESIDENT'S OWN PRICES offers to the revision that follows.
+// MUTATION LOG (2026-11-20, scratch copy of js/price-gate-core.js, each KILLED by the test named):
+//   G1  figuresBar takes the Sales price (from) instead of his figure (to)          -> "figuresBar: a line takes his figure ..." and the evaluate tests
+//   G2  figuresOfferFor ignores parentQuoteId (any returned doc of the chain offers) -> "figuresOfferFor: the parent must be the returned doc ..."
+//   G3  figuresOfferFor skips the later-decision check                               -> "a later approval by the President voids the offer" and "a later return voids it"
+//   G4  times compared as strings                                                    -> "mixed time types compare correctly"
+//   G5  a carried approval voids the offer                                           -> "a carried approval does not void the offer"
+//   G6  an unknown decision time does not void the offer                             -> "a later decision whose time is unknown voids the offer (fail closed)"
+//
 // Run with: node --test tests/*.test.mjs
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +29,7 @@ const approved = (total, lines) => ({ total, lines: lines.map(([key, unit]) => (
 
 describe('module contract', () => {
   it('exports the documented members; F7 flag defaults to false', () => {
-    assert.deepEqual(Object.keys(PG).sort(), ['REQUIRE_APPROVAL_FOR_PAYMENT', 'evaluate', 'lastApprovedFromChain', 'lineKey', 'pickLastApprovedQuote', 'snapshotFromQuote']);
+    assert.deepEqual(Object.keys(PG).sort(), ['REQUIRE_APPROVAL_FOR_PAYMENT', 'evaluate', 'figuresBar', 'figuresOfferFor', 'lastApprovedFromChain', 'lineKey', 'pickLastApprovedQuote', 'snapshotFromQuote', 'toMs']);
     assert.equal(PG.REQUIRE_APPROVAL_FOR_PAYMENT, false);
     assert.equal(globalThis.window.PriceGate, PG);
   });
@@ -170,5 +180,96 @@ describe('lastApprovedFromChain (§6.5) — carried approvals never move the bar
   it('nothing approved by Neil (unapproved, or only carried) → null', () => {
     assert.equal(PG.lastApprovedFromChain([{ total: 5 }, carriedQ]), null);
     assert.equal(PG.lastApprovedFromChain([]), null);
+  });
+});
+
+
+// ═══ QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §8 / §13.2 ═══
+describe('figuresBar', () => {
+  const returned = (over) => Object.assign({
+    items: [{ name: 'A', qty: 1, unitPrice: 100 }, { name: 'B', dims: '2x2', unit: 'pc', qty: 2, unitPrice: 50 }, { name: 'C', qty: 1, unitPrice: 10 }],
+    presidentFigures: { v: 1, mode: 'return', carry: true, at: '2026-11-20T01:00:00.000Z',
+      lines: [{ i: 0, to: 120, from: 100, note: '' }, { i: 1, to: null, from: 50, note: 'check the size' }], totals: { before: { total: 200 }, after: { total: 240 } } } }, over || {});
+  it('null unless the quote offers the carry: no presidentFigures, carry false or absent, no totals, a non-numeric total', () => {
+    assert.equal(PG.figuresBar({ items: [] }), null);
+    assert.equal(PG.figuresBar(null), null);
+    for (const carry of [false, undefined, 'true', 1]) { const q = returned(); q.presidentFigures.carry = carry; assert.equal(PG.figuresBar(q), null, String(carry)); }
+    const noTotals = returned(); delete noTotals.presidentFigures.totals; assert.equal(PG.figuresBar(noTotals), null);
+    const noAfter = returned(); noAfter.presidentFigures.totals = { before: { total: 1 } }; assert.equal(PG.figuresBar(noAfter), null);
+    const str = returned(); str.presidentFigures.totals.after.total = '240'; assert.equal(PG.figuresBar(str), null);
+  });
+  it('figuresBar: a line takes his figure (to) where he set one and the stored unit price elsewhere; a note-only row changes nothing; the total is the engine\'s "after"', () => {
+    const bar = PG.figuresBar(returned());
+    assert.deepEqual(bar, { total: 240, lines: [{ key: 'a||', unit: 120 }, { key: 'b|2x2|pc', unit: 50 }, { key: 'c||', unit: 10 }], at: '2026-11-20T01:00:00.000Z' });
+  });
+  it('a bar built from his figures is read by evaluate() like any other bar: equal carries; a higher line carries; one line below trips; the total below trips', () => {
+    const bar = PG.figuresBar(returned());
+    const rev = (a, b, c, total) => ({ total, items: [{ name: 'A', qty: 1, unitPrice: a }, { name: 'B', dims: '2x2', unit: 'pc', qty: 2, unitPrice: b }, { name: 'C', qty: 1, unitPrice: c }] });
+    assert.equal(PG.evaluate(rev(120, 50, 10, 240), bar).needsApproval, false, 'equal');
+    assert.equal(PG.evaluate(rev(130, 50, 10, 250), bar).needsApproval, false, 'a higher line');
+    const low = PG.evaluate(rev(119.99, 50, 10, 240), bar); assert.equal(low.needsApproval, true, 'one line below'); assert.deepEqual(low.reasons.map((r) => r.level + ':' + r.key), ['line:a||']);
+    const totalLow = PG.evaluate(rev(120, 50, 10, 239.99), bar); assert.equal(totalLow.needsApproval, true, 'the total below'); assert.equal(totalLow.reasons[0].level, 'total');
+    assert.equal(PG.evaluate(rev(100, 50, 10, 240), bar).needsApproval, true, 'Sales\' own price on the line he changed trips');
+  });
+});
+
+describe('figuresOfferFor', () => {
+  const AT = '2026-11-20T01:00:00.000Z';
+  const ts = (iso) => ({ toDate: () => new Date(iso) });
+  const parent = (over) => Object.assign({ id: 'p1', approvalStatus: 'needs_revision', returnedAt: ts(AT), items: [{ name: 'A', qty: 1, unitPrice: 100 }],
+    presidentFigures: { carry: true, at: AT, lines: [{ i: 0, to: 120 }], totals: { after: { total: 120 } } } }, over || {});
+  const root = (over) => Object.assign({ id: 'r0', approvalStatus: 'approved', approvedBy: 'u-pres', approvedAt: ts('2026-11-10T01:00:00.000Z'), items: [{ name: 'A', qty: 1, unitPrice: 90 }] }, over || {});
+  const data = { parentQuoteId: 'p1' };
+  it('the offer is the returned parent itself', () => {
+    const p = parent();
+    assert.equal(PG.figuresOfferFor(data, [root(), p]), p);
+  });
+  it('figuresOfferFor: the parent must be the returned doc that carries a bar — not the root, not a doc without a parent link, not an approved or no-carry doc', () => {
+    assert.equal(PG.figuresOfferFor({ parentQuoteId: 'r0' }, [root(), parent()]), null, 'the named parent is the approved root');
+    assert.equal(PG.figuresOfferFor({}, [root(), parent()]), null, 'no parent link');
+    assert.equal(PG.figuresOfferFor({ parentQuoteId: 'zz' }, [root(), parent()]), null, 'parent not in the chain');
+    assert.equal(PG.figuresOfferFor(data, [root(), parent({ approvalStatus: 'approved' })]), null);
+    const nc = parent(); nc.presidentFigures.carry = false; assert.equal(PG.figuresOfferFor(data, [root(), nc]), null);
+    assert.equal(PG.figuresOfferFor(data, null), null);
+    assert.equal(PG.figuresOfferFor(null, [parent()]), null);
+  });
+  it('a later approval by the President voids the offer; an EARLIER one does not (the root above is earlier)', () => {
+    assert.ok(PG.figuresOfferFor(data, [root(), parent()]));
+    const later = root({ id: 'r2', approvedAt: ts('2026-11-20T02:00:00.000Z') });
+    assert.equal(PG.figuresOfferFor(data, [root(), parent(), later]), null);
+  });
+  it('a later return voids it; an earlier return does not', () => {
+    assert.equal(PG.figuresOfferFor(data, [root(), parent(), { id: 'x', approvalStatus: 'needs_revision', returnedAt: ts('2026-11-20T03:00:00.000Z') }]), null);
+    assert.ok(PG.figuresOfferFor(data, [root(), parent(), { id: 'x', approvalStatus: 'needs_revision', returnedAt: ts('2026-11-15T03:00:00.000Z') }]));
+  });
+  it('a carried approval does not void the offer (a carried doc is not a decision by the President), however late', () => {
+    const carried = root({ id: 'r3', approvalCarriedFrom: 'r0', approvedAt: ts('2026-11-21T02:00:00.000Z') });
+    assert.ok(PG.figuresOfferFor(data, [root(), parent(), carried]));
+  });
+  it('mixed time types compare correctly: an ISO string, a Timestamp-like, { seconds }, a Date', () => {
+    const iso = '2026-11-20T00:59:59.000Z', later = '2026-11-20T01:00:01.000Z';
+    const sec = (iso2) => ({ seconds: Math.floor(Date.parse(iso2) / 1000), nanoseconds: 0 });
+    const forms = (i) => [i, ts(i), sec(i), new Date(i), Date.parse(i)];
+    for (const f of forms(iso)) assert.ok(PG.figuresOfferFor(data, [root({ approvedAt: f }), parent()]), 'earlier, form ' + Object.prototype.toString.call(f));
+    for (const f of forms(later)) assert.equal(PG.figuresOfferFor(data, [root({ id: 'r2', approvedAt: f }), parent()]), null, 'later, form ' + Object.prototype.toString.call(f));
+    // the offer's own time as a Timestamp-like and as seconds
+    const p2 = parent(); p2.presidentFigures.at = ts(AT);
+    assert.ok(PG.figuresOfferFor(data, [root(), p2]));
+    assert.equal(PG.figuresOfferFor(data, [root({ id: 'r2', approvedAt: ts(later) }), p2]), null);
+  });
+  it('the server stamp of his decision (atTs) is the clock when it is there: a device clock that runs fast cannot hide a later approval', () => {
+    const p = parent(); p.presidentFigures.atTs = ts('2026-11-20T00:50:00.000Z'); p.presidentFigures.at = '2026-11-20T01:30:00.000Z';
+    assert.equal(PG.figuresOfferFor(data, [root({ id: 'r2', approvedAt: ts('2026-11-20T01:00:00.000Z') }), p]), null);
+  });
+  it('a later decision whose time is unknown voids the offer (fail closed), and so does an offer whose own time is unknown', () => {
+    assert.equal(PG.figuresOfferFor(data, [root({ id: 'r2', approvedAt: undefined }), parent()]), null);
+    assert.equal(PG.figuresOfferFor(data, [parent(), { id: 'x', returnedAt: 'not a date' }]), null);
+    const p = parent(); p.presidentFigures.at = 'nonsense'; assert.equal(PG.figuresOfferFor(data, [root(), p]), null);
+  });
+  it('toMs reads every form and answers null for the rest', () => {
+    assert.equal(PG.toMs('2026-11-20T01:00:00.000Z'), Date.parse('2026-11-20T01:00:00.000Z'));
+    assert.equal(PG.toMs({ seconds: 5, nanoseconds: 2000000 }), 5002);
+    assert.equal(PG.toMs({ toMillis: () => 7 }), 7);
+    for (const bad of [null, undefined, '', 'x', {}, [], NaN]) assert.equal(PG.toMs(bad), null, String(bad));
   });
 });

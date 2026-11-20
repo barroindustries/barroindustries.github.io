@@ -8,7 +8,7 @@
 //                  stays above standard carries; approveAll ON never carries; a builder that disagrees, a failed chain read, a quote the builder already sent for approval -> the President; carried
 //                  approvals never move the bar; nothing approved by the President in the chain / the President himself / a first quote -> filed as today; priceCheck is stored sanitised.
 //   3. UPDATE      QUOTE_UPDATE on an approved source is refused and filed as a new revision (R+1 from the highest suffix); on any other source it still updates in place.
-//   4. RULES       C3 in firestore.rules (bk_quotes, bs_quotes): textual pins.
+//   4. RULES       C3 in firestore.rules (bk_quotes, bs_quotes): textual pins; and (QUOTE-PRESIDENT-FIGURES-SPEC 4.1) figuresWriteOk / figuresCarryOk, the same function bodies in both blocks.
 //   5. BADGE       "Approved (carried)" on the quote rows and cards.
 //   6. WIRING      price-gate-core.js is eager (app kit, right after sales-flow-core.js, precached under its ?v= URL) and contract-ui no longer double-loads it.
 // Fixtures are FAKE. Run with: node --test tests/*.test.mjs
@@ -139,7 +139,7 @@ describe('2 · the builder bridge (js/app.js, listener lifted whole): carry or s
     return APP.slice(start, end + 4);
   })();
   const CODE = [cfgPiece('quoteApprovalRefOf'), piece(APP, /^const QB_SOURCE_REF_RE = .*;$/m, 'QB_SOURCE_REF_RE'),
-    ...['_qbCleanSourceRef', '_qbCleanEstimateCheck', '_qbCleanApprovalWhy', '_qbCleanPriceCheck', '_qbChainQuotes', '_qbRevOf', '_qbGateText', '_qbChainGate'].map(appFn),
+    ...['_qbCleanSourceRef', '_qbCleanEstimateCheck', '_qbCleanApprovalWhy', '_qbCleanPriceCheck', '_qbChainQuotes', '_qbRevOf', '_qbGateText', '_qbFiguresNote', '_qbChainGate'].map(appFn),
     piece(SVC, /^window\.QuoteThread = \{[\s\S]*?\n\};/m, 'window.QuoteThread'), LISTENER].join('\n');
   const APPROVED_AT = '2026-11-10T02:00:00.000Z';
   // a chain: the root, approved by the President at 100000 (a snapshot, as decideQuoteApproval writes it)
@@ -352,8 +352,8 @@ describe('3 · C3 in firestore.rules (bk_quotes, bs_quotes): a non-admin write t
       assert.ok(block.includes(`get(/databases/$(database)/documents/${coll}/$(request.resource.data.approvalCarriedFrom)).data.get('approvalStatus', '') == 'approved'`));
       assert.ok(block.includes(`.data.get('rootQuoteId', request.resource.data.approvalCarriedFrom) == request.resource.data.get('rootQuoteId', '_')`), 'same chain (an older root without the field is its own chain)');
       const fn = piece(block, /function approvalWriteOk\(\) \{[\s\S]*?\n      \}/, coll + ' approvalWriteOk');
-      assert.match(fn, /return lostPrevOk\(\) && \(isAdmin\(\) \|\| request\.resource\.data\.get\('approvalStatus', ''\) != 'approved'/);
-      assert.ok(fn.includes("(resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk()"));
+      assert.match(fn, /return figuresWriteOk\(\) && lostPrevOk\(\) && \(isAdmin\(\) \|\| request\.resource\.data\.get\('approvalStatus', ''\) != 'approved'/);   // QUOTE-PRESIDENT-FIGURES-SPEC 4.1: prefixed
+      assert.ok(fn.includes("(resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk() || figuresCarryOk()"), 'the second carry arm sits right after carriedApprovalOk()');
       // reopening a LOST quote that was approved when it was marked lost (sales.js restore) — the saved state is kept honest by lostPrevOk()
       assert.ok(fn.includes("(resource != null && resource.data.get('status', '') == 'lost' && resource.data.get('lostPrevApprovalStatus', '') == 'approved')"));
     });
@@ -370,6 +370,36 @@ describe('3 · C3 in firestore.rules (bk_quotes, bs_quotes): a non-admin write t
       assert.equal(/allow (read|delete):[^;]*approvalWriteOk/.test(block), false);
     });
   }
+  // ── QUOTE-PRESIDENT-FIGURES-SPEC 4.1 (textual pins: no emulator here; `firebase deploy --only firestore:rules --dry-run` is the compile check, run when the rules are deployed) ──────────────────────────────────
+  const fnBody = (blk, name) => piece(blk, new RegExp(`function ${name}\\(\\) \\{[\\s\\S]*?\\n      \\}`), name);
+  const norm = (x, coll) => x.split(coll).join('<coll>').replace(/\s+/g, ' ');
+  it('figuresWriteOk() and figuresCarryOk() are in BOTH quote blocks with identical bodies (apart from the collection)', () => {
+    const bk = piece(RULES, /match \/bk_quotes\/\{docId\} \{[\s\S]*?\n    \}\n/, 'bk_quotes'), bs = piece(RULES, /match \/bs_quotes\/\{docId\} \{[\s\S]*?\n    \}\n/, 'bs_quotes');
+    for (const name of ['figuresWriteOk', 'figuresCarryOk']) assert.equal(norm(fnBody(bk, name), 'bk_quotes'), norm(fnBody(bs, name), 'bs_quotes'), name);
+    assert.equal((RULES.match(/function figuresWriteOk\(\)/g) || []).length, 2); assert.equal((RULES.match(/function figuresCarryOk\(\)/g) || []).length, 2);
+  });
+  it('figuresWriteOk(): the President, or a create that does not name presidentFigures, or an update whose diff does not touch it', () => {
+    const fn = norm(fnBody(piece(RULES, /match \/bk_quotes\/\{docId\} \{[\s\S]*?\n    \}\n/, 'bk_quotes'), 'figuresWriteOk'), 'bk_quotes');
+    assert.ok(fn.includes("return isPresident() || (resource == null && !('presidentFigures' in request.resource.data)) || (resource != null && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['presidentFigures']));"), fn);
+  });
+  it('figuresCarryOk(): kind figures, a named parent that is the DIRECT parent, still returned, still offering the carry, in the same chain', () => {
+    for (const coll of ['bk_quotes', 'bs_quotes']) {
+      const fn = fnBody(piece(RULES, new RegExp(`match /${coll}/\\{docId\\} \\{[\\s\\S]*?\\n    \\}\\n`), coll), 'figuresCarryOk');
+      assert.ok(fn.includes("request.resource.data.get('approvalCarriedKind', '') == 'figures'"), coll);
+      assert.ok(fn.includes("request.resource.data.get('approvalCarriedFrom', '') is string && request.resource.data.get('approvalCarriedFrom', '') != ''"));
+      assert.ok(fn.includes("request.resource.data.get('parentQuoteId', '') == request.resource.data.approvalCarriedFrom"), 'the direct child');
+      assert.ok(fn.includes(`exists(/databases/$(database)/documents/${coll}/$(request.resource.data.approvalCarriedFrom))`));
+      assert.ok(fn.includes(`get(/databases/$(database)/documents/${coll}/$(request.resource.data.approvalCarriedFrom)).data.get('approvalStatus', '') == 'needs_revision'`));
+      assert.ok(fn.includes(`.data.get('presidentFigures', {}).get('carry', false) == true`));
+      assert.ok(fn.includes(`.data.get('rootQuoteId', request.resource.data.approvalCarriedFrom) == request.resource.data.get('rootQuoteId', '_')`), 'the same chain');
+      assert.equal(fn.trim().endsWith(';\n      }'), true);
+    }
+  });
+  it('carriedApprovalOk() is untouched by the figures arm (its "named doc is approved" test is the old one)', () => {
+    const bk = piece(RULES, /match \/bk_quotes\/\{docId\} \{[\s\S]*?\n    \}\n/, 'bk_quotes');
+    assert.ok(fnBody(bk, 'carriedApprovalOk').includes("get(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('approvalStatus', '') == 'approved'"));
+    assert.equal(/figures/i.test(fnBody(bk, 'carriedApprovalOk')), false);
+  });
   it('one-line comments only (the rules size cap, CI CHECK 8), and the file stays well under the cap', () => {
     for (const m of RULES.matchAll(/\/\/ C3 \(SALES-FLOW-SPEC 6\.6\)[^\n]*\n(?!\s*\/\/)/g)) assert.ok(m[0].length < 220);
     assert.ok(Buffer.byteLength(RULES) < 262144 * 0.8);
@@ -395,7 +425,7 @@ describe('4 · the "Approved (carried)" badge (js/screens/sales.js)', () => {
   });
   it('both lists draw it: the Barro Kitchens cards (title attribute, escaped) and the Brilliant Steel rows', () => {
     assert.match(SALES, /title="' \+ escHtml\(ab\.title\) \+ '"/);
-    assert.match(SALES, /const ab = q\.approvalCarriedFrom \? window\.quoteApprovalBadge\(q\) : null;/);
+    assert.match(SALES, /const ab = \(q\.approvalCarriedFrom \|\| \(q\.presidentFigures && q\.presidentFigures\.mode === 'approve'\)\) \? window\.quoteApprovalBadge\(q\) : null;/);   // + a quote approved at the President's own prices (QUOTE-PRESIDENT-FIGURES-SPEC 10)
   });
 });
 

@@ -48,8 +48,8 @@ const configPiece = (name) => { const m = CONFIG.match(new RegExp(`^window\\.${n
 const LINK_CODE = [
   piece(/^const QB_SOURCE_REF_RE = .*;$/m, 'QB_SOURCE_REF_RE'), fnPiece('_qbCleanSourceRef'), fnPiece('_qbCleanEstimateCheck'), fnPiece('_qbCleanApprovalWhy'),
   // Phase 3 (price gate): not what this file is about — the bridge's gate steps aside (its own tests: tests/quote-carry.test.mjs)
-  'function _qbCleanPriceCheck() { return null; } async function _qbChainGate() { return { mode: "none" }; } function _qbRevOf() { return 0; } async function _qbChainQuotes() { return []; } function _qbGateText() { return ""; }',
-  winPiece('linkQuoteToRequest'), winPiece('openQuoteSource'), winPiece('reopenQuoteFromDoc'),
+  'function _qbCleanPriceCheck() { return null; } async function _qbChainGate() { return { mode: "none" }; } function _qbRevOf() { return 0; } async function _qbChainQuotes() { return []; } function _qbGateText() { return ""; } function _qbFiguresNote() { return ""; }',
+  winPiece('linkQuoteToRequest'), winPiece('openQuoteSource'), winPiece('qbStateForDoc'), winPiece('reopenQuoteFromDoc'),
   fnPiece('_qbIsAuthoritativeLoad'), fnPiece('_qbReopenStripLabel'),
   piece(/^function isBrilliantOnly\(\) \{.*\}$/m, 'isBrilliantOnly'),
 ].join('\n');

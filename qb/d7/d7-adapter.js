@@ -416,7 +416,7 @@ function lineRow(item, idx){
   if(!D){
     out.push(chip('warn', 'configurator not loaded', 'This configurator file is not loaded, so the line cannot be edited. Its stored text and price are kept.'));
   } else {
-    if(isManual(item)) out.push('<span class="ms-chip" style="background:#eee;color:var(--gray-dark)" title="A hand-typed price. The ↺ under the price box goes back to the computed one.">manual price</span>');
+    if(isManual(item)) out.push(presChip(item) || '<span class="ms-chip" style="background:#eee;color:var(--gray-dark)" title="A hand-typed price. The ↺ under the price box goes back to the computed one.">manual price</span>');
     else if(!ready() && Number(item.unitPrice) > 0) out.push(chip('ok', 'stored price', 'The prices are not loaded in this session, so this is the price that was saved with the line.'));
     else if(item.priceHeld) out.push(chip('warn', 'price as filed', 'This quote was filed with this price. The price list now gives another one, so the line keeps the filed price until you take the new one or change the line.')
       + (item.basisUnitPrice > 0 ? ` <span class="kc-held-now">now ${esc(safe(() => formatPeso(item.basisUnitPrice), String(item.basisUnitPrice)))} <button type="button" class="cfg-link kc-held-btn" onclick="D7.adapter.releaseHold(${idx})" title="Take the new price" aria-label="Take the new price">↺</button></span>` : ''));
@@ -448,6 +448,8 @@ function lineRow(item, idx){
   return `<div class="spec-line cfg-row no-print d7-cfgrow"><span class="spec-tag no-print">Config</span>${out.join('')}${btn.join('')}</div>`;
 }
 A.lineRow = lineRow;
+/* QUOTE-PRESIDENT-FIGURES-SPEC 7.2: a line at the President's own price (priceBy, stamped by QuoteFigures.applyToItems) says so instead of "manual price" (the page's presPriceChipHtml, the same chip as the legacy row's).  Never printed: lineRow is a no-print row. */
+function presChip(item){ try{ return (item && item.priceBy && item.priceBy.role==='president' && typeof presPriceChipHtml==='function') ? presPriceChipHtml(item) : ''; }catch(e){ return ''; } }
 
 /* ═════════ the typed costs leave the payload and ride the sidecar (spec 3.4) ═════════ */
 /* Every key that names a cost, at ANY depth, never leaves in a payload, a draft, a template or a stored quote (spec 3.4: "the key check"; tests/kc-live.test.mjs pins it, and pins that no product's own

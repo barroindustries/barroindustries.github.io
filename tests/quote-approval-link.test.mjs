@@ -3,7 +3,7 @@
 // What it pins, in the spec's order (§10):
 //   1. LINK HELPERS   js/config.js quoteApprovalRefOf / parseQuoteApprovalRef / quoteApprovalUrl: both collections round-trip; an unknown collection, an empty or draft id, a character
 //                     outside [A-Za-z0-9_-], a third segment, a too short / too long id are refused; the absolute url is origin + /#/quote-approval/ + ref.
-//   2. ROUTER         js/app.js parseHash / hashFor carry '#/quote-approval/<ref>' as page + subtab; navigateTo has the case; PAGE_SCRIPTS lists the four files and sw.js precaches the page.
+//   2. ROUTER         js/app.js parseHash / hashFor carry '#/quote-approval/<ref>' as page + subtab; navigateTo has the case; PAGE_SCRIPTS lists the five files (the fifth is js/quote-figures-core.js) and sw.js precaches the page.
 //   3. BRIDGE         the builder bridge listener, lifted whole: a QUOTE_APPROVAL_REQUESTED stores the sanitised approvalWhy (QUOTE_FILED never does), writes ONE 12-key thread entry,
 //                     notifies the President with the review-page link, remembers and shows the link, and survives a thread write that fails; QB_SHOW_APPROVAL_LINK; the link window itself.
 //   4. QUOTE THREAD   js/svc-approvals.js window.QuoteThread (entry / add / list) against an in-memory Firestore.
@@ -104,11 +104,11 @@ describe('2 · the router', () => {
     assert.equal(/page:\s*'quote-approval'/.test(CONFIG), false, 'not a NAV_REGISTRY page (it is reached by link, notification and buttons)');
     assert.equal(/'quote-approval'/.test(read('js/screens/dashboards.js')), false);
   });
-  it('PAGE_SCRIPTS[\'quote-approval\'] lists the four files, each exists; sw.js precaches the page (bare path, like the other lazy screens) and the others are already precached', () => {
+  it('PAGE_SCRIPTS[\'quote-approval\'] lists the five files, each exists; sw.js precaches the page (bare path, like the other lazy screens) and the others are already precached', () => {
     const list = CONFIG.match(/'quote-approval':\s*\[([^\]]*)\]/);
     assert.ok(list, 'no PAGE_SCRIPTS entry');
     const files = [...list[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    assert.deepEqual(files, ['js/screens/quote-approval.js', 'js/screens/approvals.js', 'js/forms-core.js', 'js/qb-spec-sheet.js']);
+    assert.deepEqual(files, ['js/screens/quote-approval.js', 'js/screens/approvals.js', 'js/forms-core.js', 'js/qb-spec-sheet.js', 'js/quote-figures-core.js']);
     for (const f of files) { assert.ok(fs.existsSync(path.join(ROOT, f)), `${f} does not exist`); assert.ok(SW.includes(`\n  '/${f}',\n`), `${f} is not precached (bare path, on its own line)`); }
     assert.equal(SW.split("'/js/screens/quote-approval.js'").length - 1, 1, 'listed once');
   });
@@ -169,7 +169,7 @@ describe('3 · the builder bridge (js/app.js, listener lifted whole)', () => {
     return APP.slice(start, end + 4);
   })();
   const CODE = [cfgPiece('quoteApprovalRefOf'), piece(APP, /^const QB_SOURCE_REF_RE = .*;$/m, 'QB_SOURCE_REF_RE'), appFn('_qbCleanSourceRef'), appFn('_qbCleanEstimateCheck'), appFn('_qbCleanApprovalWhy'),
-    appFn('_qbCleanPriceCheck'), appFn('_qbChainQuotes'), appFn('_qbRevOf'), appFn('_qbGateText'), appFn('_qbChainGate'),
+    appFn('_qbCleanPriceCheck'), appFn('_qbChainQuotes'), appFn('_qbRevOf'), appFn('_qbGateText'), appFn('_qbFiguresNote'), appFn('_qbChainGate'),
     piece(SVC, /^window\.QuoteThread = \{[\s\S]*?\n\};/m, 'window.QuoteThread'), LISTENER].join('\n');
 
   function makeBridge(opts) {
@@ -485,6 +485,8 @@ function loadPage() {
   vm.runInContext(read('js/forms-core.js'), ctx, { filename: 'js/forms-core.js' });
   vm.runInContext(read('js/qb-spec-sheet.js'), ctx, { filename: 'js/qb-spec-sheet.js' });
   vm.runInContext(ESC_SRC, ctx);
+  vm.runInContext(read('js/price-gate-core.js'), ctx, { filename: 'js/price-gate-core.js' });          // QUOTE-PRESIDENT-FIGURES-SPEC: the page calls the core's isHeaderRow, and the core reads PriceGate.lineKey
+  vm.runInContext(read('js/quote-figures-core.js'), ctx, { filename: 'js/quote-figures-core.js' });
   vm.runInContext(PAGE, ctx, { filename: 'js/screens/quote-approval.js' });
   return ctx;
 }
@@ -718,10 +720,10 @@ describe('5c · who sees what, what each role can do, the banners, the thread, t
   const approved = { status: 'filed', approvalStatus: 'approved', approvedAt: { seconds: 1700000300 } };
   const returned = { status: 'needs_revision', approvalStatus: 'needs_revision', returnedAt: { seconds: 1700000300 }, presidentNotes: 'Make it two sinks' };
   const btns = (vm) => plain(vm.actions.buttons);
-  const barIds = (html) => [...html.matchAll(/<button type="button" class="[^"]*qa-btn" id="(qa-[a-z]+)"/g)].map((m) => m[1]);
+  const barIds = (html) => [...html.matchAll(/<button type="button" class="[^"]*qa-btn[^"]*" id="(qa-[a-z-]+)"/g)].map((m) => m[1]);
 
-  it('actions by state and role: the President on a pending quote has Approve, Return and Comment; on a decided one Comment only; the sender has Send reply (+ Revise in builder once it is returned); a manager has none', () => {
-    const P = view(quote()); assert.deepEqual(btns(P.vm), ['approve', 'return', 'comment']); assert.deepEqual(barIds(P.html), ['qa-approve', 'qa-return', 'qa-comment']);
+  it('actions by state and role: the President on a pending quote has Approve at my figures, Return with my figures, Approve, Return and Comment; on a decided one Comment only; the sender has Send reply (+ Revise in builder once it is returned); a manager has none', () => {
+    const P = view(quote()); assert.deepEqual(btns(P.vm), ['approve', 'approveFig', 'returnFig', 'return', 'comment']); assert.deepEqual(barIds(P.html), ['qa-approve-fig', 'qa-return-fig', 'qa-approve', 'qa-return', 'qa-comment']);   // QUOTE-PRESIDENT-FIGURES-SPEC 6.1: his two own-figures buttons lead the bar
     assert.ok(P.html.includes('class="btn-success qa-btn" id="qa-approve"') && P.html.includes('class="btn-primary qa-btn" id="qa-return"') && P.html.includes('class="btn-secondary qa-btn" id="qa-comment">Comment<'));
     assert.equal(P.vm.actions.placeholder, 'Comment, or what to change before it can be approved');
     for (const over of [approved, returned, { status: 'filed', approvalStatus: 'filed' }]) { const D = view(quote(over)); assert.deepEqual(btns(D.vm), ['comment'], JSON.stringify(over)); assert.deepEqual(barIds(D.html), ['qa-comment']); }
@@ -844,7 +846,7 @@ function makePage(opts) {
   const nodes = {};
   const datasetOf = (sel) => { const tag = (painted.match(new RegExp('<[^>]*id="' + sel.slice(1) + '"[^>]*>')) || [''])[0]; const d = {}; for (const m of tag.matchAll(/data-([a-z-]+)="([^"]*)"/g)) d[m[1].replace(/-([a-z])/g, (x, c) => c.toUpperCase())] = m[2].replace(/&amp;/g, '&'); return d; };
   const mkNode = (sel) => ({ sel, handlers: {}, value: '', textContent: '', dataset: datasetOf(sel), disabled: false, focus() { focused = sel; }, addEventListener(t, f) { this.handlers[t] = f; }, click() { return this.handlers.click && this.handlers.click({ currentTarget: this }); } });
-  const has = (sel) => (/^#[\w-]+$/.test(sel) ? painted.includes('id="' + sel.slice(1) + '"') : false);
+  const has = (sel) => (/^#[\w-]+$/.test(sel) ? painted.includes('id="' + sel.slice(1) + '"') : (sel === '.qa-page' ? painted.includes('class="qa-page"') : false));
   const thumbs = [];
   const page = {
     set innerHTML(v) { painted = String(v); for (const k of Object.keys(nodes)) delete nodes[k]; thumbs.length = 0; for (const m of painted.matchAll(/<button type="button" class="qa-thumb" data-set="([^"]*)" data-i="(\d+)"/g)) thumbs.push(Object.assign(mkNode('.qa-thumb'), { dataset: { set: m[1], i: m[2] } })); },
@@ -857,6 +859,10 @@ function makePage(opts) {
     classList: { add: (c) => cls.add(c), contains: (c) => cls.has(c) }, setAttribute(k, v) { el.attrs[k] = v; }, remove() { el.removed = true; }, addEventListener(t, f) { el.handlers[t] = f; },
     querySelector: (sel) => (kids[sel] = kids[sel] || mkEl()), set innerHTML(v) { el.html = v; }, get innerHTML() { return el.html || ''; } }; return el; };
   const threadBox = { innerHTML: '' };
+  // QUOTE-PRESIDENT-FIGURES-SPEC 2.2: the hidden engine frame the page creates inside #page-content, the messages it exchanges with it, the timers that bound its answers, and sessionStorage for the boxes
+  const frames = [], posted = [], msgHandlers = [], timers = [], audits = [], session = Object.assign({}, opts.session || {});
+  const mkFrame = () => { const f = { id: '', src: '', attrs: {}, isConnected: true, setAttribute(k, v) { f.attrs[k] = v; }, remove() { f.isConnected = false; }, contentWindow: { postMessage: (m, o) => posted.push({ m: plain(m), o }) } }; return f; };
+  page.appendChild = (n) => { frames.push(n); return n; };
   const win = {
     QUOTE_COLLECTIONS: ['bk_quotes', 'bs_quotes'], currentPage: 'quote-approval',
     renderEmptyState: (o) => `<div class="empty-state"><h4>${o.title}</h4>${o.hint ? `<p>${o.hint}</p>` : ''}${o.action ? `<button id="${o.action.id}">${o.action.label}</button>` : ''}</div>`,
@@ -867,15 +873,21 @@ function makePage(opts) {
     showQuoteApprovalLink: (i) => links.push(plain(i)), reopenQuoteFromDoc: (...a) => builderCalls.push(['reopen', ...a]), openQuoteInBuilderReview: (...a) => builderCalls.push(['review', a[0], a[1]]),
     quoteBuilderPageFor: (co) => (co === 'BS' ? 'bs-quote-builder' : 'bk-quote-builder'),
     Overlay: { push: (kind, teardown, el) => overlay.push({ kind, teardown, el }), dismissTop: () => { const o = overlay.pop(); if (o) o.teardown(); } },
+    APP_VERSION: '9.9.9', logAudit: (...a) => audits.push(plain(a)),
+    addEventListener: (t, f) => { if (t === 'message') msgHandlers.push(f); }, removeEventListener: (t, f) => { const i = msgHandlers.indexOf(f); if (i >= 0) msgHandlers.splice(i, 1); },
+    qbStateForDoc: async (coll, id, q) => (opts.noState ? null : Object.assign({}, q.editableState, { sourceDocId: id, sourceCollection: coll })),
+    location: { origin: ORIGIN },
   };
   const online = { v: opts.offline ? false : true };
   const ctx = vm.createContext({
     window: win, db: D.db, firebase: { firestore: { FieldValue: FV } }, console: { log() {}, warn() {}, error() {} }, URL, Date, Intl,
     currentUser: { uid: opts.uid || 'u-pres', email: 'x@example.test' }, currentRole: opts.role || 'president', userProfile: { displayName: opts.name || 'The President' },
-    navigateTo: (p, o) => navs.push([p, plain(o)]), lucide: undefined,
+    navigateTo: (p, o) => navs.push([p, plain(o)]), lucide: undefined, location: { origin: ORIGIN },
+    sessionStorage: { getItem: (k) => (k in session ? session[k] : null), setItem: (k, v) => { session[k] = String(v); }, removeItem: (k) => { delete session[k]; } },
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
     navigator: { get onLine() { return online.v; } },
     document: { getElementById: (id) => (id === 'page-content' ? page : id === 'qa-thread-list' ? threadBox : null), addEventListener: (t, f) => { docHandlers[t] = f; if (t === 'keydown') keyHandlers.push(f); }, removeEventListener: (t, f) => { const i = keyHandlers.indexOf(f); if (i >= 0) keyHandlers.splice(i, 1); }, visibilityState: 'visible',
-      createElement: () => mkEl(), body: { appendChild: (n) => bodyAppends.push(n) } },
+      createElement: (tag) => (tag === 'iframe' ? mkFrame() : mkEl()), body: { appendChild: (n) => bodyAppends.push(n) } },
     Notifs: { showToast: (m, t) => toasts.push({ m, t }), success: (m) => toasts.push({ m, t: 'success' }), error: (m) => toasts.push({ m, t: 'error' }),
       send: async (uid, n) => { D.ops.push('notify'); notifs.push({ kind: 'send', uid, n: plain(n) }); }, sendToOwner: async (n) => { D.ops.push('notify owner'); notifs.push({ kind: 'owner', n: plain(n) }); } },
   });
@@ -883,10 +895,11 @@ function makePage(opts) {
   vm.runInContext(ESC_SRC, ctx);
   win.escHtml = ctx.escHtml;
   vm.runInContext(read('js/forms-core.js'), ctx); vm.runInContext(read('js/qb-spec-sheet.js'), ctx);
+  vm.runInContext(read('js/price-gate-core.js'), ctx); vm.runInContext(read('js/quote-figures-core.js'), ctx);
   vm.runInContext(piece(SVC, /^window\.QuoteThread = \{[\s\S]*?\n\};/m, 'window.QuoteThread'), ctx);
   vm.runInContext(cfgPiece('quoteApprovalRefOf') + '\n' + cfgPiece('parseQuoteApprovalRef'), ctx);
   vm.runInContext(PAGE, ctx);
-  const api = Object.assign(D, { win, ctx, page, threadBox, decisions, toasts, notifs, confirms, navs, builderCalls, links, docHandlers, online, overlay, keyHandlers, bodyAppends, thumbs, node: (sel) => page.querySelector(sel),
+  const api = Object.assign(D, { frames, posted, msgHandlers, timers, audits, session, mkFrame, win, ctx, page, threadBox, decisions, toasts, notifs, confirms, navs, builderCalls, links, docHandlers, online, overlay, keyHandlers, bodyAppends, thumbs, node: (sel) => page.querySelector(sel),
     render: (ref) => win.renderQuoteApproval(ref === undefined ? 'bk.' + BK : ref) });
   Object.defineProperty(api, 'painted', { get: () => painted });     // live views (Object.assign would copy a getter's value once)
   Object.defineProperty(api, 'focused', { get: () => focused });
@@ -1078,6 +1091,307 @@ describe('6 · the page (renderQuoteApproval): what it reads, what it says when 
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §6 / §13.4 — the President's own prices on the review page: the pure model (5d) and the page against a stand-in engine frame (6b)
+// MUTATION LOG (2026-11-20, scratch copy of js/screens/quote-approval.js, this file run; each mutant KILLED by the test named):
+//   P1  figuresOn ignores a newer revision                                          -> "figuresOn is false ..."
+//   P2  Sales sees the Below cost sentence / the boxes                              -> "Sales' view model never contains ..."
+//   P3  plain Approve with a typed figure is accepted                               -> "plain Approve and Return with a price typed are refused ..."
+//   P4  the page accepts a message from any source                                  -> "messages from another source are ignored ..."
+//   P5  a stale seq is applied                                                      -> "a stale seq is dropped ..."
+//   P6  the P1 check is skipped                                                     -> "a P1 failure ..."
+//   P7  the P2 check is skipped                                                     -> "a P2 failure ..."
+//   P8  Approve at my figures sends no expectSig / the wrong money                  -> "Approve at my figures: ..."
+//   P9  the carry is offered without the engine being exact                          -> "Return with my figures: ..."
+//   P10 a line note goes into the markup unescaped                                   -> "every new string goes through esc ..."
+//   P11 a thread row's line name is unescaped                                         -> "every new string goes through esc ..."
+//   P12 a line over the 60-row cap is not refused                                     -> "more than 60 rows ..." (SURVIVED the first run; that test was added and the mutant is now KILLED)
+//   P13 Return with figures offers the carry when the "show me the re-send" tick is on -> "Return with my figures: ..."
+//   P14 the below-cost warning (a cost) reaches a viewer who is not the President     -> "Sales' view model never contains ..." / "... Below cost ..."
+const PS = '₱';   // the peso sign is built here, never written next to a digit in this file
+const approved = { status: 'filed', approvalStatus: 'approved', approvedAt: { seconds: 1700000300 } };
+const returned = { status: 'needs_revision', approvalStatus: 'needs_revision', returnedAt: { seconds: 1700000300 }, presidentNotes: 'Make it two sinks' };
+const btns = (vm) => plain(vm.actions.buttons);
+describe('5d · the President\'s figures: the pure model', () => {
+  const FQ = PAGE_CTX.window.QuoteFigures;
+  const sidecar = SIDECAR({ kcSummary: KCSUM() });
+  const rowsKey = (q, inputs) => { const vm = QA.viewModel(q, baseCtx({ figures: { inputs, engine: {} }, sidecar })).fig.rows; return QA.figKey(vm); };
+  const readyEngine = (q, inputs, payload, extra) => ({ phase: 'ready', reason: '', result: Object.assign({ key: rowsKey(q, inputs), payload, costSidecar: SIDECAR({ kcSummary: KCSUM({ net: 900 }) }), held: [] }, extra || {}) });
+  const fview = (q, inputs, engine, over) => { const vm = QA.viewModel(q, baseCtx(Object.assign({ figures: { inputs, engine: engine || {} }, sidecar }, over || {}))); return { vm, html: QA.html(vm, esc) }; };
+  const payloadAt = (q, to) => Object.assign({}, plain(q), { quoteNumber: q.quoteNumber, items: plain(q.items).map((it, i) => (i === 0 ? Object.assign(it, { unitPrice: to, amount: to * it.qty }) : it)), subtotal: 3000, discountAmount: 150, netAmount: 2850, vatAmount: 300, total: 2850, grandTotal: 2850, payment: { downPayment: 1425, balance: 1425 } });
+
+  it('the President gets a box on every priced line and a note box on a fee line; a section header and a viewer who is not the President get none', () => {
+    const q = quote({ items: [headerRow(), kcLine(), catLine(), customLine({ id: 'MISCFEE', name: 'Delivery' })] });
+    const { vm, html } = fview(q, {});
+    assert.equal(vm.figuresOn, true);
+    const lines = vm.groups.flatMap((g) => g.lines);
+    assert.deepEqual(plain(lines.map((L) => !!L.fig && L.fig.can)), [true, true, false], 'the header row is not a line; the fee line takes a note only');
+    assert.equal((html.match(/class="qa-fig-price"/g) || []).length, 2); assert.equal((html.match(/class="qa-fig-note"/g) || []).length, 3);
+    assert.ok(html.includes('Additional costs: return with a note.')); assert.ok(html.includes('Your price (per pc)'));
+    assert.match(html, /inputmode="decimal" autocomplete="off" data-i="1" placeholder="[^"]+"/, 'a numeric keyboard, no autofill; Sales\' price is the placeholder');
+  });
+  it('Sales\' view model never contains fig, a cost, the Below cost sentence or a box — the President\'s does', () => {
+    const inputs = { 0: { price: '500', note: 'too low?' } };
+    const S = fview(quote(), inputs, {}, { role: 'employee', uid: 'u-sales' });
+    assert.equal(S.vm.figuresOn, false); assert.equal(S.vm.fig, null); assert.equal(S.vm.figSummary, null); assert.equal(S.vm.cost, null);
+    assert.equal(S.vm.groups.every((g) => g.lines.every((L) => L.fig === null && L.cost === null)), true);
+    for (const word of ['Below cost', 'qa-fig-price', 'qa-fig-note', 'At your prices', 'Approve at my figures', 'qa-fig-seefirst']) assert.equal(S.html.includes(word), false, word);
+    const P = fview(quote(), inputs);
+    assert.equal(P.vm.figuresOn, true); assert.deepEqual(plain(P.vm.groups[0].lines[0].fig.warns), ['big-cut', 'below-cost']); assert.ok(P.html.includes('Below cost'));
+    assert.equal(P.vm.groups[0].lines[0].fig.amount, `2 × ${PS}500.00 = ${PS}1,000.00`);
+  });
+  it('figuresOn is false when the quote is not pending, when a newer revision exists, for a manager or a secretary, and when the thread is off (no immutable record)', () => {
+    const inputs = { 0: { price: '500' } };
+    for (const [q, c] of [[quote(approved), {}], [quote(returned), {}], [quote(), { newer: { ref: 'bk.' + NEW_ID, number: 'R2' } }], [quote(), { role: 'manager', uid: 'u-boss' }], [quote(), { role: 'secretary', uid: 'u-boss' }], [quote(), { commentsOff: true }], [quote(), { role: 'employee', uid: 'u-sales' }]]) {
+      const { vm, html } = fview(q, inputs, {}, c);
+      assert.equal(vm.figuresOn, false, JSON.stringify(c)); assert.equal(html.includes('qa-fig-price'), false);
+      assert.equal(btns(vm).some((b) => b === 'approveFig' || b === 'returnFig'), false);
+    }
+    assert.deepEqual(btns(fview(quote(), {}, {}, { newer: { ref: 'bk.x', number: 'R2' } }).vm), ['approve', 'return', 'comment'], 'a newer revision: today\'s bar');
+  });
+  it('the buttons: five for the President; both own-figures buttons disabled with "Type a price beside a line first." until a valid price is typed; a bad price disables both; Approve needs the engine to be exact, Return does not', () => {
+    const q = quote();
+    let r = fview(q, {}); assert.deepEqual(btns(r.vm), ['approve', 'approveFig', 'returnFig', 'return', 'comment']);
+    assert.deepEqual(plain(r.vm.actions.fig), { noFig: true, approveFig: { disabled: true, title: 'Type a price beside a line first.' }, returnFig: { disabled: true, title: 'Type a price beside a line first.' } });
+    assert.match(r.html, /class="qa-actionbar qa-actionbar-fig qa-nofig"/); assert.match(r.html, /id="qa-approve-fig" disabled title="Type a price beside a line first\."/);
+    r = fview(q, { 0: { price: '0' } }); assert.equal(r.vm.actions.fig.returnFig.disabled, true); assert.equal(r.vm.actions.fig.returnFig.title, 'Fix the price marked in red first.'); assert.ok(r.html.includes('Type a price above zero. To give a line free, return it with a note.'));
+    r = fview(q, { 0: { price: '1000' } }, { phase: 'unavailable', reason: 'mismatch' });
+    assert.equal(r.vm.figSummary.state, 'unavailable'); assert.equal(r.vm.actions.fig.approveFig.disabled, true); assert.equal(r.vm.actions.fig.approveFig.title, QA.NO_ENGINE_SENTENCE); assert.equal(r.vm.actions.fig.returnFig.disabled, false, 'Return stays available');
+    assert.ok(r.html.includes('Totals at your figures cannot be worked out for this quote here.'));
+    r = fview(q, { 0: { price: '1000' } }, { phase: 'loading' }); assert.equal(r.vm.figSummary.state, 'loading'); assert.equal(r.vm.actions.fig.approveFig.disabled, true); assert.ok(r.html.includes('Working out the totals at your prices'));
+    r = fview(q, { 0: { price: '1000' } }, readyEngine(q, { 0: { price: '1000' } }, payloadAt(q, 1000)));
+    assert.equal(r.vm.figSummary.state, 'exact'); assert.equal(r.vm.actions.fig.approveFig.disabled, false); assert.equal(r.vm.actions.fig.noFig, false); assert.equal(/ qa-nofig/.test(r.html), false);
+    const fresh = fview(Object.assign(quote(), { editableState: null }), { 0: { price: '1000' } }); assert.equal(fresh.vm.actions.fig.approveFig.disabled, true); assert.equal(fresh.vm.figSummary.reason, 'no-snapshot');
+    assert.equal(fresh.vm.actions.fig.approveFig.title, 'This quote was filed before the builder kept an editable copy.');
+  });
+  it('the live summary: before and after of subtotal, discount, net, VAT, grand total, down payment and balance, from the engine\'s payload against the stored quote; the cost card follows ("at your prices"), and says "at Sales\' prices" until it does', () => {
+    const q = quote(); const inputs = { 0: { price: '1000' } };
+    const e = readyEngine(q, inputs, payloadAt(q, 1000), { held: [2] });
+    const { vm, html } = fview(q, inputs, e);
+    const rows = plain(vm.figSummary.rows);
+    assert.deepEqual(rows.map((r) => r.label), ['Subtotal', 'Discount', 'Net', 'VAT', 'Grand total', 'Down payment', 'Balance']);
+    assert.deepEqual(rows.find((r) => r.label === 'Grand total'), { label: 'Grand total', key: 'total', before: `${PS}3,641.82`, after: `${PS}2,850.00`, changed: true });
+    assert.equal(vm.figSummary.held, 1); assert.ok(html.includes('1 other line is held at the price shown.'));
+    assert.equal(vm.cost.label, 'at your prices'); assert.ok(html.includes('Cost and margin <span class="qa-note">at your prices</span>'));
+    assert.equal(fview(q, inputs, { phase: 'loading' }).vm.cost.label, "at Sales' prices");
+    assert.equal(fview(q, {}).vm.cost.label, undefined, 'no figure typed: the card is today\'s');
+    const opts = quote({ optionsMode: true, optionsBasis: 'A', options: [{ key: 'A', label: 'Option A', itemCount: 2, total: 1000 }, { key: 'B', label: 'Option B', itemCount: 1, total: 500 }] });
+    const po = Object.assign(payloadAt(opts, 1000), { optionsBasis: 'A', options: [{ key: 'A', label: 'Option A', itemCount: 2, total: 900 }, { key: 'B', label: 'Option B', itemCount: 1, total: 500 }] });
+    const o = fview(opts, inputs, readyEngine(opts, inputs, po));
+    assert.deepEqual(plain(o.vm.figSummary.options.map((x) => [x.label, x.before, x.after, x.basis])), [['Option A', `${PS}1,000.00`, `${PS}900.00`, true], ['Option B', `${PS}500.00`, `${PS}500.00`, false]]);
+  });
+  it('every new string goes through esc: a script tag in a note, in a line name, in the President\'s name and in a thread row is printed as text', () => {
+    const q = quote({ items: [kcLine({ name: XSS }), catLine(), customLine()], presidentFigures: { v: 1, mode: 'return', byName: XSS, at: '2026-11-20T01:00:00.000Z', lines: [{ i: 0, name: XSS, from: 1, to: 2, note: XSS }], changed: 1 } });
+    const { html } = fview(q, { 0: { price: XSS, note: XSS }, 1: { price: '1', note: XSS } });
+    assert.equal(html.includes('<img src=x onerror=1>'), false, 'no raw tag anywhere'); assert.ok(html.includes('&lt;img src=x onerror=1&gt;'));
+    const th = QA.thread(quote(), [{ id: 'c', authorRole: 'president', authorName: XSS, kind: 'figures', quoteId: BK, text: XSS, lines: [{ i: 0, name: XSS, from: 1, to: 2, note: XSS }], createdAt: { seconds: 1700000200 } }], { id: BK, lineNo: { 0: 1 } });
+    const t = QA.threadHtml(th, esc); assert.equal(t.includes('<img'), false); assert.ok(t.includes('&lt;img'));
+    assert.equal(th.items[0].kind, 'Prices and notes'); assert.deepEqual(plain(th.items[0].rows), [{ no: '1', name: XSS, from: 1, to: 2, note: XSS }]);
+    assert.ok(t.includes('<ul class="qa-entry-rows">') && t.includes(`: ${PS}1.00 to ${PS}2.00`));
+    const other = QA.thread(quote(), [{ id: 'c', authorRole: 'president', kind: 'returned', quoteId: 'another-doc', text: '', lines: [{ i: 0, name: 'Sink', from: 1, to: 2, note: '' }], createdAt: { seconds: 1 } }], { id: BK, lineNo: { 0: 1 } });
+    assert.equal(other.items[0].rows[0].no, '', 'an entry of another revision prints no line number (its lines may have moved)');
+  });
+  it('his figures are shown beside each line on THIS doc to both sides: "President: X (Sales\' price Y) · note", a note-only line, and a chip on a line that is already at his price (held says so)', () => {
+    const pf = { v: 1, mode: 'return', by: 'u-pres', byName: 'The President', at: '2026-11-20T01:00:00.000Z', lines: [{ i: 0, name: 'Chef Mode stove', from: 1234.5, to: 1000, note: 'a lower price' }, { i: 1, name: 'Work table', from: 421.75, to: null, note: 'check the top' }], changed: 1 };
+    const q = quote({ presidentFigures: pf, items: [kcLine(), catLine(), customLine({ priceBy: { role: 'president', name: 'The President', at: '2026-11-20T01:00:00.000Z', salesPrice: 90 } })] });
+    for (const view_ of [fview(q, {}, {}, { role: 'employee', uid: 'u-sales' }), fview(q, {}, {})]) {
+      assert.ok(view_.html.includes(`President: ${PS}1,000.00 (Sales' price ${PS}1,234.50) · "a lower price"`), 'a price and a note'); assert.ok(view_.html.includes(`President's note: "check the top"`));
+      assert.ok(view_.html.includes('class="qa-chip qa-chip-pres" title="Sales&#39; price was ') && view_.html.includes('President&#39;s price</span>'));
+    }
+    const held = quote({ items: [customLine({ priceBy: { role: 'president', held: true, salesPrice: 1 } })] });
+    assert.ok(fview(held, {}).html.includes('Price held')); assert.equal(fview(held, {}).html.includes('Price typed by hand'), false, 'a President\'s price is not "typed by hand"');
+    const wrongName = quote({ presidentFigures: Object.assign({}, pf, { lines: [{ i: 0, name: 'A different line', from: 1, to: 2, note: '' }] }) });
+    assert.equal(fview(wrongName, {}).html.includes('President:'), false, 'a row whose name no longer matches its line is not shown on it');
+  });
+  it('more than 60 rows: the 61st figure or note is refused in its own box with the sentence, only 60 rows are stored, and both own-figures buttons wait until he clears one', () => {
+    const items = Array.from({ length: 61 }, (_, k) => catLine({ name: 'Line ' + k, qty: 1, unitPrice: 100 + k, amount: 100 + k }));
+    const q = quote({ items }); const inputs = {}; items.forEach((_, k) => { inputs[k] = { price: '', note: 'note ' + k }; });
+    const { vm, html } = fview(q, inputs);
+    assert.equal(vm.fig.rows.length, 60); assert.equal(vm.fig.anyError, true);
+    const L = vm.groups.flatMap((g) => g.lines);
+    assert.equal(L[59].fig.error, ''); assert.equal(L[60].fig.error, 'Too many lines for one decision. Return it with a note.'); assert.equal(L[60].fig.over, true);
+    assert.ok(html.includes('Too many lines for one decision. Return it with a note.'));
+    inputs[60].note = ''; assert.equal(fview(q, inputs).vm.fig.anyError, false, 'clearing the 61st lets it through');
+  });
+  it('the three banners: approved at his prices, filed under his prices, returned with his prices (and the old ones are untouched)', () => {
+    const pf = (mode, extra) => Object.assign({ v: 1, mode, by: 'u-pres', byName: 'The President', at: '2026-11-20T01:00:00.000Z', lines: [{ i: 0, name: 'Chef Mode stove', from: 1, to: 2, note: '' }], changed: 1 }, extra || {});
+    const text = (q, c) => view(q, c).vm.banners.filter((b) => b.kind === 'state').map((b) => b.text);
+    assert.match(text(quote(Object.assign({}, approved, { presidentFigures: pf('approve') })))[0], /^Approved by the President on .+ at his own prices on 1 line\.$/);
+    assert.match(text(quote(Object.assign({}, approved, { approvalCarriedKind: 'figures', approvalCarriedFrom: 'qd1', approvalCarriedOn: '2026-11-20T01:00:00.000Z' })))[0], /^Filed under the prices the President set on Nov 20, 2026\.$/);
+    assert.match(text(quote(Object.assign({}, returned, { returnedAt: { seconds: 1700000500 }, presidentFigures: pf('return') })))[0], /^Returned on .+ with the President's prices on 1 line\. Waiting for Sales to apply them and re-send\.$/);
+    assert.match(text(quote(Object.assign({}, returned, { returnedAt: { seconds: 1700000500 } })))[0], /^Returned on .+\. Waiting for Sales to revise\.$/);
+    assert.match(text(quote(approved))[0], /^Approved by the President( on .+)?\.$/);
+  });
+  it('the submitter\'s button on a returned doc: Apply President\'s figures when it carries at least one price and an editable copy; else Revise; nothing without a copy', () => {
+    const pf = { v: 1, mode: 'return', lines: [{ i: 0, name: 'Chef Mode stove', from: 1, to: 2, note: '' }], changed: 1 };
+    const S = (over) => view(quote(Object.assign({}, returned, over)), { role: 'employee', uid: 'u-sales' });
+    assert.deepEqual(btns(S({ presidentFigures: pf }).vm), ['comment', 'applyFig']); assert.ok(S({ presidentFigures: pf }).html.includes('id="qa-apply-fig">Apply President\'s figures<'));
+    assert.deepEqual(btns(S({ presidentFigures: Object.assign({}, pf, { lines: [{ i: 0, name: 'x', from: 1, to: null, note: 'only a note' }] }) }).vm), ['comment', 'revise']);
+    assert.deepEqual(btns(S({ presidentFigures: pf, editableState: null }).vm), ['comment']); assert.deepEqual(btns(S({}).vm), ['comment', 'revise']);
+    assert.deepEqual(btns(view(quote(Object.assign({}, returned, { presidentFigures: pf })), {}).vm), ['comment'], 'the President has no Apply button');
+  });
+});
+
+describe('6b · the President\'s figures on the page: the hidden engine frame, the proofs, and what each button sends', () => {
+  const FQ = PAGE_CTX.window.QuoteFigures;
+  const rootOf = (P) => P.node('.qa-page');
+  const box = (cls, i, value) => ({ dataset: { i: String(i) }, value, classList: { contains: (c) => c === cls }, matches: (sel) => sel.split(',').some((x) => x.trim() === '.' + cls), focus() {} });
+  const price = (i, v) => box('qa-fig-price', i, v), note = (i, v) => box('qa-fig-note', i, v);
+  const type = (P, i, v) => rootOf(P).handlers.input({ target: price(i, v) });
+  const typeNote = (P, i, v) => rootOf(P).handlers.input({ target: note(i, v) });
+  const focus = (P, i) => rootOf(P).handlers.focusin({ target: price(i, '') });
+  const q0 = () => quote();
+  const baseOf = () => FQ.summary(q0());
+  const unitsOf = () => q0().items.map((it) => it.unitPrice);
+  const payloadAt = (to) => Object.assign({}, plain(q0()), { items: plain(q0().items).map((it, i) => (i === 0 ? Object.assign(it, { unitPrice: to, amount: to * it.qty }) : it)), subtotal: 3000, discountAmount: 150, netAmount: 2850, vatAmount: 300, total: 2850, grandTotal: 2850, payment: { downPayment: 1425, balance: 1425 } });
+  const fromFrame = (P, data, src) => P.msgHandlers[0]({ origin: ORIGIN, source: src === undefined ? P.frames[0].contentWindow : src, data });
+  const ready = async (P, over) => { focus(P, 0); await fromFrame(P, { type: 'QB_READY' }); await fromFrame(P, Object.assign({ type: 'ENGINE_READY', base: baseOf(), units: unitsOf(), kc: true, kcState: 'live' }, over || {})); };
+  const sentApply = (P) => P.posted.filter((x) => x.m.type === 'APPLY_FIGURES');
+  const flushTimers = (P, ms) => P.timers.filter((t) => t.fn && t.ms === ms).forEach((t) => { const f = t.fn; t.fn = null; f(); });
+  const settle = () => new Promise((r) => setImmediate(r));
+
+  it('the engine frame is created LAZILY on the first focus of a price box, once, hidden (aria, no tab stop), with the engine URL; a quote he only reads never loads the builder', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render();
+    assert.equal(P.frames.length, 0, 'nothing on a plain read');
+    focus(P, 0); focus(P, 1);
+    assert.equal(P.frames.length, 1); const f = P.frames[0];
+    assert.equal(f.id, 'qa-engine'); assert.equal(f.attrs['aria-hidden'], 'true'); assert.equal(f.attrs.tabindex, '-1'); assert.equal(f.src, 'quote-builder-v2.html?v=9.9.9&engine=1&reopen=1');
+    const S = makePage({ docs: pageDocs(), role: 'employee', uid: 'u-sales' }); await S.render(); assert.equal(S.node('.qa-page').handlers.focusin !== undefined, true); focus(S, 0); assert.equal(S.frames.length, 0, 'Sales has no boxes: the focus handler does nothing');
+  });
+  it('the protocol: QB_READY -> LOAD_QUOTE (the prepared state, not a revision); ENGINE_READY and P1 pass -> APPLY_FIGURES with the valid figures, a seq, who and when; the result paints "At your prices"', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render();
+    type(P, 0, '1000'); assert.equal(P.session['qaFig:bk.' + BK].includes('"price":"1000"'), true, 'kept in sessionStorage');
+    await ready(P);
+    const load = P.posted.find((x) => x.m.type === 'LOAD_QUOTE'); assert.ok(load); assert.equal(load.o, ORIGIN); assert.equal(load.m.payload.asRevision, false); assert.equal(load.m.payload.editableState.sourceDocId, BK);
+    const ap = sentApply(P); assert.equal(ap.length, 1); assert.equal(ap[0].o, ORIGIN);
+    assert.deepEqual(plain({ seq: ap[0].m.seq, figures: ap[0].m.figures, by: ap[0].m.by }), { seq: 1, figures: [{ i: 0, to: 1000 }], by: { uid: 'u-pres', name: 'The President' } }); assert.match(ap[0].m.at, /^\d{4}-\d\d-\d\dT/);
+    await fromFrame(P, { type: 'FIGURES_RESULT', seq: 1, ok: true, payload: payloadAt(1000), costSidecar: { v: 1, items: [] }, held: [], applied: [0], summary: FQ.summary(payloadAt(1000)) });
+    const host = P.node('#qa-figsum-host').innerHTML; assert.ok(host.includes('At your prices') && host.includes('Grand total') && host.includes(`${PS}2,850.00`));
+  });
+  it('messages from another source (or another origin) are ignored, and a stale seq is dropped: only the latest request\'s answer is used', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render();
+    type(P, 0, '1000'); focus(P, 0);
+    await fromFrame(P, { type: 'ENGINE_READY', base: baseOf(), units: unitsOf() }, {});                       // another source
+    await P.msgHandlers[0]({ origin: 'https://evil.test', source: P.frames[0].contentWindow, data: { type: 'ENGINE_READY', base: baseOf(), units: unitsOf() } });   // another origin
+    assert.equal(sentApply(P).length, 0, 'the engine is not ready: nothing was believed');
+    await fromFrame(P, { type: 'QB_READY' }); await fromFrame(P, { type: 'ENGINE_READY', base: baseOf(), units: unitsOf() });
+    assert.equal(sentApply(P).length, 1);
+    type(P, 0, '900'); flushTimers(P, 400); assert.equal(sentApply(P).length, 2); assert.equal(sentApply(P)[1].m.seq, 2);
+    await fromFrame(P, { type: 'FIGURES_RESULT', seq: 1, ok: true, payload: payloadAt(1000), costSidecar: null, held: [] });
+    assert.equal(P.node('#qa-figsum-host').innerHTML.includes(`${PS}2,850.00`), false, 'the answer for the OLD figure is dropped');
+    await fromFrame(P, { type: 'FIGURES_RESULT', seq: 2, ok: true, payload: payloadAt(900), costSidecar: null, held: [] });
+    assert.ok(P.node('#qa-figsum-host').innerHTML.includes('Grand total'));
+  });
+  it('a P1 failure (the builder did not reproduce the stored totals) makes the engine unavailable: the sentence, Approve off, the audit line, the frame removed — and a P2 failure (a line moved, a figure missing) does the same', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render(); type(P, 0, '1000');
+    await ready(P, { base: Object.assign({}, baseOf(), { total: baseOf().total + 0.01 }) });
+    assert.ok(P.node('#qa-figsum-host').innerHTML.includes('Totals at your figures cannot be worked out for this quote here.')); assert.equal(sentApply(P).length, 0);
+    assert.equal(P.frames[0].isConnected, false, 'the frame is gone'); assert.deepEqual(P.audits.map((a) => a[3].figuresEngine.split(':')[0]), ['mismatch']);
+    const Q = makePage({ docs: pageDocs() }); await Q.render(); type(Q, 0, '1000'); await ready(Q);
+    const moved = payloadAt(1000); moved.items[1].unitPrice += 1;
+    await fromFrame(Q, { type: 'FIGURES_RESULT', seq: 1, ok: true, payload: moved, costSidecar: null, held: [] });
+    assert.ok(Q.node('#qa-figsum-host').innerHTML.includes('cannot be worked out')); assert.ok(Q.audits[0][3].figuresEngine.startsWith('mismatch:P2 moved:1'), Q.audits[0][3].figuresEngine);
+    const R = makePage({ docs: pageDocs() }); await R.render(); type(R, 0, '1000'); await ready(R);
+    await fromFrame(R, { type: 'FIGURES_RESULT', seq: 1, ok: false, error: 'unstable' }); assert.equal(R.audits[0][3].figuresEngine.split(':')[0], 'unstable');
+  });
+  it('a timeout (the frame never says ENGINE_READY, or never answers an APPLY_FIGURES) makes the engine unavailable; a quote with no editable copy never creates a frame', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render(); type(P, 0, '1000'); focus(P, 0);
+    flushTimers(P, 15000); assert.ok(P.node('#qa-figsum-host').innerHTML.includes('cannot be worked out')); assert.equal(P.audits[0][3].figuresEngine.split(':')[0], 'timeout');
+    const Q = makePage({ docs: pageDocs() }); await Q.render(); type(Q, 0, '1000'); await ready(Q); flushTimers(Q, 5000);
+    assert.ok(Q.node('#qa-figsum-host').innerHTML.includes('cannot be worked out')); assert.equal(Q.audits[0][3].figuresEngine, 'timeout:apply');
+    const N = makePage({ docs: pageDocs({ editableState: null }) }); await N.render(); type(N, 0, '1000'); focus(N, 0);
+    assert.equal(N.frames.length, 0); assert.ok(N.node('#qa-figsum-host').innerHTML.includes('cannot be worked out'));
+  });
+  it('plain Approve and Return with a price typed are refused with the inline sentence and call nothing (no confirm, no decision); line notes alone ride along; none = today\'s call byte for byte', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render(); type(P, 0, '1000');
+    await P.node('#qa-approve').click(); assert.equal(P.node('#qa-err').textContent, 'You typed prices. Use Approve at my figures or Return with my figures, or clear them.');
+    P.node('#qa-text').value = 'x'; await P.node('#qa-return').click();
+    assert.deepEqual(P.decisions, []); assert.deepEqual(P.confirms, []);
+    const N = makePage({ docs: pageDocs() }); await N.render(); typeNote(N, 1, 'check the top');
+    await N.node('#qa-approve').click();
+    assert.equal(N.decisions.length, 1); const d = N.decisions[0];
+    assert.deepEqual(Object.keys(d).sort(), ['action', 'agentId', 'clientName', 'coll', 'figures', 'notes', 'quoteId', 'quoteNumber']);
+    assert.equal(d.figures.mode, 'approve'); assert.equal(d.figures.changed, 0); assert.equal(d.figures.carry, false); assert.deepEqual(d.figures.lines.map((r) => [r.i, r.to, r.note]), [[1, null, 'check the top']]);
+    const R = makePage({ docs: pageDocs() }); await R.render(); typeNote(R, 1, 'redo the top');
+    await R.node('#qa-return').click();   // the bottom box is empty: the line note IS the instruction
+    assert.equal(R.decisions.length, 1); assert.equal(R.decisions[0].figures.mode, 'return'); assert.equal(R.decisions[0].notes, '');
+    const T = makePage({ docs: pageDocs() }); await T.render(); await T.node('#qa-approve').click();
+    assert.deepEqual(T.decisions, [{ coll: 'bk_quotes', quoteId: BK, agentId: 'u-sales', quoteNumber: 'BKZZTEST261120-007R1', clientName: 'Mira Santos', action: 'approve', notes: '' }], 'no figures key at all');
+  });
+  it('Comment: text and/or line notes; with line notes the entry is kind figures with rows whose to is null (a typed price is NOT sent and stays); both empty -> "Write a comment first."; the notified count never carries the note', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render();
+    await P.node('#qa-comment').click(); assert.equal(P.node('#qa-err').textContent, 'Write a comment first.');
+    type(P, 0, '1000'); typeNote(P, 0, 'is this right?'); typeNote(P, 2, 'colour?');
+    await P.node('#qa-comment').click();
+    assert.equal(P.adds.length, 1); const e = P.adds[0].data;
+    assert.equal(e.kind, 'figures'); assert.equal(e.text, ''); assert.deepEqual(plain(e.lines.map((r) => [r.i, r.to, r.note])), [[0, null, 'is this right?'], [2, null, 'colour?']], 'the typed price is not part of the comment');
+    assert.equal(e.lines[0].from, 1234.5); assert.equal(P.session['qaFig:bk.' + BK].includes('"price":"1000"'), true, 'the price stays in its box');
+    const n = P.notifs.find((x) => x.kind === 'send'); assert.equal(n.n.title, '💬 The President left notes on your quote'); assert.equal(n.n.body, '"BKZZTEST261120-007R1" for Mira Santos: notes on 2 lines.'); assert.equal(n.n.type, 'quote_comment');
+    const T = makePage({ docs: pageDocs() }); await T.render(); typeNote(T, 0, 'x'); T.node('#qa-text').value = 'general words';
+    await T.node('#qa-comment').click(); assert.equal(T.notifs.find((x) => x.kind === 'send').n.body, '"BKZZTEST261120-007R1" for Mira Santos: notes on 1 line. general words');
+    const C = makePage({ docs: pageDocs() }); await C.render(); C.node('#qa-text').value = 'plain'; await C.node('#qa-comment').click();
+    assert.equal(C.adds[0].data.kind, 'comment'); assert.equal('lines' in C.adds[0].data, false);
+  });
+  it('Approve at my figures: needs an exact engine; the confirm names the lines and the totals; ONE decision carries the builder\'s money fields, the rows, both totals, expectSig of the stored quote and the cost record', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render(); type(P, 0, '1000');
+    P.timers.filter((t) => t.ms === 400).forEach((t) => { t.fn = null; });
+    const clickP = P.node('#qa-approve-fig').click();   // the decision WAITS for the engine: the frame boots, proves P1, applies the figure, answers
+    await settle();
+    assert.deepEqual(P.decisions, [], 'the engine has not answered yet: nothing is decided'); assert.deepEqual(P.confirms, []);
+    await fromFrame(P, { type: 'QB_READY' }); await fromFrame(P, { type: 'ENGINE_READY', base: baseOf(), units: unitsOf() });
+    await fromFrame(P, { type: 'FIGURES_RESULT', seq: sentApply(P).slice(-1)[0].m.seq, ok: true, payload: payloadAt(1000), costSidecar: { v: 1, items: [{ i: 0, n: 'x' }], kcSummary: { v: 1, net: 2850 } }, held: [2], applied: [0] });
+    await clickP;
+    assert.equal(P.confirms.length, 1); assert.equal(P.confirms[0], `Approve BKZZTEST261120-007R1 for Mira Santos at your prices? 1 line change. Grand total ${PS}3,641.82 becomes ${PS}2,850.00. Down payment ${PS}1,820.91 becomes ${PS}1,425.00. Discount ${PS}191.68 becomes ${PS}150.00. 1 other line is held at the prices shown.`);
+    assert.equal(P.decisions.length, 1); const d = P.decisions[0];
+    assert.equal(d.action, 'approve'); assert.equal(d.expectSig, FQ.sig(q0())); assert.deepEqual(d.costSidecar, { v: 1, items: [{ i: 0, n: 'x' }], kcSummary: { v: 1, net: 2850 } });
+    for (const k of ['items', 'subtotal', 'total', 'grandTotal', 'netAmount', 'vatAmount', 'discountAmount', 'payment', 'editableState', 'editedByPresident', 'editedAt', 'editedBy']) assert.ok(k in d.edits, k);
+    assert.equal(d.edits.total, 2850); assert.equal(d.edits.editedBy, 'u-pres'); assert.equal('clientName' in d.edits, false);
+    assert.equal(d.figures.mode, 'approve'); assert.equal(d.figures.exact, true); assert.equal(d.figures.carry, false); assert.equal(d.figures.changed, 1); assert.deepEqual(d.figures.held, [2]);
+    assert.deepEqual(d.figures.totals, { before: { subtotal: 3833.5, netAmount: 3641.82, total: 3641.82 }, after: { subtotal: 3000, netAmount: 2850, total: 2850 } }); assert.deepEqual(d.figures.lines.map((r) => [r.i, r.from, r.to]), [[0, 1234.5, 1000]]);
+  });
+  it('Return with my figures: the bottom box may be empty; carry is true only when the engine is exact AND the "Show me the re-send" tick is off; the confirm says which; not exact -> comes back to him', async () => {
+    const P = makePage({ docs: pageDocs() }); await P.render(); type(P, 0, '1000');
+    P.timers.filter((t) => t.ms === 400).forEach((t) => { t.fn = null; });
+    const p1 = P.node('#qa-return-fig').click(); await settle(); await fromFrame(P, { type: 'QB_READY' }); await fromFrame(P, { type: 'ENGINE_READY', base: baseOf(), units: unitsOf() });
+    await fromFrame(P, { type: 'FIGURES_RESULT', seq: sentApply(P).slice(-1)[0].m.seq, ok: true, payload: payloadAt(1000), costSidecar: null, held: [] }); await p1;
+    assert.equal(P.confirms[0], 'Return BKZZTEST261120-007R1 with your prices on 1 line? Sales applies them and re-sends. A re-send at or above your prices is filed without coming back to you.');
+    let d = P.decisions[0]; assert.equal(d.action, 'return'); assert.equal(d.notes, ''); assert.equal(d.expectSig, FQ.sig(q0())); assert.equal('edits' in d, false, 'a return never changes the quote\'s prices');
+    assert.deepEqual(plain({ mode: d.figures.mode, exact: d.figures.exact, carry: d.figures.carry, changed: d.figures.changed }), { mode: 'return', exact: true, carry: true, changed: 1 });
+    assert.deepEqual(d.figures.totals.after, { subtotal: 3000, netAmount: 2850, total: 2850 });
+    const T = makePage({ docs: pageDocs() }); await T.render(); type(T, 0, '1000');
+    T.node('#qa-fig-seefirst').checked = true; T.timers.filter((t) => t.ms === 400).forEach((t) => { t.fn = null; });
+    const p2 = T.node('#qa-return-fig').click(); await settle(); await fromFrame(T, { type: 'QB_READY' }); await fromFrame(T, { type: 'ENGINE_READY', base: baseOf(), units: unitsOf() });
+    await fromFrame(T, { type: 'FIGURES_RESULT', seq: sentApply(T).slice(-1)[0].m.seq, ok: true, payload: payloadAt(1000), costSidecar: null, held: [] }); await p2;
+    assert.ok(T.confirms[0].endsWith('The re-send will come back to you for approval.')); d = T.decisions[0]; assert.equal(d.figures.carry, false); assert.equal(d.figures.exact, true);
+    const U = makePage({ docs: pageDocs() }); await U.render(); type(U, 0, '1000'); await ready(U, { base: Object.assign({}, baseOf(), { total: 1 }) });   // P1 fails: not exact
+    await U.node('#qa-return-fig').click();
+    assert.ok(U.confirms[0].endsWith('The re-send will come back to you for approval.')); d = U.decisions[0]; assert.equal(d.figures.exact, false); assert.equal(d.figures.carry, false); assert.equal(d.figures.totals, null);
+    assert.equal(U.decisions.length, 1);
+  });
+  it('a decision refused because the quote CHANGED (P3) reloads the page; a decision taken clears the saved boxes; the boxes come back from the session only for lines whose name and quantity still match', async () => {
+    const P = makePage({ docs: pageDocs(), decide: { ok: false, reason: 'changed' } }); await P.render(); type(P, 0, '1000');
+    const reads = P.ops.filter((o) => o === 'get bk_quotes/' + BK).length;
+    P.timers.filter((t) => t.ms === 400).forEach((t) => { t.fn = null; });
+    const clicked = P.node('#qa-return-fig').click(); await settle(); await fromFrame(P, { type: 'QB_READY' }); await fromFrame(P, { type: 'ENGINE_READY', base: baseOf(), units: unitsOf() });
+    await fromFrame(P, { type: 'FIGURES_RESULT', seq: sentApply(P).slice(-1)[0].m.seq, ok: true, payload: payloadAt(1000), costSidecar: null, held: [] }); await clicked; await settle();
+    assert.equal(P.ops.filter((o) => o === 'get bk_quotes/' + BK).length, reads + 1, 'reloaded'); assert.ok(P.session['qaFig:bk.' + BK], 'the boxes are kept for the reload');
+    const stored = JSON.stringify({ 0: { price: '1000', note: '', n: 'Chef Mode stove', q: 2 }, 1: { price: '5', note: '', n: 'Work table', q: 99 }, 2: { price: '7', note: '', n: 'Renamed', q: 1 } });
+    const R = makePage({ docs: pageDocs(), session: { ['qaFig:bk.' + BK]: stored } }); await R.render();
+    assert.ok(R.painted.includes('value="1000"')); assert.equal(R.painted.includes('value="5"') || R.painted.includes('value="7"'), false, 'a figure on a line whose name or quantity changed is dropped');
+    assert.equal(R.frames.length, 1, 'restored prices work the totals out again');
+    const D = makePage({ docs: pageDocs(), session: { ['qaFig:bk.' + BK]: stored } }); await D.render(); D.node('#qa-text').value = 'go'; await D.node('#qa-comment').click();
+    const OK = makePage({ docs: pageDocs(), session: { ['qaFig:bk.' + BK]: JSON.stringify({ 1: { price: '', note: 'n', n: 'Work table', q: 3 } }) } }); await OK.render(); OK.node('#qa-text').value = ''; await OK.node('#qa-return').click(); await settle();
+    assert.equal(OK.decisions.length, 1);
+    assert.equal(OK.session['qaFig:bk.' + BK], undefined, 'a taken decision clears the saved boxes');
+  });
+  it('Apply President\'s figures (the submitter): the builder opens on the returned quote with the one-shot auto-apply flag set', async () => {
+    const pf = { v: 1, mode: 'return', lines: [{ i: 0, name: 'Chef Mode stove', qty: 2, from: 1, to: 2, note: '' }], changed: 1 };
+    const P = makePage({ docs: pageDocs(Object.assign({}, returned, { presidentFigures: pf })), role: 'employee', uid: 'u-sales' }); await P.render();
+    await P.node('#qa-apply-fig').click();
+    assert.deepEqual(plain(P.builderCalls), [['reopen', 'bk_quotes', BK, 'bk-quote-builder']]); assert.equal(P.win._qbFiguresAutoApply, true);
+  });
+});
+
 describe('7 · the Quotes list, the Approvals screen, the notifications, the builder host', () => {
   const salesCtx = () => {
     const win = {}; const navs = [], links = [];
@@ -1215,7 +1529,7 @@ describe('7 · the Quotes list, the Approvals screen, the notifications, the bui
     const store = new Map(); const win = { QUOTE_COLLECTIONS: ['bk_quotes', 'bs_quotes'], _qbReturnNote: 'stale' }; const navs = [];
     const ctx = vm.createContext({ window: win, db: { collection: (c) => ({ doc: (id) => ({ get: async () => ({ exists: store.has(c + '/' + id), data: () => store.get(c + '/' + id) }) }) }) }, console, Date,
       Notifs: { showToast() {} }, navigateTo: (p) => navs.push(p), graftQuoteCosts: async () => {} });
-    vm.runInContext(cfgPiece('quoteApprovalRefOf') + '\n' + appWin('reopenQuoteFromDoc'), ctx);
+    vm.runInContext(cfgPiece('quoteApprovalRefOf') + '\n' + appWin('qbStateForDoc') + '\n' + appWin('reopenQuoteFromDoc'), ctx);
     const docOf = (over) => Object.assign({ editableState: { quoteNo: 'N' }, quoteNumber: 'N', status: 'needs_revision', approvalStatus: 'needs_revision', presidentNotes: 'Two sinks' }, over || {});
     store.set('bk_quotes/' + BK, docOf());
     await win.reopenQuoteFromDoc('bk_quotes', BK, 'bk-quote-builder');
@@ -1257,7 +1571,7 @@ describe('8 · static pins', () => {
     assert.equal(/\)\.add\(/.test(src), false, 'no direct add on a collection: the thread goes through QuoteThread.add');
     assert.equal((src.match(/QuoteThread\.add\(/g) || []).length, 1, 'the one comment write');
     assert.equal(/\bon(click|error|load)\s*=|javascript:|innerHTML\s*\+=/.test(src.replace(/safeImg[\s\S]*?\n  \}/, '')), false, 'no inline handler and no string-built handler');
-    assert.equal(/localStorage|sessionStorage|eval\(|new Function/.test(src), false);
+    assert.equal(/localStorage|eval\(|new Function/.test(src), false);   // sessionStorage is allowed since QUOTE-PRESIDENT-FIGURES-SPEC 6.3: the figures boxes survive a reload there (try / catch)
     assert.equal(/emojiIcon\(/.test(src), false, 'plain text in every toast and notification (CHECK 5)');
   });
   it('the cost words appear in the page file only inside the President\'s cost model and its markup — never in the shared line, header, totals, terms or thread builders', () => {
@@ -1269,9 +1583,9 @@ describe('8 · static pins', () => {
       assert.ok(n <= 3, `"${w}" appears ${n} times outside the cost block`);
     }
     // the only places the markup prints a cost: the line card (from line.cost) and the cost section (from vm.cost): both guarded by the model that is null for everyone else
-    assert.match(src, /cost: isApprover \? costModel\(q, sc, lines\.map\(\(\{ L \}\) => L\)\) : null,/);
+    assert.match(src, /cost: isApprover \? costAt\(q, sc, lines\.map\(\(\{ L \}\) => L\), fig, isObj\(figIn\.engine\) \? figIn\.engine : \{\}\) : null,/);
     assert.match(src, /const sc = \(isApprover && isObj\(ctx\.sidecar\)\) \? ctx\.sidecar : null;/);
-    assert.match(src, /if \(vm\.cost\) \{\s*out\.push\('<section class="qa-card qa-cost">/);
+    assert.match(src, /function costHtml\(vm, e\) \{\s*if \(!vm\.cost\) return '';\s*return '<section class="qa-card qa-cost">/);
     assert.match(src, /\(L\.cost \? \(L\.cost\.none/);
   });
   it('the thread, link and decision writes are the only new writes: the bridge writes approvalWhy and the thread entry in the approval branch alone', () => {
@@ -1312,6 +1626,19 @@ describe('8 · static pins', () => {
   it('no peso amount is written into a tracked source file of this feature (fixtures excepted): the page and the list helpers format at run time', () => {
     for (const [name, src] of [['js/screens/quote-approval.js', PAGE], ['js/svc-approvals.js QuoteThread', SVC.slice(SVC.indexOf('window.QuoteThread'))]]) {
       assert.equal(/₱\s*\d/.test(code(src)), false, name);
+    }
+  });
+});
+
+describe('9 · the Cost and margin grid keeps labels and values in their columns (owner preview 2026-11-20)', () => {
+  it('a full-width note or warning row carries no empty <dd>, so the rows after it stay label | value', () => {
+    for (const ks of [KCSUM({ costKnown: false }), KCSUM({ net: 800, standardTotal: 900 })]) {
+      const { html } = view(quote(), { sidecar: SIDECAR({ kcSummary: ks }) });
+      const kv = (html.match(/<section class="qa-card qa-cost">[\s\S]*?<\/section>/) || [''])[0];
+      assert.ok(/qa-(note|bad)/.test(kv), 'the case has a full-width row');
+      assert.equal(/<dt class="qa-(note|bad)">[^<]*<\/dt><dd><\/dd>/.test(kv), false, 'no empty value cell after a full-width row');
+      const dts = (kv.match(/<dt class="">/g) || []).length, dds = (kv.match(/<dd>/g) || []).length;
+      assert.equal(dds, dts, 'every ordinary label has exactly one value');
     }
   });
 });
