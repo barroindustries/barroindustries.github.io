@@ -50,7 +50,8 @@ describe('the title guard', () => {
   it('every registered form title passes the guard, and the four Phase 1 titles are the spec\'s', () => {
     assert.ok(FC.list().length >= 4);
     for (const e of FC.list()) { assert.equal(FC.assertTitleAllowed(e.title), true, e.title); assert.ok(!BANNED.test(e.title), e.title); }
-    assert.deepEqual(FC.list().map((e) => e.title).sort(), ['HANDOFF PACK', 'JOB ORDER', 'PAYMENT ACKNOWLEDGEMENT', 'SALES ORDER']);
+    const phase1 = ['HANDOFF PACK', 'JOB ORDER', 'PAYMENT ACKNOWLEDGEMENT', 'SALES ORDER'];   // later work packages add entries (4B: the five Operations forms)
+    assert.deepEqual(FC.list().map((e) => e.title).filter((t) => phase1.includes(t)).sort(), phase1);
   });
 
   it('a form TITLED "Official Receipt" or "Sales Invoice" is refused at registration — any case, any spacing, any position — and registers nothing', () => {

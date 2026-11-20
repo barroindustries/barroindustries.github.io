@@ -182,9 +182,9 @@ describe('2. header, companies, logo', () => {
 describe('3. the peso wall (§9.7)', () => {
   const { project } = fixtures();
   it('the four Phase 1 entries are registered with the spec\'s titles and audiences', () => {
-    const got = Object.fromEntries(FC.list().map((e) => [e.id, [e.title, e.audience]]));
+    const got = Object.fromEntries(FC.list().filter((e) => ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id)).map((e) => [e.id, [e.title, e.audience]]));
     assert.deepEqual(got, { sales_order: ['SALES ORDER', 'sales'], payment_ack: ['PAYMENT ACKNOWLEDGEMENT', 'sales'], job_order: ['JOB ORDER', 'ops'], handoff_pack: ['HANDOFF PACK', 'ops'] });
-    for (const e of FC.list()) { assert.equal(e.bodySet, 'js/forms-set-1.js'); assert.equal(e.orientation, 'portrait'); }
+    for (const e of FC.list()) { assert.equal(e.bodySet, ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id) ? 'js/forms-set-1.js' : 'js/forms-set-2.js'); assert.equal(e.orientation, 'portrait'); }
     for (const id of ['job_order', 'handoff_pack']) assert.deepEqual(FC.get(id).needs, ['js/screens/production.js']);
   });
   it('registering an ops entry with a money:true field throws, and registers nothing', () => {

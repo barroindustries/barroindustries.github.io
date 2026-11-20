@@ -435,6 +435,20 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
   // .print-footer: navy rule, bold thanks line, grey creds line
   FC.footerHtml = (co) => `<div class="print-footer" data-pdf-cut><div class="pf-thanks">${esc(co.thanks)}</div><div class="pf-creds">${esc(co.creds)}</div></div>`;
 
+  // The Google-review QR footer option (§9.9 owner ruling 2026-11-19): a registry entry with `reviewQr: true` gets the QR and ONE plain line above the
+  // thanks/creds footer. The QR is made here from the vendored encoder (js/qrcode.js → window.buildQRSVG, inline SVG): no network, so it works offline and
+  // in the PDF. Entries that need it list 'js/qrcode.js' in `needs`. Without the encoder the plain line and the address still print.
+  FC.REVIEW_URL = 'https://g.page/r/CTfy7v-fDzwEEBM/review';
+  FC.REVIEW_LINE = 'Happy with our work? Scan to leave us a Google review.';
+  FC.reviewQrHtml = function () {
+    let svg = '';
+    try { if (typeof W().buildQRSVG === 'function') svg = String(W().buildQRSVG(FC.REVIEW_URL, 84) || ''); } catch (_) { svg = ''; }
+    return `<div class="review-qr" data-pdf-cut style="margin-top:10px;text-align:center;page-break-inside:avoid;break-inside:avoid">` +
+      (svg ? `<div class="rq-code" style="display:inline-block;line-height:0">${svg}</div>` : '') +
+      `<div class="rq-line" style="font-size:9pt;font-weight:600;color:#1F3A5F;margin-top:3px">${esc(FC.REVIEW_LINE)}</div>` +
+      `<div class="rq-url" style="font-size:7.5pt;color:#6B7280">${esc(FC.REVIEW_URL)}</div></div>`;
+  };
+
   // The sheet CSS. Rooted at .pd-print .frm so nothing leaks into the live app; every size is the quote's print size (pt), the colours its
   // palette (--dark-blue #1E3A5F, --mid-blue #2E5F8A, --light-blue #D6E4F0, --gray-light #F5F6FA, --gray-mid #DDE2EC, --gray-dark #6B7280).
   FC.CSS = `
@@ -517,7 +531,7 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     return {
       title, barLabelText: title, fileName: prep.fileName, watermark: prep.watermark || null, accent: prep.accent,
       pageId: 'frm-page',
-      bodyHtml: `<div class="frm">${FC.headerHtml(prep)}${mid}${mid.indexOf('class="sig-row') >= 0 ? '' : FC.sigRow(prep.signatures, !!prep.entry.sigSolo)}${FC.footerHtml(co)}</div>`,
+      bodyHtml: `<div class="frm">${FC.headerHtml(prep)}${mid}${mid.indexOf('class="sig-row') >= 0 ? '' : FC.sigRow(prep.signatures, !!prep.entry.sigSolo)}${prep.entry.reviewQr ? FC.reviewQrHtml() : ''}${FC.footerHtml(co)}</div>`,
       pageCss: FC.CSS,
     };
   };
@@ -981,6 +995,164 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
       { key: 'salesNotes', label: 'Notes from Sales / Design', freeText: true, from: (c) => str(c.project.notes) },
     ],
   });
+
+
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+  //  PHASE 4B ENTRIES — the five Operations forms (bodies: js/forms-set-2.js). ALL audience 'ops' = NO PESOS for any login.
+  //  Every one prints correctly as a BLANK paper form from the job alone (job no., client, site, the job order's item lines, empty boxes / lines /
+  //  signature blocks) and prints what is recorded when these fields exist (the screens that fill them are js/screens/flow-docs.js, later):
+  //    job_projects.jobOrder.qcTicks[]       index-aligned to joDoc().qcChecks:      { label, state:'pass'|'fail'|'na', note?, by?, date? }
+  //    job_projects.jobOrder.qcNotes         string
+  //    job_projects.jobOrder.installTicks[]  index-aligned to joDoc().installChecks: { label, done:true, note?, by?, date? }
+  //    job_projects.jobOrder.installNotes    string
+  //    production_orders[].qc                (exists today) { result:'passed'|'failed', items:[{label,state}], notes, byName, at } — via ctx.workOrders
+  //    job_projects.punchList                { items:[{ text, location?, raisedDate?, done?, doneDate?, by? }], clearedAt?, clearedBy? }  (array also read)
+  //    job_projects.acceptance               { url?, name?, signedBy, date, by, byName, at }
+  //  A tick only applies while its `label` still equals the list's label at that index (an edited list never shows a stale tick).
+  //  Numbers: QC-/INS-/PL-/ACC- + the job order number, DERIVED like HP- (no counters). delivery_receipt keeps its stored DR serial.
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+  const jobNoText = (c) => FC.withRev(joInfo(c).number, salesRev(c));
+  const jobMeta = (c) => [metaQuoteRef(c), 'Job order ref: ' + jobNoText(c)];
+  const jobGuard = (c) => (c.project ? '' : 'We could not find that job.');
+  const jobSource = { source: { coll: 'job_projects', via: 'projectId' }, records: { project: 'required', order: 'optional' }, needs: [PRODUCTION] };
+  const jobFields = () => [
+    { key: 'clientName', label: 'Client', from: (c) => first(c.project.clientName, c.client && c.client.name) },
+    { key: 'clientCompany', label: 'Company', from: (c) => clientParty(c).company },
+    { key: 'clientAddress', label: 'Address', from: (c) => clientParty(c).address },
+    { key: 'clientPhone', label: 'Phone', from: (c) => clientParty(c).phone },
+    { key: 'clientEmail', label: 'E-mail', from: (c) => clientParty(c).email },
+    { key: 'subject', label: 'Subject', from: subjectOf },
+    { key: 'jobOrderNo', label: 'Job order', from: jobNoText },
+    { key: 'siteAddress', label: 'Delivery & installation site', from: (c) => (joOf(c) || {}).siteAddress },
+    { key: 'deliveryDate', label: 'Delivery date', from: (c) => FC.toIsoDate((joOf(c) || {}).deliveryDate) },
+    { key: 'deadline', label: 'Deadline', from: (c) => FC.toIsoDate((joOf(c) || {}).targetDate) },
+    { key: 'workOrders', label: 'Work orders', list: true, from: workOrderNos },
+    { key: 'lines', label: 'Job order items', list: true, from: crewLines },
+  ];
+  const joRaw = (c) => (c.project && c.project.jobOrder) || {};
+  // a check list (strings) merged with its index-aligned ticks → [{ label, state, done, note, by, date }]
+  function tickedChecks(labels, ticks) {
+    const t = arr(ticks);
+    return arr(labels).map((l, i) => {
+      const label = str(l && typeof l === 'object' ? (l.label || l.text) : l);
+      const k = t[i] && typeof t[i] === 'object' && (!str(t[i].label) || str(t[i].label) === label) ? t[i] : {};
+      return { label, state: str(k.state).toLowerCase(), done: k.done === true, note: str(k.note), by: str(k.by || k.byName), date: FC.toIsoDate(k.date || k.doneDate || k.at) };
+    }).filter((r) => r.label);
+  }
+  const qcOf = (o) => (o && o.qc && typeof o.qc === 'object' ? o.qc : null);
+  function workOrderQc(c) {
+    return arr(c.workOrders).filter(qcOf).map((o) => {
+      const q = qcOf(o);
+      return { orderNo: str(o.orderNo), title: str(o.title), result: str(q.result).toLowerCase(), byName: str(q.byName), date: FC.toIsoDate(q.at), notes: str(q.notes),
+        failed: arr(q.items).filter((i) => str(i && i.state) === 'fail').map((i) => str(i.label)).filter(Boolean) };
+    });
+  }
+  function qcOverall(c) {
+    const l = workOrderQc(c);
+    if (!l.length) return '';
+    return l.some((x) => x.result === 'failed') ? 'failed' : l.every((x) => x.result === 'passed') ? 'passed' : '';
+  }
+  const lastQcBy = (c) => { const l = workOrderQc(c).filter((x) => x.byName); return l.length ? l[l.length - 1].byName : ''; };
+
+  FC.register(Object.assign({
+    id: 'qc_checklist', title: 'QC CHECKLIST', audience: 'ops', orientation: 'portrait', bodySet: 'js/forms-set-2.js',
+    number: { series: 'QC', record: (c) => c.project, derive: (c) => 'QC-' + joInfo(c).number },
+    signatures: ['checked', 'approved'],
+    date: () => '', extraMeta: jobMeta, guard: jobGuard,
+    sign: (c) => [
+      { role: 'Checked by', name: lastQcBy(c), lines: ['QC inspector'] },
+      { role: FC.LABELS.approvedBy, name: '', lines: ['Production'] },
+    ],
+    fields: jobFields().concat([
+      { key: 'checks', label: 'QC checks', list: true, from: (c) => tickedChecks((joOf(c) || { qcChecks: joRaw(c).qcChecks }).qcChecks, joRaw(c).qcTicks) },
+      { key: 'workOrderQc', label: 'Work-order inspections', list: true, from: workOrderQc },
+      { key: 'result', label: 'Overall result', from: qcOverall },
+      { key: 'notes', label: 'Inspection notes', freeText: true, from: (c) => str(joRaw(c).qcNotes) },
+    ]),
+  }, jobSource));
+
+  // delivery_receipt: moved onto the engine; content = the old production.js print (printDeliveryReceipt): Deliver To / Work Order, a # / Description /
+  // Qty table of the work order's line plus three blank rows, the notes, Delivered by / Received by (client). The record is the PRODUCTION ORDER
+  // (work order): pass it as ref.record (Forms loads it into ctx.order); the DR serial is the one recorded on it (deliveryReceipt.no), never assigned here.
+  const woOf = (c) => c.workOrder || c.order;
+  const drOf = (c) => (woOf(c) && woOf(c).deliveryReceipt) || {};
+  FC.register({
+    id: 'delivery_receipt', title: 'DELIVERY RECEIPT', audience: 'ops', orientation: 'portrait', bodySet: 'js/forms-set-2.js',
+    source: { coll: 'production_orders', via: 'docId' }, records: { project: 'optional' }, needs: [],
+    number: { series: 'DR', record: woOf,
+      resolve: (c) => (str(drOf(c).no) ? { number: str(drOf(c).no), source: 'stored' } : { number: 'DR-' + FC.last6(woOf(c).id), source: 'fallback' }),
+      fallback: (r) => 'DR-' + FC.last6(r && r.id) },
+    signatures: ['prepared', 'received'],
+    date: (c) => drOf(c).date || '',
+    extraMeta: (c) => ['Work Order: ' + str(woOf(c) && woOf(c).orderNo), woOf(c) && str(woOf(c).quoteRef) ? 'Quote: ' + str(woOf(c).quoteRef) : ''],
+    guard: (c) => (woOf(c) ? '' : 'We could not find that work order.'),
+    sign: (c) => [
+      { role: 'Delivered by', name: str(drOf(c).byName), lines: ['Production — Barro Industries'] },
+      { role: 'Received by (client)', name: str(drOf(c).receivedBy), lines: [str(woOf(c).client)] },
+    ],
+    fields: [
+      { key: 'client', label: 'Deliver to', from: (c) => first(woOf(c).client, c.project && c.project.clientName) },
+      { key: 'orderNo', label: 'Work order', from: (c) => str(woOf(c).orderNo) },
+      { key: 'quoteRef', label: 'Quote ref', from: (c) => str(woOf(c).quoteRef) },
+      { key: 'itemTitle', label: 'Description', from: (c) => str(woOf(c).title) },
+      { key: 'qty', label: 'Qty', from: (c) => fin(woOf(c).qty) },
+      { key: 'receivedBy', label: 'Received by (client rep)', from: (c) => str(drOf(c).receivedBy) },
+      { key: 'notes', label: 'Notes', freeText: true, from: (c) => str(drOf(c).notes) },
+    ],
+  });
+
+  FC.register(Object.assign({
+    id: 'installation_checklist', title: 'INSTALLATION CHECKLIST', audience: 'ops', orientation: 'portrait', bodySet: 'js/forms-set-2.js',
+    number: { series: 'INS', record: (c) => c.project, derive: (c) => 'INS-' + joInfo(c).number },
+    signatures: ['prepared', 'checked'],
+    date: () => '', extraMeta: jobMeta, guard: jobGuard,
+    sign: () => [
+      { role: 'Prepared by', name: '', lines: ['Installation lead'] },
+      { role: 'Checked by', name: '', lines: ['Production'] },
+    ],
+    fields: jobFields().concat([
+      { key: 'checks', label: 'Installation checks', list: true, from: (c) => tickedChecks((joOf(c) || { installChecks: joRaw(c).installChecks }).installChecks, joRaw(c).installTicks) },
+      { key: 'notes', label: 'Installation notes', freeText: true, from: (c) => str(joRaw(c).installNotes) },
+    ]),
+  }, jobSource));
+
+  const punchOf = (c) => { const p = c.project && c.project.punchList; return Array.isArray(p) ? { items: p } : (p && typeof p === 'object' ? p : {}); };
+  FC.register(Object.assign({
+    id: 'punch_list', title: 'PUNCH LIST', audience: 'ops', orientation: 'portrait', bodySet: 'js/forms-set-2.js',
+    number: { series: 'PL', record: (c) => c.project, derive: (c) => 'PL-' + joInfo(c).number },
+    signatures: ['prepared', 'conforme'],
+    date: () => '', extraMeta: jobMeta, guard: jobGuard,
+    sign: (c, d) => [
+      { role: 'Prepared by', name: first(punchOf(c).clearedBy), lines: ['Barro representative'] },
+      { role: 'Conforme — Client', name: d.clientName || 'CLIENT NAME', lines: ['Signature over printed name', 'Date: ___________________'] },
+    ],
+    fields: jobFields().concat([
+      { key: 'items', label: 'Punch list items', list: true, from: (c) => arr(punchOf(c).items).map((x) => ({ text: str(x && (x.text || x.note)), location: str(x && x.location),
+        raisedDate: FC.toIsoDate(x && x.raisedDate), done: !!(x && x.done), doneDate: FC.toIsoDate(x && x.doneDate), by: str(x && (x.by || x.byName)) })).filter((x) => x.text) },
+      { key: 'clearedOn', label: 'Cleared on', from: (c) => FC.toIsoDate(punchOf(c).clearedAt) },
+      { key: 'clearedBy', label: 'Cleared by', from: (c) => str(punchOf(c).clearedBy) },
+    ]),
+  }, jobSource));
+
+  const accOf = (c) => (c.project && c.project.acceptance && typeof c.project.acceptance === 'object' ? c.project.acceptance : {});
+  FC.register(Object.assign({}, jobSource, {
+    id: 'client_acceptance', title: 'CLIENT ACCEPTANCE FORM', audience: 'ops', orientation: 'portrait', bodySet: 'js/forms-set-2.js', reviewQr: true,
+    needs: [PRODUCTION, 'js/qrcode.js'],
+    number: { series: 'ACC', record: (c) => c.project, derive: (c) => 'ACC-' + joInfo(c).number },
+    signatures: ['prepared', 'conforme'],
+    date: (c) => accOf(c).date || '', extraMeta: jobMeta, guard: jobGuard,
+    sign: (c, d, co) => [
+      { role: 'Prepared by', name: first(accOf(c).byName), lines: ['Barro representative'] },
+      { role: 'Conforme — Accepted by Client', name: first(accOf(c).signedBy) || d.clientName || 'CLIENT NAME', lines: ['Signature over printed name', 'Date: ___________________'] },
+    ],
+    fields: jobFields().concat([
+      { key: 'signedBy', label: 'Accepted by', from: (c) => str(accOf(c).signedBy) },
+      { key: 'acceptedOn', label: 'Accepted on', from: (c) => FC.toIsoDate(accOf(c).date) },
+      { key: 'signedCopy', label: 'Signed copy on file', from: (c) => !!str(accOf(c).url) },
+      { key: 'punchOpen', label: 'Punch-list items still open', from: (c) => arr(punchOf(c).items).filter((x) => x && str(x.text || x.note) && !x.done).length },
+      { key: 'punchCount', label: 'Punch-list items', from: (c) => arr(punchOf(c).items).filter((x) => x && str(x.text || x.note)).length },
+    ]),
+  }));
 
   W().FormsCore = FC;
   if (typeof module !== 'undefined' && module.exports) module.exports = FC;
