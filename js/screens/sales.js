@@ -123,6 +123,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
         <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">Inquiry → Quote → Approval → Payment → Sales Order → Delivery</p>
       </div>
     </div>
+    <div id="sales-scorecard"></div>
     ${window.sopPanel('How Sales works', [
       'Clients is the CRM book. Log every inquiry here the same day, with its source. The architect / engineer / contractor prospecting directory lives in the CRM department.',
       'Briefs holds the Client Information forms from barroindustries.com, and Quote requests holds the "Get a quote" requests from the catalogue. Review the answers, then Convert to client. On a quote request, Open in Quote Builder to price it.',
@@ -142,6 +143,9 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   // and binding afterwards would also attach this outer handler to those.
   window.bindChipTabs(c, (key) => { window.setSubroute(key); loadSalesContent(currentUser, currentRole, key); });
   loadSalesContent(currentUser, currentRole, subtab);
+  // Sales KPI (SALES-MANAGER-KPI-SPEC-2026-11-20, rollout step 5): the person whose own sales_kpi is switched on sees "My scorecard" here, labelled
+  // "Preview — not yet used for pay". Lazy (js/screens/sales-kpi.js) and silent for everyone else; it never touches the page if it cannot load.
+  try { window.ensureScript('js/screens/sales-kpi.js').then(() => { if (window.SalesKpiUI) window.SalesKpiUI.renderMyScorecard(c.querySelector('#sales-scorecard')); }).catch(() => {}); } catch (_) {}
 };
 
 // Scoped inner sub-nav (chip toggle) for a consolidated Sales tab. Binds ONLY

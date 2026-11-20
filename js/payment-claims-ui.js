@@ -14,6 +14,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
+  // firebase-config.js declares `const db` at top level: a global binding every classic script can read, but NOT window.db (undefined in the real app).
+  const fsDb = function () { return (typeof db !== 'undefined' && db) || window.db; };
 
   const esc = function (s) { return window.escHtml ? window.escHtml(s) : String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   const money = function (n) { return '₱' + (window.fmtN2 ? window.fmtN2(Number(n) || 0) : (Number(n) || 0).toFixed(2)); };
@@ -42,7 +44,7 @@
     if (!window.PaymentClaims) throw new Error('The payment engine did not load.');
   }
   async function readDoc(coll, id) {
-    const s = await window.db.collection(coll).doc(id).get();
+    const s = await fsDb().collection(coll).doc(id).get();
     return s.exists ? Object.assign({ id: s.id }, s.data()) : null;
   }
   function invalidate() {
@@ -61,7 +63,7 @@
   async function loadFees(clientId) {
     if (!clientId) return [];
     try {
-      const snap = await window.db.collection('payment_claims').where('clientId', '==', clientId).get();
+      const snap = await fsDb().collection('payment_claims').where('clientId', '==', clientId).get();
       return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); })
         .filter(function (c) { return c.kind === 'site_visit' && c.status === 'recorded' && Number(c.recordedAmount) > 0; })
         .map(function (c) { return { id: c.id, recordedAmount: Number(c.recordedAmount) }; });
@@ -179,7 +181,7 @@
             if (!cur || cur.status !== 'payment_rejected') { toast('This payment was already sent again or confirmed.', 'error'); sending = false; if (onDone) onDone(); return; }
             const pc = cur.paymentConfirm || {};
             resubmits = (Number(pc.resubmits) || 0) + 1;
-            await window.db.collection('payment_claims').doc(claim.id).update({
+            await fsDb().collection('payment_claims').doc(claim.id).update({
               kind: kind, paymentReceived: entered, paymentMethod: paymentMethod, vatTreatment: vatTreatment, orRef: orRef, paymentDate: paymentDate, receiptUrl: receiptUrl, receiptName: receiptName,
               status: 'pending',
               paymentConfirm: { requestedAt: nowIso, requestedBy: vNow.uid, requestedByName: who, decision: null, resubmits: resubmits, prevReason: pc.reason || '' },
@@ -196,7 +198,7 @@
               paymentConfirm: { requestedAt: nowIso, requestedBy: vNow.uid, requestedByName: who, decision: null, resubmits: 0 },
               createdBy: vNow.uid, createdByName: who, createdAt: FV().serverTimestamp(), updatedAt: FV().serverTimestamp(),
             };
-            const ref = await window.db.collection('payment_claims').add(doc);
+            const ref = await fsDb().collection('payment_claims').add(doc);
             id = ref.id;
             try { if (window.logAudit) window.logAudit('create', 'payment_claim', id, { client: doc.clientName, kind: kind, paid: entered }); } catch (_) {}
           }
@@ -229,7 +231,7 @@
   };
 
   function buildDeps(vNow, who, acct, paNumber) {
-    const db = window.db;
+    const db = fsDb();
     return {
       getClaim: function (id) { return readDoc('payment_claims', id); },
       getProject: function (id) { return readDoc('job_projects', id); },
@@ -349,7 +351,7 @@
     const reason = await window.promptDialog({ title: 'Send payment back', message: 'Tell Sales what to fix.', placeholder: 'e.g. amount does not match the receipt', required: true, multiline: true, confirmLabel: 'Send back' });
     if (reason == null || !String(reason).trim()) return false;
     try {
-      const ref = window.db.collection('payment_claims').doc(o.id);
+      const ref = fsDb().collection('payment_claims').doc(o.id);
       const snap = await ref.get();
       if (!snap.exists) { toast('This payment no longer exists.', 'error'); onDone(); return false; }
       const cur = snap.data();
@@ -375,7 +377,7 @@
 
   // ── lists ──────────────────────────────────────────────────────────────────────────────────────────────────────
   async function pendingClaims() {
-    const snap = await window.db.collection('payment_claims').where('status', '==', 'pending').get();
+    const snap = await fsDb().collection('payment_claims').where('status', '==', 'pending').get();
     return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); })
       .sort(function (a, b) { return ((b.createdAt && b.createdAt.seconds) || 0) - ((a.createdAt && a.createdAt.seconds) || 0); });
   }
@@ -411,7 +413,7 @@
 
   // ── a job's payment lines (Sales Orders row and the job's Money panel) ───────────────────────────────────────────
   async function claimsForOrder(orderId) {
-    const snap = await window.db.collection('payment_claims').where('orderId', '==', orderId).orderBy('createdAt', 'asc').get();
+    const snap = await fsDb().collection('payment_claims').where('orderId', '==', orderId).orderBy('createdAt', 'asc').get();
     return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
   }
   const STATE = {
@@ -452,7 +454,7 @@
     if (!hosts.length) return;
     try { await loadCore(); } catch (_) { return; }
     let snap;
-    try { snap = await window.db.collection('payment_claims').orderBy('createdAt', 'asc').get(); } catch (_) { return; }
+    try { snap = await fsDb().collection('payment_claims').orderBy('createdAt', 'asc').get(); } catch (_) { return; }
     const all = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
     const F = await formsApi();
     const v = viewer();

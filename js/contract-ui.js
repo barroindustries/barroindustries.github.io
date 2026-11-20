@@ -13,6 +13,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
+  // firebase-config.js declares `const db` at top level: a global binding every classic script can read, but NOT window.db (undefined in the real app).
+  const fsDb = function () { return (typeof db !== 'undefined' && db) || window.db; };
 
   const esc = function (s) { return window.escHtml ? window.escHtml(s) : String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   const money = function (n) { return '₱' + (window.fmtN2 ? window.fmtN2(Number(n) || 0) : (Number(n) || 0).toFixed(2)); };
@@ -43,7 +45,7 @@
   const rLabel = function (n) { return 'R' + n; };
 
   async function readDoc(coll, id) {
-    const s = await window.db.collection(coll).doc(id).get();
+    const s = await fsDb().collection(coll).doc(id).get();
     return s.exists ? Object.assign({ id: s.id }, s.data()) : null;
   }
   function invalidate() {
@@ -65,7 +67,7 @@
 
   // ── the apply: real dependencies for ContractCore.runApply ────────────────────────────────────────────────────
   function buildApplyDeps(vNow) {
-    const db = window.db;
+    const db = fsDb();
     const who = whoName();
     return {
       getOrder: function (id) { return readDoc('sales_orders', id); },
@@ -104,13 +106,13 @@
     const step = async function (fn) { try { await fn(); } catch (e) { try { console.warn('[contract] follow-up failed', e); } catch (_) {} } };
     await step(async function () { if (order.trackingToken && typeof window.syncOrderTracking === 'function') await window.syncOrderTracking(order.trackingToken, { balance: result.arAfter }); });
     await step(async function () {
-      if (pr.kind === 'quote_revision' && pr.quoteId) await window.db.collection(pr.quoteColl || 'bk_quotes').doc(pr.quoteId).update({ salesOrderId: order.id, projectId: order.projectId || null, status: 'won' });
+      if (pr.kind === 'quote_revision' && pr.quoteId) await fsDb().collection(pr.quoteColl || 'bk_quotes').doc(pr.quoteId).update({ salesOrderId: order.id, projectId: order.projectId || null, status: 'won' });
     });
     await step(async function () {
       if (pr.kind === 'change_order' && pr.changeOrderId) {
         const patch = { status: 'applied', appliedContractRev: n };
-        await window.db.collection('change_orders').doc(pr.changeOrderId).update(patch);
-        await window.db.collection('change_requests').doc(pr.changeOrderId).update(patch);
+        await fsDb().collection('change_orders').doc(pr.changeOrderId).update(patch);
+        await fsDb().collection('change_requests').doc(pr.changeOrderId).update(patch);
       }
     });
     const N = window.Notifs;
@@ -127,7 +129,7 @@
 
   // ── pending list (the decision block) ─────────────────────────────────────────────────────────────────────────
   async function pendingRevisions() {
-    const col = window.db.collection('sales_orders');
+    const col = fsDb().collection('sales_orders');
     const out = {};
     for (const st of ['pending_approval', 'pending_confirm']) {
       const snap = await col.where('pendingRevision.status', '==', st).get();
@@ -180,7 +182,7 @@
     const reason = await window.promptDialog({ title: 'Send back', message: 'Tell Sales what to change.', placeholder: 'e.g. the price is too low for this job', required: true, multiline: true, confirmLabel: 'Send back' });
     if (reason == null || !String(reason).trim()) return false;
     try {
-      const ref = window.db.collection('sales_orders').doc(order.id);
+      const ref = fsDb().collection('sales_orders').doc(order.id);
       const snap = await ref.get();
       if (!snap.exists) { toast('This order no longer exists.', 'error'); return false; }
       const cur = snap.data();
@@ -201,7 +203,7 @@
 
   async function withdraw(order, onDone) {
     try {
-      const ref = window.db.collection('sales_orders').doc(order.id);
+      const ref = fsDb().collection('sales_orders').doc(order.id);
       const snap = await ref.get();
       const cur = snap.exists ? snap.data() : null;
       if (!cur || !cur.pendingRevision) { toast('There is nothing to withdraw.', 'error'); if (onDone) onDone(); return; }
@@ -272,7 +274,7 @@
       const map = {}; map[start.id] = start;
       const root = rootId === start.id ? start : await readDoc(coll, rootId);
       if (root) map[root.id] = root;
-      const snap = await window.db.collection(coll).where('rootQuoteId', '==', rootId).get();
+      const snap = await fsDb().collection(coll).where('rootQuoteId', '==', rootId).get();
       snap.docs.forEach(function (d) { map[d.id] = Object.assign({ id: d.id }, d.data()); });
       return { coll: coll, quotes: Object.keys(map).map(function (k) { return map[k]; }) };
     } catch (_) { return { coll: 'bk_quotes', quotes: [] }; }
@@ -319,7 +321,7 @@
     // Choice C: only when a signed, unapplied change order exists (Phase 5 collection; any failure just hides it).
     let cos = [];
     try {
-      const cs = await window.db.collection('change_orders').where('orderId', '==', order.id).get();
+      const cs = await fsDb().collection('change_orders').where('orderId', '==', order.id).get();
       cos = cs.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (c) { return c.status === 'signed' && !c.appliedContractRev && c.pricing && isFinite(Number(c.pricing.price)); });
     } catch (_) { cos = []; }
 
@@ -429,7 +431,7 @@
           decision: null, decidedBy: null, decidedByName: null, decidedByRole: null, decidedAt: null, onBehalf: false, reason: '',
         };
         try {
-          await window.db.collection('sales_orders').doc(order.id).update({ pendingRevision: pr, updatedAt: FV().serverTimestamp() });
+          await fsDb().collection('sales_orders').doc(order.id).update({ pendingRevision: pr, updatedAt: FV().serverTimestamp() });
         } catch (ex) { fail('Could not send it: ' + (ex.message || ex.code)); return; }
         try { if (window.logAudit) window.logAudit('update', 'contract', order.id, { requested: true, revNo: pr.revNo, from: from, to: cur.toAmount }); } catch (_) {}
         const text = who + ': ' + (order.clientName || '') + ' ' + soLabel(order) + ' — ' + money(from) + ' → ' + money(cur.toAmount) + '. ' + reason;

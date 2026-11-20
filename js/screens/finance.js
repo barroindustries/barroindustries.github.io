@@ -251,7 +251,8 @@ const FINANCE_GROUPS = [
   // teams (its own predecessor, the renderPayrollHub chip-tab wrapper, is
   // retired — see §8). 'HR Profiles' is gone from the
   // chip row but is NOT gone as a route: see FINANCE_LEGACY_KEYS below.
-  { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','Cash Advances','SSS / Gov'] },
+  // Sales KPI (SALES-MANAGER-KPI-SPEC-2026-11-20): the President's card + the scorecard preview for the Sales Manager — display only until the pay switch ships.
+  { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','Cash Advances','SSS / Gov','Sales KPI'] },
   { key:'Purchases & Inventory', label:'Purchases & Inventory', members:['Purchases','Inventory','Sales Orders'] },
   { key:'Taxes & BIR',           label:'Taxes & BIR',           members:['Taxes','BIR','Gov Rates'] },
   { key:'Records',               label:'Records',               members:['Records','Tasks'] },
@@ -285,7 +286,7 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('💰',20)} Finance & HR</h2></div>
     ${window.sopPanel('How Finance works', [
-      'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
+      'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, Cash Advances, SSS/Gov, Sales KPI) · Purchases & Inventory · Taxes & BIR · Records.',
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
       'Record income/expense via Money In/Out; Reports reads the ledger for the P&L, VAT, Balance Sheet, Cash Flow, Bank Reconciliation and Break-even.',
       // PAYROLL-REDESIGN-BRIEF.md — one payroll over both teams, and the words
@@ -503,6 +504,17 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
       break;
     case 'Cash Advances':
       await renderFinanceCA(content, currentUser, currentRole);
+      break;
+    // Sales Manager KPI (js/screens/sales-kpi.js, lazy): the President's settings card, the scorecard preview and "Jobs waiting for a rating".
+    // Finance reads the scorecard; only the President sees the controls. Display only: nothing here reaches payroll.
+    case 'Sales KPI':
+      try { await window.ensureScript('js/screens/sales-kpi.js'); } catch (_) {}
+      if (window.renderSalesKpi) {
+        await window.renderSalesKpi(content, currentUser, currentRole);
+      } else {
+        content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Sales KPI did not load</h4><p>Reload the app and try again.</p></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [content] });
+      }
       break;
     case 'Tasks':
       await renderDeptTasks(content, 'Finance', currentUser, currentRole);

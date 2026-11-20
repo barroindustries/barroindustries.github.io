@@ -997,6 +997,21 @@ service cloud.firestore {
       allow write: if isAuth() && isAdmin();
     }
 
+    // Sales Manager KPI (SALES-MANAGER-KPI-SPEC-2026-11-20 §7): the President sets it; the person and the books tier read it. NOT kpi_targets (any admin writes that).
+    match /sales_kpi/{uid} {
+      allow read:  if isAuth() && (isOwner(uid) || isPresident() || canFinance());
+      allow write: if isAuth() && isPresident();
+    }
+    // Client ratings, one per job (doc id = projectId): only the President writes; the books tier and the salesperson named in salesUid read.
+    match /client_ratings/{projectId} {
+      allow read:   if isAuth() && (isPresident() || canFinance()
+                      || resource.data.get('salesUid', '') == request.auth.uid);
+      allow create, update: if isAuth() && isPresident()
+                      && request.resource.data.stars is int
+                      && request.resource.data.stars >= 1 && request.resource.data.stars <= 5;
+      allow delete: if isAuth() && isPresident();
+    }
+
     // [RN-68] Settings ─ -> docs/firestore-rules-notes.md#rn-68
     match /settings/{docId} {
       allow read: if isAuth() && (hasProfile() || docId == 'system');

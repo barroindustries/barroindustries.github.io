@@ -1867,6 +1867,8 @@ function openJobProjectDetail(p, opts){
     </div></div>
     ${/* PAYMENT-CLAIM-HOOK (P5): the job's payment lines + Record payment, lazy (js/payment-claims-ui.js). Money viewers of a flow-2 job only. */''}
     ${(showMoney && !isBsOnlyU && Number(p.flowVersion)>=2 && p.salesOrderId)?'<div id="jpd-payments"></div>':''}
+    ${/* SALES-KPI-HOOK (rollout step 4): the President's "Client rating" row on a delivered-or-later job, lazy (js/screens/sales-kpi.js). */''}
+    ${((typeof isRealPresident==='function' && isRealPresident()) && ['delivered','completed','paid'].includes(p.stage))?'<div id="jpd-rating"></div>':''}
     ${/* FLOW-FORM-HOOK (P4): the Operations forms (QC checklist, installation checklist, punch list, client acceptance), drawn by js/forms.js when it loads. */''}
     ${/* FLOW-DOCS-HOOK (J8): client acceptance + punch list, lazy (js/screens/flow-docs.js). Flow-2 jobs only. */''}
     ${Number(p.flowVersion)>=2 && !isBsOnlyU?'<div id="jpd-flowdocs"></div>':''}
@@ -2014,6 +2016,8 @@ function openJobProjectDetail(p, opts){
       const _paintDocs = async ()=>{ let pj = p; try { const fr = await db.collection('job_projects').doc(p.id).get(); if (fr.exists) pj = { id:p.id, ...fr.data() }; } catch (_) {} if (panelLive(jpdPanel)) await window.FlowDocs.renderJobDocs(_docsHost, pj, _paintDocs); };
       return _paintDocs();
     }).catch(()=>{});
+    const _rateHost = jpdPanel.querySelector('#jpd-rating');
+    if (_rateHost) window.ensureScript('js/screens/sales-kpi.js').then(()=>{ if (panelLive(jpdPanel) && window.SalesKpiUI) return window.SalesKpiUI.renderJobRating(_rateHost, p); }).catch(()=>{});
     const _formHost = jpdPanel.querySelector('#jpd-forms');
     if (_formHost) window.flowForms().then((F)=>{
       if (!panelLive(jpdPanel)) return;

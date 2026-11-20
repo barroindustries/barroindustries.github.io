@@ -7155,12 +7155,17 @@ html:not(.light) .splash-hlogo { filter: brightness(0) invert(1); }
   letter-spacing: -0.2px;
   color: var(--text);
 }
+/* owner 2026-11-20: the tiny blue spaced caps fought the logo's own spaced "INDUSTRIES".
+   Now a readable sentence-case line in the logo's ink, set off by a hairline the logo's width. */
 .splash-word-sub {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--primary);
+  width: min(300px, 72vw);
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-2);
 }
 
 /* Loading bar — thin, quiet */
