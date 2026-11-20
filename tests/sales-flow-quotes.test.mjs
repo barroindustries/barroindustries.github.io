@@ -312,7 +312,7 @@ describe('quote-state helpers (js/config.js)', () => {
   });
 });
 
-describe('the Sales SOP (§6)', () => {
+describe('the Sales SOP (§6; version 3 of 2026-11-20: the Barro Kitchens process)', () => {
   const sop = (env) => env.load('DEFAULT_SALES_SOP', 'x');
   const old = { intro: 'old intro', steps: [{ short: 'Confirm', title: 'Client Confirmation & Down Payment', owner: 'Sales + Finance', tab: 'Quotes', desc: 'x', actions: ['**Finance** verifies the payment before the order is created.'], out: 'x' }], rules: ['r'], updatedBy: 'x' };
   async function view(who, saved) {
@@ -321,45 +321,94 @@ describe('the Sales SOP (§6)', () => {
     await env.ctx.renderSalesSOP(c);
     return { env, c };
   }
+  const textOf = (s) => [s.title, s.desc, ...s.actions, s.out].join(' | ');
+  const stepText = (d, short) => textOf(d.steps.find((x) => x.short === short));
 
-  it('the default is version 2 with the new ten steps, in order', () => {
+  it('the default is version 3 with the twelve steps of the process, in order, each one complete', () => {
     const d = sop(makeEnv(SALES, {}));
-    assert.equal(d.sopVersion, 2);
-    same(d.steps.map((s) => s.short), ['Inquiry', 'Qualify', 'Site Visit', 'Quote', 'Approve', 'Send', 'Follow-up', 'Design', 'Payment', 'Generate']);
+    assert.equal(d.sopVersion, 3);
+    same(d.steps.map((s) => s.short), ['Lead', 'Qualify', 'Visit', 'Quote', 'Approve', 'Send', 'Follow-up', 'Drawings', 'Payment', 'Generate', 'Track', 'Balance']);
+    for (const s of d.steps) assert.ok(s.title && s.owner && s.tab && s.desc && s.out && s.actions.length >= 3, `${s.short} is missing a field or has fewer than three actions`);
+    assert.ok(d.intro.length > 0 && d.rules.length >= 8);
   });
-  it('the replaced steps say what the spec says: Mark sent, Lost with a reason, Record payment, the President confirms, Generate SO & JO', () => {
+  it('the steps cover Record payment, Generate SO & JO, Won / Projects, Download PDF and the approval link — each in the step that owns it', () => {
+    const d = sop(makeEnv(SALES, {}));
+    assert.ok(stepText(d, 'Payment').includes('**Record payment**'));
+    assert.ok(stepText(d, 'Generate').includes('**Generate SO & JO**'));
+    assert.ok(stepText(d, 'Track').includes('Won / Projects'));
+    assert.ok(stepText(d, 'Send').includes('**PDF ▾ → Download PDF**'));
+    assert.ok(stepText(d, 'Approve').includes('approval link') && stepText(d, 'Approve').includes('**Send for approval (get the link)**'));
+    const all = JSON.stringify(d.steps);
+    for (const phrase of ['Record payment', 'Generate SO & JO', 'Won / Projects', 'Download PDF', 'approval link']) assert.ok(all.includes(phrase), `${phrase} is not in any step`);
+  });
+  it('the Quote step names the configurators, the standard terms and the discount rule; Approve and Send name the approval and the copies', () => {
+    const d = sop(makeEnv(SALES, {}));
+    const quote = stepText(d, 'Quote');
+    for (const needle of ['**Configure**', '**Add to Quote**', 'Standard Price List', '**Add custom item**', '65% down payment', '35% on delivery', '6-month service warranty', 'hairline', 'starts at none', '30% at most', 'never type one', '**Reload DB**', 'standalone page is preview only']) assert.ok(quote.includes(needle), `Quote step: ${needle}`);
+    assert.equal(d.steps.find((s) => s.short === 'Approve').owner, 'President (Neil)');
+    assert.ok(stepText(d, 'Approve').includes('Messenger or Viber') && stepText(d, 'Approve').includes('**Approvals**'));
+    const send = stepText(d, 'Send');
+    assert.ok(send.includes('**Agent Copy**') && send.includes('**Workforce Copy**') && send.includes('no prices') && send.includes('A4 file named by the quote number') && send.includes('**Mark sent**'));
+    // A quote that went through approval is stored without a filed stamp, so a reopened one is not "filed" in the builder and Download PDF
+    // says "file this quote first" (checked in the QA harness, 2026-11-20): the step must send Sales through Verify & File → Update in place.
+    for (const needle of ['tap **↻ Reopen** on it in **Quotes → Records**, then **Verify & File**', '**Update the original quote in place** (it keeps the number and the approval)', '**File Quotation**', '(on a phone: **☰ → Download PDF**)']) assert.ok(send.includes(needle), `Send step: ${needle}`);
+  });
+  it('the Follow-up, Payment and Generate steps say what the owner rulings say', () => {
     const d = sop(makeEnv(SALES, {}));
     const step = (s) => d.steps.find((x) => x.short === s);
-    assert.equal(step('Approve').owner, 'President');
-    assert.ok(step('Send').actions.includes('Tap **Mark sent** on the quote the same day.'));
-    assert.ok(step('Follow-up').actions.includes('If the client says no, tap **Lost** and choose the reason. Every lost quote needs a reason.'));
+    assert.ok(stepText(d, 'Follow-up').includes('**File as a new revision**') && stepText(d, 'Follow-up').includes('**Update in place**') && stepText(d, 'Follow-up').includes('R2, R3'));
+    assert.ok(step('Follow-up').actions.some((a) => a.includes('tap **Lost** and choose the reason. Every lost quote needs a reason.')));
     assert.equal(step('Follow-up').out, 'A clear client decision: paying, or Lost with a reason.');
     assert.equal(step('Payment').title, 'Record the Payment');
+    assert.equal(step('Payment').owner, 'Sales records · President confirms (Finance as stand-in)');
     assert.ok(step('Payment').actions.some((a) => a.includes('Finance may confirm in his place')));
-    assert.ok(step('Payment').actions.includes('The contract amount is the quote total and cannot be typed. To change it, revise the quote.'));
-    assert.equal(step('Generate').desc, 'Hand the job to Production yourself. No Finance step.');
-    assert.ok(step('Generate').actions.includes('In **Sales Orders**, tap **Generate SO & JO** on the confirmed order.'));
+    assert.ok(step('Payment').actions.includes('The contract amount is the quote total and cannot be typed. To change it, make a **New Revision** of the quote and have it approved.'));
+    assert.ok(step('Payment').actions.some((a) => a.includes('receipt or proof of payment is required')));
+    assert.ok(step('Generate').desc.includes('no Finance step and no handoff meeting'));
+    assert.ok(step('Generate').actions.includes('In **Sales Orders**, tap **Generate SO & JO** on the order that shows Payment confirmed.'));
+    assert.ok(step('Generate').actions.some((a) => a.includes('Not drawn yet — send to Design first') && a.includes('attach the drawing yourself later with **Attach drawing**')), 'F6 on hold: nobody is assumed to be in Design');
   });
-  it('nothing in the default still describes the old Finance-verifies flow', () => {
+  it('the Visit, Drawings and Balance steps put Rene and Finance where the owner has them (not Aron, not a handoff meeting)', () => {
+    const d = sop(makeEnv(SALES, {}));
+    const step = (s) => d.steps.find((x) => x.short === s);
+    assert.equal(step('Visit').owner, 'Operations (Rene)');
+    assert.ok(stepText(d, 'Visit').includes('Rene never quotes a price on site'));
+    assert.equal(step('Drawings').owner, "Rene / Design, or the client's own");
+    assert.equal(step('Balance').owner, 'Sales follows up · Finance bills');
+    assert.ok(stepText(d, 'Balance').includes('President steps in only after 30 days overdue'));
+    assert.ok(!JSON.stringify(d).includes('Aron'), 'Aron has no queue yet (owner, 2026-11-19)');
+  });
+  it('nothing in the default still describes the old flows, a peso figure, or the old spelling', () => {
     const d = JSON.stringify(sop(makeEnv(SALES, {})));
     assert.ok(!d.includes('Finance** verifies'));
     assert.ok(!d.includes('Create the Sales Order') && !d.includes('Handoff to Production / Fulfillment') && !d.includes('Client Confirmation & Down Payment'));
     assert.ok(!d.includes('(Step 8)'), 'the golden rule no longer points at a step that moved');
+    assert.ok(!d.includes('50% down'), 'the old 50% down payment example is gone: the standard is 65 / 35');
+    assert.ok(!d.includes('₱'), 'no peso figure in a tracked file');
+    assert.ok(!d.includes('Brilliant'), 'Brilliance Steel, never Brilliant');
+    assert.ok(!d.includes('Sales Agent / Sales Staff'));
   });
-  it('the Generate step says what to do when nobody can draw it (F6 on hold)', () => {
+  it('the golden rules point at the right steps: approval is step 5, the confirmed payment is step 9', () => {
     const d = sop(makeEnv(SALES, {}));
-    assert.ok(d.steps.find((s) => s.short === 'Generate').actions.some((a) => a.includes('attach the drawing yourself later from the Sales Orders row')));
+    assert.equal(d.steps[4].short, 'Approve');
+    assert.equal(d.steps[8].short, 'Payment');
+    assert.ok(d.rules.some((r) => r.includes("No quotation goes out without the President's approval (Step 5).")));
+    assert.ok(d.rules.some((r) => r.includes('No job goes to Production without a payment the President has confirmed (Step 9).')));
   });
-  it('a SAVED old SOP shows the President the banner with the load button, and everyone else a one-line note', async () => {
-    const p = await view(PRES, old);
-    assert.ok(p.c.innerHTML.includes('The sales flow changed on 19 Nov 2026 (payment confirmed in the app by the President, or by Finance in his place; Sales generates the sales order and job order). This saved SOP is the older version.'));
-    assert.ok(p.c.innerHTML.includes('id="sop-load-v2"') && p.c.innerHTML.includes('Load the new default'));
-    const s = await view(SALES, old);
-    assert.ok(s.c.innerHTML.includes('This SOP is being updated to the new sales flow.'));
-    assert.ok(!s.c.innerHTML.includes('sop-load-v2') && !s.c.innerHTML.includes('Load the new default'));
-  });
-  it('no banner for a saved v2 SOP, for the shipped default (no saved doc), or when the saved doc could not be read', async () => {
-    for (const saved of [{ ...old, sopVersion: 2 }, undefined]) {
+  for (const [label, saved] of [['no version', old], ['version 2', { ...old, sopVersion: 2 }]]) {
+    it(`a SAVED SOP with ${label} shows the President the banner with the load button, and everyone else a one-line note`, async () => {
+      const p = await view(PRES, saved);
+      assert.ok(p.c.innerHTML.includes('The sales process was updated (Nov 2026)'));
+      assert.ok(p.c.innerHTML.includes('Record payment, Generate SO &amp; JO and the Won / Projects tab. This saved SOP is the older version.'));
+      assert.ok(!p.c.innerHTML.includes('19 Nov'), 'the wording is not tied to one date');
+      assert.ok(p.c.innerHTML.includes('id="sop-load-v2"') && p.c.innerHTML.includes('Load the new default'));
+      const s = await view(SALES, saved);
+      assert.ok(s.c.innerHTML.includes('This SOP is being updated to the new sales process.'));
+      assert.ok(!s.c.innerHTML.includes('sop-load-v2') && !s.c.innerHTML.includes('Load the new default'));
+    });
+  }
+  it('no banner for a saved v3 SOP, for the shipped default (no saved doc), or when the saved doc could not be read', async () => {
+    for (const saved of [{ ...old, sopVersion: 3 }, { ...old, sopVersion: 4 }, undefined]) {
       const r = await view(PRES, saved);
       assert.ok(!r.c.innerHTML.includes('This saved SOP is the older version') && !r.c.innerHTML.includes('being updated'), JSON.stringify(saved && saved.sopVersion));
     }
@@ -367,29 +416,37 @@ describe('the Sales SOP (§6)', () => {
     env.db.collection = () => ({ doc: () => ({ get: async () => { throw new Error('denied'); } }) });
     const c = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
     await env.ctx.renderSalesSOP(c);
-    assert.ok(!c.innerHTML.includes('This saved SOP is the older version'), 'the fallback default is version 2');
+    assert.ok(!c.innerHTML.includes('This saved SOP is the older version'), 'the fallback default is version 3');
   });
-  it('"Load the new default" opens the editor with the default, and Save writes it — sopVersion 2 included', async () => {
-    const { env, c } = await view(PRES, old);
+  it('the page heading and footer carry the new scope and the brand', async () => {
+    const { c } = await view(SALES, undefined);
+    assert.ok(c.innerHTML.includes('Sales SOP — Inquiry to Close-out'));
+    assert.ok(c.innerHTML.includes('Barro Kitchens (Barro Industries OPC) · Sales Department · Standard Operating Procedure'));
+    assert.ok(c.innerHTML.includes('PDF ▾ → Download PDF'), 'the pipeline and the steps render the default');
+  });
+  it('"Load the new default" opens the editor with the default, and Save writes it — sopVersion 3 included', async () => {
+    const { env, c } = await view(PRES, { ...old, sopVersion: 2 });
     c._handlers.load();
     assert.ok(c.innerHTML.includes('Editing Sales SOP') && c.innerHTML.includes('Record the Payment'), 'the editor is prefilled with the new default');
     await env.ctx.salesSopSave(c);
     const saved = env.db.store.settings.get('sales_sop');
-    assert.equal(saved.sopVersion, 2);
-    assert.equal(saved.steps.length, 10);
+    assert.equal(saved.sopVersion, 3);
+    assert.equal(saved.steps.length, 12);
     assert.ok(!JSON.stringify(saved).includes('Finance** verifies'));
     const again = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
     await env.ctx.renderSalesSOP(again);
     assert.ok(!again.innerHTML.includes('This saved SOP is the older version'), 'and now the banner is gone');
   });
-  it('editing the OLD SOP and saving does not mark it as new: the banner stays until the default is loaded', async () => {
-    const { env, c } = await view(PRES, old);
-    await env.ctx.renderSalesSOPEditor(c, old);
-    await env.ctx.salesSopSave(c);
-    const saved = env.db.store.settings.get('sales_sop');
-    assert.ok(!(saved.sopVersion >= 2));
-    const again = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
-    await env.ctx.renderSalesSOP(again);
-    assert.ok(again.innerHTML.includes('This saved SOP is the older version'));
+  it('editing an OLD SOP (no version, or version 2) and saving does not mark it as new: the banner stays until the default is loaded', async () => {
+    for (const saved of [old, { ...old, sopVersion: 2 }]) {
+      const { env, c } = await view(PRES, saved);
+      await env.ctx.renderSalesSOPEditor(c, saved);
+      await env.ctx.salesSopSave(c);
+      const written = env.db.store.settings.get('sales_sop');
+      assert.ok(!(written.sopVersion >= 3), `version ${saved.sopVersion} must not become 3 by an edit`);
+      const again = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
+      await env.ctx.renderSalesSOP(again);
+      assert.ok(again.innerHTML.includes('This saved SOP is the older version'));
+    }
   });
 });

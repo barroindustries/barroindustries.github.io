@@ -7246,7 +7246,8 @@ html.light .topbar-os-label { border-left-color: rgba(0,0,0,0.15); }
 #tn-tabs .tn-os-label { font-size: 0.55rem; }
 .tn-os-label { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.62); padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.25); white-space: nowrap; }
 html.light .tn-os-label { color: rgba(0,0,0,0.52); border-left-color: rgba(0,0,0,0.15); }
-@media (min-width: 769px) { .tn-os-label { display: none; } }   /* desktop: the logo sits top left only; the centre strip stays empty */
+@media (min-width: 769px) { .tn-os-label { display: none; } }
+@media (max-width: 400px) { #tn-tabs .tn-os-label { font-size: 0.5rem; letter-spacing: 0.03em; padding-left: 6px; } #tn-tabs .tn-hlogo { height: 22px; } #tn-tabs .tn-brand-stack { gap: 6px; } }   /* narrow phones: the full label fits beside the back arrow */   /* desktop: the logo sits top left only; the centre strip stays empty */
 
 /* Hide sub-label on very small screens, keep brand name */
 @media (max-width: 360px) {

@@ -184,7 +184,7 @@ describe('WP2 Generate (§5.5) and the Sales "Attach drawing" action (F6 on hold
     assert.ok(/Notifs\.sendToDept\('Design',[\s\S]{0,400}\{ fallbackToOwner:true \}/.test(TO_DESIGN));
   });
   it('the SOP tells Sales they can attach the drawing themselves', () => {
-    assert.ok(SALES.includes('attach the drawing yourself later from the Sales Orders row'));
+    assert.ok(SALES.includes('attach the drawing yourself later with **Attach drawing** on the Sales Orders row'));
   });
 });
 
@@ -241,19 +241,55 @@ describe('WP3 quote card, KPIs and SOP wiring (js/screens/sales.js, js/config.js
   it('isQuoteLost includes "lost"', () => {
     assert.match(CONFIG, /window\.isQuoteLost = q => !!\(q && \(q\.status === 'rejected' \|\| q\.status === 'lost'\) && !window\.isQuoteWon\(q\)\);/);
   });
-  it('the SOP default is version 2 and no step still says Finance verifies', () => {
+  it('the SOP default is version 3 and no step still says Finance verifies', () => {
     const d = between(SALES, 'const DEFAULT_SALES_SOP = {', "function sopFmt(s)");
-    assert.ok(/sopVersion: 2,/.test(d));
+    assert.ok(/sopVersion: 3,/.test(d));
+    assert.ok(!/sopVersion: 2,/.test(d));
     assert.ok(!d.includes('Finance** verifies'));
   });
-  it('the saved-SOP banner is wired: the President gets the load button, Save writes sopVersion only for a real version', () => {
+  it('the saved-SOP banner is wired: a version below 3 shows it, the President gets the load button, Save writes sopVersion only for a real version', () => {
+    assert.ok(SALES.includes('const oldSopBanner = (data.sopVersion >= 3) ?'), 'the banner shows for a saved SOP below version 3');
     assert.ok(SALES.includes('id="sop-load-v2"') && SALES.includes("container.querySelector('#sop-load-v2')"));
     assert.ok(SALES.includes('...(d.sopVersion >= 2 ? { sopVersion: d.sopVersion } : {}),'));
-    assert.ok(SALES.includes('This SOP is being updated to the new sales flow.'));
+    assert.ok(SALES.includes('This SOP is being updated to the new sales process.'));
+    assert.ok(SALES.includes('The sales process was updated (Nov 2026)') && !SALES.includes('The sales flow changed on 19 Nov 2026'), 'the wording is not tied to one date');
   });
-  it('the How Sales works panel names Mark sent, Lost, Record payment and Generate SO & JO', () => {
-    assert.ok(SALES.includes('On each quote: Mark sent when it goes out, Lost (with a reason) when the client says no, Record payment when the client pays.'));
-    assert.ok(SALES.includes('tap Generate SO & JO to hand the job to Production.'));
+  it('the How Sales works panel names the configurators, the approval link, Download PDF, Mark sent, Lost, Record payment, Generate SO & JO, Won / Projects and Brilliance Steel', () => {
+    const panel = between(SALES, "window.sopPanel('How Sales works', [", '])}');
+    for (const needle of [
+      'The Barro Kitchens configurators are on: pick the area tab, Configure the product, then Add to Quote.',
+      'Prices come from the Standard Price List',
+      "Every quote needs the President\\'s approval.",
+      'Verify & File, then Send for approval (get the link)',
+      'Messenger or Viber',
+      'PDF ▾ → Download PDF',
+      'Reopen it, Verify & File with Update the original quote in place, then PDF ▾ → Download PDF.',
+      'On each quote: Mark sent when it goes out, Lost (with a reason) when the client says no, New Revision for any change.',
+      'When the client pays, tap Record payment on the quote.',
+      'tap Generate SO & JO to hand the job to Production.',
+      'Won / Projects lists every won job from the moment its payment is recorded',
+      'Brilliance Steel is a read-only window',
+    ]) assert.ok(panel.includes(needle), `How Sales works: ${needle}`);
+    assert.ok(!panel.includes('Brilliant'), 'Brilliance Steel, never Brilliant, in the words people read');
+    assert.ok(!panel.includes('₱'), 'no peso figure in a tracked file');
+  });
+  it('the Sales tab chip reads Brilliance Steel while its key (deep links, nav, tests) stays Brilliant Steel', () => {
+    assert.ok(SALES.includes("const salesTabs = ['Clients','Briefs','Quote requests','Quotes','Won','Analytics','Brilliant Steel','Files','SOP','Budgeting','Tasks'];"));
+    assert.ok(SALES.includes("label: s==='Won' ? 'Won / Projects' : s==='Brilliant Steel' ? 'Brilliance Steel' : s"));
+    assert.ok(SALES.includes("case 'Brilliant Steel':"));
+    const bs = between(SALES, "case 'Brilliant Steel':", "case 'Files':");
+    assert.ok(bs.includes('Brilliance Steel — quotes &amp; files shared with Sales for coordination.</div>'));
+    assert.ok(!bs.includes('Brilliant Steel —'), 'the banner no longer uses the old spelling');
+  });
+  it('the per-tab intros match the process: Quotes (configurators, approval, Records), Won / Projects, Quick Estimate (rough check only)', () => {
+    const quotes = between(SALES, "case 'Quotes': {", "case 'Brilliant Steel':");
+    assert.ok(quotes.includes('the Barro Kitchens configurators are on, and the President approves each quote before it goes out.'));
+    assert.ok(quotes.includes('(Mark sent · Record payment · Lost · New Revision)') && quotes.includes('<strong>Quick Estimate</strong> is only a rough price check.'));
+    assert.ok(SALES.includes("from the moment its payment is recorded: the same records as the Projects page. Tap <strong>Open</strong> for the full project folder."));
+    assert.ok(SALES.includes("A job appears here as soon as a client\\'s payment is recorded on a quote."));
+    assert.ok(SALES.includes('<strong>Quick Estimate</strong> — a rough price check from the live product database.'));
+    assert.ok(SALES.includes('The quote itself is built in the Quote Builder, where the Barro Kitchens configurators and the Standard Price List set the price.'));
+    assert.ok(!SALES.includes('One-stop kitchen design'), 'no hype line in the header');
   });
 });
 
