@@ -1005,3 +1005,14 @@ describe('owner Finalize Step 1 (2026-11-20): the standalone banner and the "eve
     assert.match(A, /if\('approveall' in d\) return setApproveAll\(!!el\.checked\);/);
   });
 });
+
+describe('owner 2026-11-20 "Start at no discount": a new quote never pre-selects the month-pace discount; the calculator still shows the suggestion', () => {
+  const code = stripComments(SCRIPT);
+  it('PACE_AUTO_DISCOUNT is false and gates both places that used to pre-select (boot and New)', () => {
+    assert.match(code, /const PACE_AUTO_DISCOUNT = false;/);
+    assert.match(code, /if\(PACE_AUTO_DISCOUNT&&_sd\.live&&_sd\.tier>0&&_de&&\(_de\.value==='0'\|\|!_de\.value\)\) _de\.value=String\(_sd\.tier\);/);
+    assert.match(code, /if\(PACE_AUTO_DISCOUNT&&_sd\.live&&_sd\.tier>0\)\{ const el=document\.getElementById\('discountPct'\); if\(el\) el\.value=String\(_sd\.tier\); \}/);
+    assert.equal((code.match(/el\.value=String\(_sd\.tier\)|_de\.value=String\(_sd\.tier\)/g) || []).length, 2, 'no other place pre-selects it');
+  });
+  it('the hint stays: "Month pace: offer up to n% discount"', () => { assert.match(code, /Month pace: offer up to \$\{_sd\.tier\}% discount/); });
+});
