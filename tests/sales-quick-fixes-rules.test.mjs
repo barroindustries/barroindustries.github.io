@@ -164,7 +164,7 @@ describe('WP0 job_projects money keys', () => {
     for (const k of ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule', 'contractAmount']) {
       assert.ok(keys.includes(k), `${k} missing from the job_projects money list`);
     }
-    assert.match(norm(upd), /\|\| canFinance\(\) \)$/);
+    assert.match(norm(upd), /\|\| canFinance\(\) \)( && paidOk\(\))?$/);
   });
   it('the other job_projects rules are untouched (read, create, delete)', () => {
     const t = norm(JP);

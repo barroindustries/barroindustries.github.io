@@ -65,6 +65,6 @@ describe('F3 job_projects money keys', () => {
     assert.ok(!JP.includes('budgetBadge'));
   });
   it('the money keys still require canFinance()', () => {
-    assert.match(norm(JP), /\|\| canFinance\(\) \);/);
+    assert.match(norm(JP), /\|\| canFinance\(\) \)( && paidOk\(\))?;/);
   });
 });
