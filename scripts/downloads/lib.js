@@ -145,12 +145,12 @@ const proofBar = () => `<ul class="proof" aria-label="Key facts">
   <li><b><em>23</em> years</b><span>in business</span></li>
   <li><b>Built by our own team</b><span>Design, build, deliver and install</span></li>
   <li><b>SS304 food grade</b><span>SS316 laboratory grade on request</span></li>
-  <li><b>6-month warranty</b><span>on workmanship</span></li>
+  <li><b>12-month warranty</b><span>on workmanship</span></li>
 </ul>`;
 const regs = (cls = '') => `<div class="pills ${cls}">${['PhilGEPS-registered', 'SEC-registered', 'VAT-registered'].map((t) => `<span class="pill">${ic('shield')}${t}</span>`).join('')}</div>`;
 const warranty = () => `<div class="cols c2 gap4">
-  <div class="card paper"><div class="fig4"><b>6</b><span>months</span></div><div class="h3">Workmanship warranty</div><p>6-month warranty on workmanship, on every piece we build and install.</p></div>
-  <div class="card paper"><div class="fig4"><b>12</b><span>months</span></div><div class="h3">Preventive maintenance</div><p>Full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™.</p></div>
+  <div class="card paper"><div class="fig4"><b>12</b><span>months</span></div><div class="h3">Workmanship warranty</div><p>12-month warranty on workmanship, on every piece we build and install.</p></div>
+  <div class="card paper"><div class="fig4"><b>12</b><span>months</span></div><div class="h3">Preventive maintenance</div><p>Full-kitchen projects can add 12 months of preventive maintenance service (PMS) with KitchenShield™.</p></div>
 </div>`;
 const link = (href, text) => `<a href="${href}">${text}</a>`;
 

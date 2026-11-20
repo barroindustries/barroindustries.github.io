@@ -236,7 +236,7 @@ const OVEN_PATH = '/products/gas-deck-ovens/';
 // MADE-TO-ORDER pieces, so it cannot contradict the notes of the bought-in items (CE-016 "SS202 1.0mm inner", CE-020 "SS1.2mm top, 0.8mm lower", ...)
 const HUB_CONSTRUCTION = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
 const FAQ_CONSTRUCTION = 'Our made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate, with 1.2 mm bodies and shelving and square-tube posts with adjustable bullet feet; bought-in equipment such as fryers, ovens and refrigeration keeps the specification shown in its catalogue notes.';
-const WARRANTY_TEXT = 'We give a 6-month warranty on workmanship. Full-kitchen projects also include 12 months of preventive maintenance service (PMS) with KitchenShield™.';
+const WARRANTY_TEXT = 'We give a 12-month warranty on workmanship. Full-kitchen projects can also add 12 months of preventive maintenance service (PMS) with KitchenShield™.';
 const INSTALL_TEXT = 'Yes. We design, fabricate, deliver and install, then commission everything on site. Service and support continue after handover.';
 const homeAlts = {};
 for (const m of home.matchAll(/<img\b[^>]*?\bsrc="(site\/img\/projects\/(?:ispsc|dmmmsu)\/\d\d)(?:-thumb)?\.webp"[^>]*?\balt="([^"]*)"/g)) (homeAlts[m[1]] ||= new Set()).add(decode(m[2]));
@@ -621,7 +621,7 @@ describe('the FAQ: 5 questions per page, answered only with facts already on the
         assert.ok(!/\b(lead[- ]?times?|turnaround|within \d+|deposits?|down[- ]?payments?|installments?|payments?|delivery fees?|shipping|freight|discounts?|₱|PHP)\b/i.test(`${q} ${a}`), `a lead time, payment term, fee or amount is in "${q}"`);
         assert.ok(!/\b\d+\s*(?:%|percent)/.test(`${q} ${a}`), q);
         const durations = [...`${q} ${a}`.matchAll(/\b(\d+)[ -]?(minutes?|hours?|days?|weeks?|months?|years?)\b/gi)].map((m) => `${m[1]} ${m[2].replace(/s$/, '')}`);
-        assert.deepEqual(durations, /warranty/.test(q) ? ['6 month', '12 month'] : [], `${p.path}: a duration in "${q}"`);
+        assert.deepEqual(durations, /warranty/.test(q) ? ['12 month', '12 month'] : [], `${p.path}: a duration in "${q}"`);
       }
     });
   });

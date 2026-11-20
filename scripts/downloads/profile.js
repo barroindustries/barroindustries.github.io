@@ -51,7 +51,7 @@ function build() {
           <li><b>One team, end to end.</b> We design, fabricate, deliver and install, then commission on site.</li>
           <li><b>Made to order.</b> Your exact dimensions, SS304 or SS316, with a standard hairline finish (brushed, mirror or satin on request).</li>
           <li><b>Finished with care.</b> Seams welded and ground smooth, surfaces polished to a professional finish.</li>
-          <li><b>Here after handover.</b> A 6-month warranty on workmanship, and 12 months of preventive maintenance with KitchenShield™ on full-kitchen projects.</li>
+          <li><b>Here after handover.</b> A 12-month warranty on workmanship, and full-kitchen projects can add 12 months of preventive maintenance with KitchenShield™.</li>
         </ul>
         <p class="h4 mt3">Companion documents</p>
         <p class="sm mt1"><b>Product catalogue</b><br>${CO.site}/downloads/barro-industries-catalogue.pdf</p>
@@ -91,8 +91,8 @@ function build() {
     <p class="lead">Excellence · Integrity · People first · Growth. Four values shape how we build and how we work with you.</p>
     <div class="cols c2 gap4 mt3 stretch">
       <div class="card"><div class="num">01</div><div class="h3">Excellence</div><p>Every piece is built to order. Seams are welded and ground smooth, and surfaces are polished to a professional finish.</p></div>
-      <div class="card"><div class="num">02</div><div class="h3">Integrity</div><p>We build to your specifications and tell you plainly what we will deliver: your equipment, your sizes, your grade and finish, and a 6-month warranty on workmanship.</p></div>
-      <div class="card"><div class="num">03</div><div class="h3">People first</div><p>One team carries your project from the first consultation and site visit to after-sales support. Full-kitchen projects include 12 months of preventive maintenance service with KitchenShield™.</p></div>
+      <div class="card"><div class="num">02</div><div class="h3">Integrity</div><p>We build to your specifications and tell you plainly what we will deliver: your equipment, your sizes, your grade and finish, and a 12-month warranty on workmanship.</p></div>
+      <div class="card"><div class="num">03</div><div class="h3">People first</div><p>One team carries your project from the first consultation and site visit to after-sales support. Full-kitchen projects can add 12 months of preventive maintenance service with KitchenShield™.</p></div>
       <div class="card"><div class="num">04</div><div class="h3">Growth</div><p>A family business that began in Baguio City and La Union, now a Quezon City manufacturer with projects across Luzon, built on a commitment to long-term growth.</p></div>
     </div>
     <div class="band mt4"><p class="eyebrow">Our promise</p><p class="h1" style="color:#fff;margin-top:3mm">${CO.tagline}</p></div>
@@ -244,7 +244,7 @@ function build() {
     <p class="h4 mt4">After-sales</p>
     <div class="cols c2 gap4 mt1 stretch">
       <div class="card"><div class="icb">${ic('headset')}</div><div class="h3 mt1">Service and support</div><p>Service and support continue after handover, from one team.</p></div>
-      <div class="card"><div class="icb">${ic('shield')}</div><div class="h3 mt1">KitchenShield™</div><p>Preventive maintenance service (PMS) for full-kitchen projects, for 12 months.</p></div>
+      <div class="card"><div class="icb">${ic('shield')}</div><div class="h3 mt1">KitchenShield™</div><p>Preventive maintenance service (PMS) for full-kitchen projects, for 12 months, as an add-on.</p></div>
     </div>
     <div class="fill">${fig('ispsc-02.jpg', 'ISPSC 2026 — rows of stainless-steel work tables in the school room', 'Rows of stainless-steel work tables in a school room.', 'fill', '50% 55%')}</div>` }));
 

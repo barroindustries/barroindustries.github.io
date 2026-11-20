@@ -2500,7 +2500,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     ? { policy: frozenThisMonth.policy, perfFactor: frozenThisMonth.perfFactor,
         kpiScore: frozenThisMonth.kpiScore, attScore: frozenThisMonth.attScore,
         preMultiplierNet: frozenThisMonth.preMultiplierNet,
-        netBeforeCA: frozenThisMonth.netPay ?? frozenThisMonth.finalPay }
+        netBeforeCA: frozenThisMonth.netPay ?? frozenThisMonth.finalPay,
+        // PAYSLIP-BASE-FIX 2026-11-20 — a finalised 'basekpi' month names its base and incentive in pesos (the sentence and the working rows
+        // below read these); the salary_history mirror stores the base as `salary`. Without them the month printed "₱0.00 base paid in full".
+        base: frozenThisMonth.salary, allowance: frozenThisMonth.allowance,
+        kpiFactor: frozenThisMonth.kpiFactor, incentiveFull: frozenThisMonth.incentiveFull,
+        incentiveEarned: frozenThisMonth.incentiveEarned }
     : projLine;
   const payBasisSentenceText = (!noPayRecordWords && typeof window.payBasisSentence === 'function' && payBasisLine)
     ? window.payBasisSentence(kpiSrc === 'sales' ? Object.assign({}, payBasisLine, { kpiSource: 'sales' }) : payBasisLine) : '';
