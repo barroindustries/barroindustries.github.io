@@ -1668,7 +1668,10 @@ service cloud.firestore {
       allow write: if isAuth() && canIt();
     }
     match /it_software/{docId} {
-      allow read: if isAuth() && hasProfile();
+      // 2026-11-20 review: was hasProfile(), so every staff login (and the Corporate Secretary, who is kept out
+      // of IT by owner ruling) could read every licence key. Same tier as it_access / it_network now. The only
+      // reader is the IT screen's Software tab (js/screens/govit.js), which already needs canIt() to write.
+      allow read: if isAuth() && canIt();
       allow write: if isAuth() && canIt();
     }
     match /it_access/{docId} {

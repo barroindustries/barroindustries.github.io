@@ -305,6 +305,7 @@ describe('js/config.js registries', () => {
     assert.equal(win.QUOTE_COMPANIES.BS.internal, false);
     assert.equal(win.QUOTE_COMPANIES.BS.coll, 'bs_quotes');
     assert.equal(win.QUOTE_COMPANIES.BS.page, 'bs-quote-builder');
+    assert.equal(win.QUOTE_COMPANIES.BS.label, 'Brilliance Steel'); // owner 2026-11-20: display name (dept key stays 'Brilliant Steel')
     assert.deepEqual(keys(win.QUOTE_COMPANIES), ['BK', 'BI', 'BS']);
     assert.deepEqual([...win.QUOTE_COLLECTIONS], ['bk_quotes', 'bs_quotes']);
     const salesTabs = win.DEPARTMENTS.Sales.subtabs;
@@ -562,7 +563,7 @@ describe('Phase 3: nothing widens — the retired partner term stands in as hasP
     assert.ok(!/exists\(\s*\/databases\/\$\(database\)\/documents\/users\/\$\(request\.auth\.uid\)/.test(RULES_STRIP(RULES)), 'an exists() of the caller\'s own users doc is back');
   });
   it('the 111 statements that carried the retired term in HEAD still require a profile — the list is pinned (tests/fixtures/rules-profile-statements.json)', () => {
-    assert.equal(FIX.firestoreProfile.length, 117);   // 111 at the partner removal; +3 kc_config / kc_materials (2026-11-19); sweep 2026-10-29 split quote_costs read,write → read+delete / create / update; sales quick fixes 2026-11-19 (WP0) added soSalesUpdate(), the Sales arm of the sales_orders update, which requires a profile (it narrows nothing that was open: Sales could not update an order at all before)
+    assert.equal(FIX.firestoreProfile.length, 116);   // 2026-11-20: -1, it_software read is now canIt() (IT tier, still profile-gated through getRole()). 111 at the partner removal; +3 kc_config / kc_materials (2026-11-19); sweep 2026-10-29 split quote_costs read,write → read+delete / create / update; sales quick fixes 2026-11-19 (WP0) added soSalesUpdate(), the Sales arm of the sales_orders update, which requires a profile (it narrows nothing that was open: Sales could not update an order at all before)
     assert.deepEqual(NOW.firestoreProfile, FIX.firestoreProfile);
   });
   it('and no read has become a bare `isAuth()`: the five that always were are the only ones', () => {
