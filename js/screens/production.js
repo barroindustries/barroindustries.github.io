@@ -863,6 +863,7 @@ function openJobOrderEditor(p, onSaved){
     </div>`;
 
   const _panel = openPage(`${emojiIcon('✏️',16)} Edit Job Order — ` + escHtml(d.no), `
+    ${(p.jobOrder && p.jobOrder.scopeReviewNeeded) ? `<div class="alert-banner alert-warn" style="cursor:default;margin-bottom:12px"><span>${emojiIcon('⚠️',16)} <strong>The scope changed.</strong> Review the lines, then save.</span></div>` : ''}
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
       This IS the job order — everything below prints on the sheet the floor works from.
       It never changes quotation <b>${escHtml(p.quoteNumber||'—')}</b> or the contract value, and the
@@ -991,6 +992,7 @@ function openJobOrderEditor(p, onSaved){
       // any exist even if the wording is identical.
       const differs = joScopeSignature(items) !== joScopeSignature(quoteScope);
       const anyTicks = items.some(r => Object.keys(r.stages || {}).length || r.initials || r.doneDate);
+      // Saving replaces the whole jobOrder map, so a pending jobOrder.scopeReviewNeeded (set by F3) is cleared here, by design.
       const jobOrder = {
         startDate: start, deliveryDate: delivery,
         siteAddress: $('#jo-site').value.trim(),
@@ -1015,7 +1017,7 @@ function openJobOrderEditor(p, onSaved){
       await db.collection('job_projects').doc(p.id).update(patch);
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
       window.logAudit && window.logAudit('update','job_order',p.id,{ jobOrder:d.no, revision:jobOrder.revision, scopeEdited:differs });
-      Notifs.success('Job Order ' + d.no + ' saved (rev. ' + jobOrder.revision + ').');
+      Notifs.success('Job Order ' + d.no + ' saved (edit ' + jobOrder.revision + ').');
       closeModal(); onSaved && onSaved();
     } catch (ex) { err.textContent = 'Save failed: ' + (ex.message || ex.code); err.classList.remove('hidden'); btn.disabled = false; }
   });
@@ -1167,7 +1169,7 @@ function printJobOrder(p, orders){
               address: ent.address, phone: ent.phone, email: ent.email },
     extraMeta: [
       p.quoteNumber ? ('Ref. Quotation: ' + p.quoteNumber) : null,
-      d.revision ? ('Revision ' + d.revision + (d.updatedByName ? ' — ' + d.updatedByName : '')) : null,
+      d.revision ? ('Edit ' + d.revision + (d.updatedByName ? ' — ' + d.updatedByName : '')) : null,
       jobOrders.length ? ('Work Order: ' + jobOrders.map(o => o.orderNo || '—').join(', ')) : null,
     ].filter(Boolean),
     footerNote: 'Job Order ' + d.no + ' · Internal production document — carries no prices and is not a quotation',
@@ -1369,7 +1371,9 @@ async function renderProdJobOrders(el, currentUser, currentRole, showAll=false){
             <span style="color:${late?'var(--danger)':'var(--text-muted)'}">${emojiIcon('📅',16)} ${p.targetDate?`Target ${escHtml(p.targetDate)}${late?` ${emojiIcon('⚠️',16)}`:''}`:'No target date'}</span>
             <span style="color:var(--text-muted)">${emojiIcon('📦',16)} ${(Array.isArray(p.items)?p.items.length:0)} item(s)</span>
             ${jobOrders.length?`<span style="color:var(--text-muted)">${emojiIcon('🏭',16)} ${escHtml(jobOrders.map(o=>o.orderNo||'WO').join(', '))}</span>`:`<span class="badge badge-orange" style="font-size:9px">no work order yet</span>`}
-            ${ed.revision?`<span class="badge badge-blue" style="font-size:9px" title="Edited by Production Planning">${emojiIcon('✏️',9)} rev. ${escHtml(String(ed.revision))}</span>`:''}
+            ${ed.revision?`<span class="badge badge-blue" style="font-size:9px" title="Edited by Production Planning">${emojiIcon('✏️',9)} edit ${escHtml(String(ed.revision))}</span>`:''}
+            ${p.joRev?`<span class="badge badge-blue" style="font-size:9px" title="Contract revision of this job order">R${escHtml(String(p.joRev))}</span>`:''}
+            ${ed.scopeReviewNeeded?`<span class="badge badge-orange" style="font-size:9px" title="The scope changed. Review the lines, then save.">review scope</span>`:''}
             ${(()=>{ const t=joTickedCount(joDoc(p)); return t.total?`<span style="color:var(--text-muted)" title="${t.done} of ${t.total} item-stages ticked">${emojiIcon('✅',16)} ${t.pct}%</span>`:''; })()}
             ${joScopeEdited(p)?`<span class="badge badge-orange" style="font-size:9px" title="The job order scope differs from the quotation">scope changed</span>`:''}
           </div>

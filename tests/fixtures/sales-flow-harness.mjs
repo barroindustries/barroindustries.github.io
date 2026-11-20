@@ -53,6 +53,7 @@ export function makeDb(seed = {}) {
     const out = { ...(existing || {}) };
     for (const [k, v] of Object.entries(patch)) {
       if (isOp(v) && v.__op === 'union') { const cur = Array.isArray(out[k]) ? out[k].slice() : []; if (!cur.some((x) => JSON.stringify(x) === JSON.stringify(v.v))) cur.push(clone(v.v)); out[k] = cur; }
+      else if (isOp(v) && v.__op === 'unionMany') { const cur = Array.isArray(out[k]) ? out[k].slice() : []; for (const it of v.vs) if (!cur.some((x) => JSON.stringify(x) === JSON.stringify(it))) cur.push(clone(it)); out[k] = cur; }
       else if (isOp(v) && v.__op === 'ts') out[k] = stamp();
       else if (isOp(v) && v.__op === 'delete') delete out[k];
       else out[k] = clone(v);
@@ -65,7 +66,7 @@ export function makeDb(seed = {}) {
     limit() { return query(c, filters); },
     async get() {
       log.push({ op: 'query', path: c, filters });
-      const docs = [...col(c).entries()].filter(([, d]) => filters.every(([f, val]) => d[f] === val)).map(([id, d]) => { const s = new Snap(id, d); s.ref = { id }; return s; });
+      const docs = [...col(c).entries()].filter(([, d]) => filters.every(([f, val]) => f.split('.').reduce((x, k) => (x == null ? undefined : x[k]), d) === val)).map(([id, d]) => { const s = new Snap(id, d); s.ref = { id }; return s; });
       return { docs, size: docs.length, empty: !docs.length };
     },
   });
@@ -83,6 +84,13 @@ export function makeDb(seed = {}) {
         async add(data) { const id = `${c}_${++auto}`; log.push({ op: 'add', path: `${c}/${id}`, data }); col(c).set(id, apply({}, data)); return { id }; },
         where: (...a) => query(c).where(...a), orderBy: () => query(c), limit: () => query(c), get: () => query(c).get(),
       };
+    },
+    // db.runTransaction: reads see the store, writes are applied in order after the callback resolves (enough for the contract apply).
+    async runTransaction(fn) {
+      const pending = [];
+      const tx = { get: (ref) => ref.get(), update: (ref, patch) => pending.push(() => ref.update(patch)), set: (ref, d, o) => pending.push(() => ref.set(d, o)) };
+      await fn(tx);
+      for (const w of pending) await w();
     },
     writes(prefix) { return log.filter((l) => l.op !== 'query' && l.path.startsWith(prefix)); },
   };
@@ -158,7 +166,7 @@ export function makeBaseEnv(who = PRES, { seed = {}, banks = [], forms = null, c
   ctx.window = ctx;
   Object.assign(ctx, { currentRole: who.role, currentDepts: who.depts, currentUser: { uid: who.uid, email: who.name.toLowerCase() + '@x.test' }, userProfile: { displayName: who.name } });
   ctx.SECRETARY_BLOCKED_DEPTS = ['Finance', 'IT'];
-  ctx.firebase = { firestore: { FieldValue: { serverTimestamp: () => ({ __op: 'ts' }), arrayUnion: (v) => ({ __op: 'union', v }), delete: () => ({ __op: 'delete' }) } } };
+  ctx.firebase = { firestore: { FieldValue: { serverTimestamp: () => ({ __op: 'ts' }), arrayUnion: (...v) => (v.length === 1 ? { __op: 'union', v: v[0] } : { __op: 'unionMany', vs: v }), delete: () => ({ __op: 'delete' }) } } };
   ctx.db = db;
   ctx.escHtml = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   ctx.safeHttpUrl = (u) => (/^https?:\/\//.test(String(u)) ? String(u) : '');
