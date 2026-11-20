@@ -5539,7 +5539,11 @@ window.buildPayslipHTML = function(model) {
         preMultiplierNet: m.performance.preMultiplierNet, netBeforeCA: m.performance.netBeforeCA,
         kpiFactor: m.performance.kpiFactor, incentiveFull: m.performance.incentiveFull,
         incentiveEarned: m.performance.incentiveEarned,
-        kpiSource: m.performance.kpiSource
+        kpiSource: m.performance.kpiSource,
+        // PAYSLIP-BASE-FIX 2026-11-20 — the 'basekpi' sentence names the base and the incentive in pesos; without these two keys it printed
+        // "₱0.00 base paid in full". Read off the model's own frozen earnings (never recomputed); ignored by every other policy.
+        base: m.earnings ? m.earnings.base : undefined,
+        allowance: m.earnings ? m.earnings.allowance : undefined
       })
     : '';
   // SALES MANAGER KPI (rollout step 6; spec §5.4) — the two working lines of a Sales-KPI payslip, in the one set of words (js/pay-policy.js

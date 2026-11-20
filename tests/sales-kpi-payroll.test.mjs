@@ -975,6 +975,18 @@ describe('C · carry-through: PC.normalizeLine, the phone-card breakdown, payBas
       const flatTask = slip.html(slip.model({ ...mirrorOf(taskLine()), policy: 'flat', uid: 'u-task' }));
       assert.ok(flatTask.includes('Task KPI (70%)') && !flatTask.includes('Sales KPI'));
     });
+    it('PAYSLIP-BASE-FIX: a basekpi payslip names the real base and incentive in its sentence — never "₱0.00 base" (pay_runs line and salary_history mirror alike)', () => {
+      for (const [label, src] of [
+        ['sales, mirror', { ...mirrorOf(salesLine()), uid: 'u-sales' }],
+        ['sales, run line', { ...salesLine(), uid: 'u-sales', month: MONTH }],
+        ['task, mirror', { ...mirrorOf(taskLine()), uid: 'u-task' }],
+        ['task, run line', { ...taskLine(), uid: 'u-task', month: MONTH }],
+      ]) {
+        const html = slip.html(slip.model(src));
+        assert.ok(html.includes('₱10,000.00 base paid in full; the remaining ₱8,000.00 is multiplied'), label);
+        assert.ok(!html.includes('₱0.00 base paid in full'), label);
+      }
+    });
     it('a Sales-KPI line whose working is missing prints no invented lines and does not crash', () => {
       const html = slip.html(slip.model({ ...mirrorOf(salesLine()), salesKpi: null, uid: 'u-sales' }));
       assert.ok(!html.includes('Sales: ₱') && !html.includes('Client rating'));
@@ -1123,6 +1135,14 @@ describe('D · My Finance (renderPersonalFinance) — the employee\'s own page',
         assert.ok(/Sales KPI 62%/.test(t) && t.includes(SALES_LINE) && t.includes(RATING_LINE), label);
         assert.ok(t.includes('Final') && !t.includes('KPI unavailable'), label);
         assert.ok(!t.includes('Task KPI'), label);
+      }
+    });
+    it('PAYSLIP-BASE-FIX: a finalised basekpi month names its frozen base and incentive — never ₱0.00 (sales month and task month)', async () => {
+      for (const [label, data] of [['sales', frozen({ kpiSource: 'sales', salesKpi: WORKING })], ['task', frozen({ kpiScore: 0.9 })]]) {
+        const t = text(await run(makeUiEnv({ data })));
+        assert.ok(t.includes('₱10,000.00 base paid in full; the remaining ₱8,000.00'), label + ': the sentence');
+        assert.ok(t.includes('10,000.00 of your pay is a protected base') && t.includes('The remaining ₱8,000.00 is an incentive'), label + ': how your pay is worked out');
+        assert.ok(!t.includes('₱0.00 base paid in full') && !t.includes('₱0.00 of your pay is a protected base'), label);
       }
     });
     it('a finalised TASK month (no kpiSource on the mirror) stays a task month even though the Sales KPI is in force now', async () => {
