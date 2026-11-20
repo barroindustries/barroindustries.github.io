@@ -259,10 +259,11 @@ describe('3 · what the website view fetches: site.js, fonts and images — no a
 
   it('keeps the three hidden logo images (splash, sign-in, top bar) lazy, so the 848 KB PNG is not fetched for a visitor who never sees them — and the app views preload it', () => {
     const logos = [...html.matchAll(/<img src="icons\/barro-kitchens\.png"[^>]*>/g)].map((m) => m[0]);
-    assert.equal(logos.length, 2);   // owner 2026-11-20: the top bar now shows the horizontal Barro Industries logo (below)
+    assert.equal(logos.length, 1);   // owner 2026-11-20: the top bar and the splash now show the horizontal Barro Industries logo (below)
     for (const t of logos) assert.ok(/\sloading="lazy"/.test(t), `not lazy: ${t.slice(0, 70)}`);
-    assert.deepEqual(logos.map((t) => t.match(/class="([^"]+)"/)[1]), ['splash-logo', 'login-logo-img']);
+    assert.deepEqual(logos.map((t) => t.match(/class="([^"]+)"/)[1]), ['login-logo-img']);
     assert.ok(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="topbar-hlogo" loading="lazy"/.test(html), 'the top bar: the horizontal Barro Industries logo, lazy');
+    assert.ok(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="splash-hlogo" loading="lazy"/.test(html), 'the splash: the horizontal Barro Industries logo, lazy');
     assert.ok(kitLinks.some((l) => l.attrs.rel === 'preload' && l.attrs.href === 'icons/barro-kitchens.png'));
     assert.ok(!/barro-kitchens\.png/.test(outside.replace(/<img src="icons\/barro-kitchens\.png"[^>]*>/g, '')), 'another reference to the large logo in the website view');
   });

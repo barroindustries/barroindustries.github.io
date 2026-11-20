@@ -7133,6 +7133,10 @@ html.theme-astral .splash-logo-card {
 }
 html.theme-astral .splash-bi-fallback { background: var(--grad-pk-bl); }
 
+/* owner 2026-11-20: the horizontal Barro Industries logo replaces the cube card + name. Navy on transparent, drawn white on the dark themes. */
+.splash-hlogo { display: block; width: min(300px, 72vw); height: auto; margin-bottom: 14px; }
+html:not(.light) .splash-hlogo { filter: brightness(0) invert(1); }
+
 /* Wordmark */
 .splash-wordmark-stack {
   display: flex;
