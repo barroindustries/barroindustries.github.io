@@ -47,7 +47,6 @@
   "/inventory_items/{docId} :: allow create,update #1",
   "/inventory_items/{docId} :: allow read #1",
   "/it_assets/{docId} :: allow read #1",
-  "/it_software/{docId} :: allow read #1",
   "/it_tickets/{docId} :: allow read #1",
   "/job_projects/{docId} :: allow read #1",
   "/job_projects/{docId} :: allow update #1",
