@@ -1540,7 +1540,7 @@ describe('the document stylesheet (d7-doc.css)', () => {
   });
   it('the A4 pages: 794 x 1123 px boxes, the print look written out for the properties a phone-width rule of the page would change', () => {
     assert.match(css, /\.d7-a4-page\{[^}]*width:794px;height:1123px/); assert.match(css, /\.d7-a4-doc\{position:absolute;left:-10000px/);
-    assert.match(css, /\.d7-a4-page > \.d7-a4-body\{position:absolute;left:38px;top:42px;width:718px;height:1031px;overflow:hidden/);
+    assert.match(css, /\.d7-a4-page > \.d7-a4-body\{position:absolute;left:30px;top:34px;width:734px;height:1043px;overflow:hidden/);   // owner 2026-11-20: tighter margins (≈8 mm), the PDF engine adds none for the quotation
     for (const rule of [/\.d7-a4-body \.items-table > tbody > tr > td\{padding:2\.5px 6px!important;font-size:8\.5pt!important/, /\.d7-a4-body \.terms-grid\{grid-template-columns:1fr 1fr/, /\.d7-a4-body \.sig-row\.d7-sig3\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/,
       /\.d7-a4-body \.totals-box\{[^}]*position:static/, /\.d7-a4-body \.d7-lh\{[^}]*display:flex/, /\.d7-a4-body \.d7-lh-id\{display:block/]) assert.match(css, rule);
   });
@@ -2196,5 +2196,15 @@ describe('Fable review F12: the line chip and the panel say the same about a lin
     const host = fs.readFileSync(path.join(QB, 'kc/host-d7.js'), 'utf8');
     assert.ok(host.includes('until then the quote goes to the President for approval.'), 'the panel says it');
     assert.match(env.D7.h('flow.approvalReason'), /need review/, 'and Verify & File really does send it for approval');
+  });
+});
+
+describe('owner 2026-11-20 "pdf has too large margins": the quotation asks the PDF engine for no margin of its own; other forms keep the default', () => {
+  it('d7-doc.js passes margin 0 to FormsPdf.download, forms-pdf forwards it per page, pdf-lite uses it and keeps MARGIN otherwise', () => {
+    const doc = fs.readFileSync(path.join(ROOT, 'qb/d7/d7-doc.js'), 'utf8'), fp = fs.readFileSync(path.join(ROOT, 'js/forms-pdf.js'), 'utf8'), pl = fs.readFileSync(path.join(ROOT, 'js/pdf-lite.js'), 'utf8');
+    assert.match(doc, /FormsPdf\.download\(built\.node, name, \{ cutSelector: '\.d7-a4-page', keepNextSelector: '\[data-pdf-no-keep\]', margin: 0 \}\)/);
+    assert.match(fp, /typeof opts\.margin === 'number' \? \{ margin: opts\.margin \} : \{\}/);
+    assert.match(pl, /var m = \(typeof p\.margin === 'number' && p\.margin >= 0 && p\.margin < 100\) \? p\.margin : MARGIN;/);
+    assert.match(pl, /var scale = Math\.min\(\(pageW - 2 \* m\) \/ p\.pxW, \(pageH - 2 \* m\) \/ p\.pxH\);/);
   });
 });

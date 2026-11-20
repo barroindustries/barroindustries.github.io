@@ -66,7 +66,7 @@
 
   window.jpegToPdf = function (jpegBytesOrPages, pxW, pxH, landscape) {
     var pages = Array.isArray(jpegBytesOrPages)
-      ? jpegBytesOrPages.map(function (p) { return { bytes: toBytes(p.bytes), pxW: p.pxW, pxH: p.pxH, landscape: isLandscape(p.landscape) }; })
+      ? jpegBytesOrPages.map(function (p) { return { bytes: toBytes(p.bytes), pxW: p.pxW, pxH: p.pxH, landscape: isLandscape(p.landscape), margin: p.margin }; })
       : [{ bytes: toBytes(jpegBytesOrPages), pxW: pxW, pxH: pxH, landscape: isLandscape(landscape) }];
 
     if (!pages.length) throw new Error('jpegToPdf: no pages supplied');
@@ -76,7 +76,7 @@
     var next = 3;
     var pageObjs = pages.map(function (p) {
       var pageNum = next++, contentsNum = next++, imgNum = next++;
-      return { pageNum: pageNum, contentsNum: contentsNum, imgNum: imgNum, bytes: p.bytes, pxW: p.pxW, pxH: p.pxH, landscape: p.landscape };
+      return { pageNum: pageNum, contentsNum: contentsNum, imgNum: imgNum, bytes: p.bytes, pxW: p.pxW, pxH: p.pxH, landscape: p.landscape, margin: p.margin };
     });
     var maxObjNum = next - 1;
 
@@ -94,7 +94,10 @@
       // existing caller never sets it, so pageW/pageH === PAGE_W/PAGE_H and
       // this is byte-identical to the pre-flag behavior.
       var pageW = p.landscape ? PAGE_H : PAGE_W, pageH = p.landscape ? PAGE_W : PAGE_H;
-      var scale = Math.min((pageW - 2 * MARGIN) / p.pxW, (pageH - 2 * MARGIN) / p.pxH);
+      // Additive (2026-11-20, owner: "pdf has too large margins"): a page may carry its own margin in points. The configurator quotation lays out its own A4 margins,
+      // so it passes 0; every other caller sends nothing and keeps MARGIN, byte for byte as before.
+      var m = (typeof p.margin === 'number' && p.margin >= 0 && p.margin < 100) ? p.margin : MARGIN;
+      var scale = Math.min((pageW - 2 * m) / p.pxW, (pageH - 2 * m) / p.pxH);
       var drawW = p.pxW * scale, drawH = p.pxH * scale;
       var x = (pageW - drawW) / 2, y = (pageH - drawH) / 2;
       var contentStr = 'q ' + drawW.toFixed(2) + ' 0 0 ' + drawH.toFixed(2) + ' ' + x.toFixed(2) + ' ' + y.toFixed(2) + ' cm /Im' + p.pageNum + ' Do Q';

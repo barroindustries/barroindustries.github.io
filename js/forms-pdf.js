@@ -209,7 +209,7 @@
           const ctx = slice.getContext('2d');
           ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, slice.width, slice.height);      // a full-page white canvas: the last page sits at the top like the others
           if (r.sh > 0) ctx.drawImage(canvas, 0, r.sy, canvas.width, r.sh, 0, 0, canvas.width, r.sh);
-          pages.push({ bytes: await (await toJpegBlob(slice, quality)).arrayBuffer(), pxW: slice.width, pxH: slice.height, landscape });
+          pages.push(Object.assign({ bytes: await (await toJpegBlob(slice, quality)).arrayBuffer(), pxW: slice.width, pxH: slice.height, landscape }, typeof opts.margin === 'number' ? { margin: opts.margin } : {}));   // opts.margin (points): optional, see pdf-lite.js
         }
         return pages;
       };
