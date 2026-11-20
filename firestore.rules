@@ -1394,9 +1394,25 @@ service cloud.firestore {
                || !('lostPrevApprovalStatus' in request.resource.data)
                || request.resource.data.lostPrevApprovalStatus == resource.data.get('approvalStatus', null)));
       }
+      // QUOTE-PRESIDENT-FIGURES-SPEC: only the President writes presidentFigures.
+      function figuresWriteOk() {
+        return isPresident()
+          || (resource == null && !('presidentFigures' in request.resource.data))
+          || (resource != null && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['presidentFigures']));
+      }
+      // A revision of a quote the President returned WITH his figures may be filed approved: it must name that doc, be its direct child, and the doc must still offer the carry.
+      function figuresCarryOk() {
+        return request.resource.data.get('approvalCarriedKind', '') == 'figures'
+          && request.resource.data.get('approvalCarriedFrom', '') is string && request.resource.data.get('approvalCarriedFrom', '') != ''
+          && request.resource.data.get('parentQuoteId', '') == request.resource.data.approvalCarriedFrom
+          && exists(/databases/$(database)/documents/bs_quotes/$(request.resource.data.approvalCarriedFrom))
+          && get(/databases/$(database)/documents/bs_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('approvalStatus', '') == 'needs_revision'
+          && get(/databases/$(database)/documents/bs_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('presidentFigures', {}).get('carry', false) == true
+          && get(/databases/$(database)/documents/bs_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('rootQuoteId', request.resource.data.approvalCarriedFrom) == request.resource.data.get('rootQuoteId', '_');
+      }
       function approvalWriteOk() {
-        return lostPrevOk() && (isAdmin() || request.resource.data.get('approvalStatus', '') != 'approved'
-          || (resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk()
+        return figuresWriteOk() && lostPrevOk() && (isAdmin() || request.resource.data.get('approvalStatus', '') != 'approved'
+          || (resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk() || figuresCarryOk()
           || (resource != null && resource.data.get('status', '') == 'lost' && resource.data.get('lostPrevApprovalStatus', '') == 'approved'));
       }
       allow create: if isAuth() && (
@@ -1435,9 +1451,25 @@ service cloud.firestore {
                || !('lostPrevApprovalStatus' in request.resource.data)
                || request.resource.data.lostPrevApprovalStatus == resource.data.get('approvalStatus', null)));
       }
+      // QUOTE-PRESIDENT-FIGURES-SPEC: only the President writes presidentFigures.
+      function figuresWriteOk() {
+        return isPresident()
+          || (resource == null && !('presidentFigures' in request.resource.data))
+          || (resource != null && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['presidentFigures']));
+      }
+      // A revision of a quote the President returned WITH his figures may be filed approved: it must name that doc, be its direct child, and the doc must still offer the carry.
+      function figuresCarryOk() {
+        return request.resource.data.get('approvalCarriedKind', '') == 'figures'
+          && request.resource.data.get('approvalCarriedFrom', '') is string && request.resource.data.get('approvalCarriedFrom', '') != ''
+          && request.resource.data.get('parentQuoteId', '') == request.resource.data.approvalCarriedFrom
+          && exists(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom))
+          && get(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('approvalStatus', '') == 'needs_revision'
+          && get(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('presidentFigures', {}).get('carry', false) == true
+          && get(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('rootQuoteId', request.resource.data.approvalCarriedFrom) == request.resource.data.get('rootQuoteId', '_');
+      }
       function approvalWriteOk() {
-        return lostPrevOk() && (isAdmin() || request.resource.data.get('approvalStatus', '') != 'approved'
-          || (resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk()
+        return figuresWriteOk() && lostPrevOk() && (isAdmin() || request.resource.data.get('approvalStatus', '') != 'approved'
+          || (resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk() || figuresCarryOk()
           || (resource != null && resource.data.get('status', '') == 'lost' && resource.data.get('lostPrevApprovalStatus', '') == 'approved'));
       }
       allow create: if isAuth() && hasProfile() &&
@@ -1476,7 +1508,7 @@ service cloud.firestore {
       allow read: if isAuth() && hasProfile()
         && (isAdmin() || resource.data.get('submitterUid', '') == request.auth.uid);
       allow create: if isAuth() && hasProfile()
-        && request.resource.data.keys().hasOnly(['threadKey','coll','quoteId','rootQuoteId','quoteNumber','kind','text','authorUid','authorName','authorRole','submitterUid','createdAt'])
+        && request.resource.data.keys().hasOnly(['threadKey','coll','quoteId','rootQuoteId','quoteNumber','kind','text','authorUid','authorName','authorRole','submitterUid','createdAt','lines'])
         && request.resource.data.keys().hasAll(['threadKey','coll','quoteId','rootQuoteId','kind','text','authorUid','authorRole','submitterUid','createdAt'])
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.createdAt == request.time
@@ -1488,14 +1520,15 @@ service cloud.firestore {
         && isBoundedString(request.resource.data.get('quoteNumber', ''), 80)
         && isBoundedString(request.resource.data.get('authorName', ''), 120)
         && isBoundedString(request.resource.data.submitterUid, 128)
+        && (!('lines' in request.resource.data) || (isPresident() && request.resource.data.lines is list && request.resource.data.lines.size() <= 60))
         && (request.resource.data.kind != 'comment' || request.resource.data.text.size() > 0)
         && (
           (isPresident() && request.resource.data.authorRole == 'president'
-            && request.resource.data.kind in ['comment', 'returned', 'approved', 'submitted'])
+            && request.resource.data.kind in ['comment', 'returned', 'approved', 'submitted', 'figures'])
           ||
           (!isPresident() && request.resource.data.authorRole == 'sales'
             && request.resource.data.submitterUid == request.auth.uid
-            && request.resource.data.kind in ['comment', 'submitted']
+            && request.resource.data.kind in ['comment', 'submitted', 'applied']
             && get(/databases/$(database)/documents/$(request.resource.data.coll)/$(request.resource.data.quoteId)).data.get('createdBy', '') == request.auth.uid)
         );
       allow update: if false;

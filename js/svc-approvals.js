@@ -317,13 +317,30 @@
 // (js/app.js: 'submitted'). Reads are get()s, sorted here (no composite index: D8). Nothing here ever throws into a caller.
 window.QuoteThread = {
   keyOf(coll, q, id) { return coll + '_' + ((q && q.rootQuoteId) || id); },
-  // PURE. o = { coll, quoteId, q, kind, text, uid, name, role } -> the eleven data keys of a thread entry (createdAt is the writer's server timestamp).
+  // PURE (QUOTE-PRESIDENT-FIGURES-SPEC §3.2). The per-line rows of an entry: { i, name, from, to, note } (numbers or null, name <= 120, note <= 500), at most 60. A row with neither a price nor a note is dropped.
+  lines(rows) {
+    const num = v => (v === null || v === undefined || v === '' || !isFinite(Number(v))) ? null : Number(v);
+    return (Array.isArray(rows) ? rows : []).filter(r => r && typeof r === 'object').map(r => ({
+      i: num(r.i) === null ? 0 : Math.max(0, Math.floor(num(r.i))), name: String(r.name == null ? '' : r.name).slice(0, 120),
+      from: num(r.from), to: num(r.to), note: String(r.note == null ? '' : r.note).trim().slice(0, 500),
+    })).filter(r => r.to !== null || r.note).slice(0, 60);
+  },
+  // PURE. The preview the quote's own card shows for an entry: its text, else (rows and no text) "Prices on N lines" / "Notes on N lines" — never an amount.
+  preview(e) {
+    if (e && e.text) return String(e.text).slice(0, 200);
+    const rows = (e && Array.isArray(e.lines)) ? e.lines : [];
+    const prices = rows.filter(r => r && r.to !== null && r.to !== undefined).length, notes = rows.filter(r => r && r.note).length;
+    const word = n => n + ' ' + (n === 1 ? 'line' : 'lines');
+    return prices ? 'Prices on ' + word(prices) : (notes ? 'Notes on ' + word(notes) : '');
+  },
+  // PURE. o = { coll, quoteId, q, kind, text, uid, name, role, lines? } -> the eleven data keys of a thread entry (createdAt is the writer's server timestamp), plus `lines` when the PRESIDENT's entry has rows.
   entry(o) {
     o = (o && typeof o === 'object') ? o : {};
     const q = (o.q && typeof o.q === 'object') ? o.q : {};
     const quoteId = String(o.quoteId == null ? '' : o.quoteId);
-    const KINDS = ['comment', 'returned', 'approved', 'submitted'];
-    return {
+    const KINDS = ['comment', 'returned', 'approved', 'submitted', 'figures', 'applied'];
+    const rows = o.role === 'president' ? window.QuoteThread.lines(o.lines) : [];
+    const out = {
       threadKey: window.QuoteThread.keyOf(o.coll, q, quoteId),
       coll: String(o.coll == null ? '' : o.coll),
       quoteId,
@@ -336,6 +353,8 @@ window.QuoteThread = {
       authorRole: o.role === 'president' ? 'president' : 'sales',
       submitterUid: String(q.createdBy || ''),
     };
+    if (rows.length) out.lines = rows;
+    return out;
   },
   // entry + createdAt, then the quote's own preview (approvalThread: what the Quotes list card shows), best-effort. -> { ok, id } | { ok: false, error }
   async add(o) {
@@ -346,7 +365,7 @@ window.QuoteThread = {
       try {
         await db.collection(e.coll).doc(e.quoteId).update({
           'approvalThread.count': FV.increment(1),
-          'approvalThread.lastText': e.text.slice(0, 200),
+          'approvalThread.lastText': window.QuoteThread.preview(e),
           'approvalThread.lastByName': e.authorName,
           'approvalThread.lastByRole': e.authorRole,
           'approvalThread.lastAt': FV.serverTimestamp(),

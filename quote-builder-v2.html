@@ -273,6 +273,14 @@ input[type="checkbox"],input[type="radio"]{
 .handoff-bar details{margin-top:5px;font-size:12px;color:#33506f;}
 .handoff-bar summary{cursor:pointer;font-weight:700;}
 .handoff-bar .ho-notes{white-space:pre-wrap;margin-top:3px;background:#fff;border:1px solid #cfe1f3;border-radius:6px;padding:6px 9px;}
+/* QUOTE-PRESIDENT-FIGURES-SPEC 7.2 — the President's figures on a returned quote: the banner above the items and the note beside each line (never printed) */
+.pres-fig-bar{background:#fff8e6;border:1.5px solid #f0c27b;border-radius:10px;padding:9px 14px;margin:0 0 9px;font-size:12.5px;color:#6b4300;line-height:1.5;}
+.pres-fig-bar .pf-line{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;justify-content:space-between;}
+.pres-fig-bar .pf-text{flex:1 1 260px;min-width:0;font-weight:700;}
+.pres-fig-bar .pf-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.pres-fig-bar .pf-lost{margin-top:5px;font-size:12px;color:#9c2b2b;}
+.pres-fig-bar .pf-hint{margin-top:4px;font-size:11.5px;color:#8a6a2a;}
+.pf-row{margin-top:3px;font-size:11.5px;color:#6b4300;line-height:1.4;overflow-wrap:anywhere;}
 body.body-terms-view #handoffBar{display:none!important;}
 
 @media(max-width:768px){
@@ -1710,6 +1718,7 @@ body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:nor
     <label class="no-print d7-only d7-photo-toggle"><input type="checkbox" id="d7PhotoCol" checked onchange="renderItems()"> Photo column</label>
     <span id="itemSavedTag" class="no-print" style="display:none;font-size:11px;font-weight:700;color:var(--green);text-transform:none;letter-spacing:normal;">✓ Saved</span>
   </div>
+  <div class="pres-fig-bar no-print" id="presFigBar" style="display:none;"></div>
 
   <div id="tableWrap" style="overflow-x:auto;">
     <table class="items-table">
@@ -2164,7 +2173,7 @@ body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:nor
         <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. A configured line (and a line from a website request) keeps the <strong>website price</strong> instead — the calculator shows the cost-based price beside it, and <em>Use cost-based</em> / <em>Use website</em> / <em>Apply cost-based to all</em> switch it. A line ticked <strong>pass-through</strong> skips all of it: the supplier price is the client price (no OH, no MK), counted at cost in the calculator — and discounts never touch it. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms. In the <em>Terms</em> tab, the <strong>Warranty plan</strong> is the standard 12-month service warranty, or <em>Full kitchen</em> — the same 12-month warranty, with 12 months of KitchenShield™ preventive maintenance service (PMS) offered at a discount (no PMS price prints; Sales quotes it) — and a tick prints the <strong>“Our standard” page</strong> after the terms (materials &amp; finishes, the standard construction of the products on this quote, warranty, how we work, references, registrations). A quotation filed before the plan existed shows <em>As issued</em>: reopened or revised, it keeps the warranty and site wording and the timeline it was issued with until you pick a plan. The <strong>project timeline</strong> is 25 working days minimum (or 12 working days + 3 per ₱20,000 of materials, if longer; Sundays never counted) on Barro Kitchens and Barro Industries quotations; Brilliance Steel keeps minimum 2 weeks + 3 per ₱20,000.</li>
-        <li><strong>Verify &amp; File</strong> — completeness checklist (it also warns when the total is outside the estimate the client saw online, and waits for any line marked <em>needs a price</em>); filing makes the quote official. A made-to-order line with no size blocks filing; lines still missing specs or a finish are only listed (you can file anyway). 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
+        <li><strong>Verify &amp; File</strong> — completeness checklist (it also warns when the total is outside the estimate the client saw online, and waits for any line marked <em>needs a price</em>); filing makes the quote official. A made-to-order line with no size blocks filing; lines still missing specs or a finish are only listed (you can file anyway). 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). When the President returns a quote with his own prices they show beside each line with his notes: tap <em>Apply President's figures</em>, then send again — a quote sent at his prices is filed as approved, and a quote he approved at his own prices opens with those prices, ready to send as a PDF.</li>
         <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately, and 🛠 Workforce Copy prints the crew version with no prices — item details, qty and unit only. A quotation is always shared as the PDF.</li>
       </ol>
 
@@ -2296,7 +2305,7 @@ body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:nor
      this loader writes the seven local scripts (firebase-config, letterhead, the three above, qb-configured, then js/qb-spec-sheet.js — the pure
      spec-sheet helpers, specs/QB-SELLING-QUOTE-SPEC.md) with that version, as the same
      parser-inserted defer scripts the app-kit in index.html uses. Opened without ?v= (standalone, file://) they load bare, as before. -->
-<script>(function(){var v=new URLSearchParams(location.search).get('v'),q=(v&&/^[0-9][0-9.]*$/.test(v))?'?v='+v:'';['js/firebase-config.js','js/letterhead.js','js/pricing-core.js','js/qr-families.js','js/product-families.js','js/qb-configured.js','js/qb-spec-sheet.js'].forEach(function(f){document.write('<script defer src="'+f+q+'"><\/script>');});})();</script>
+<script>(function(){var v=new URLSearchParams(location.search).get('v'),q=(v&&/^[0-9][0-9.]*$/.test(v))?'?v='+v:'';['js/firebase-config.js','js/letterhead.js','js/pricing-core.js','js/qr-families.js','js/product-families.js','js/qb-configured.js','js/qb-spec-sheet.js','js/quote-figures-core.js'].forEach(function(f){document.write('<script defer src="'+f+q+'"><\/script>');});})();</script>
 <!-- KC (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md section 4.2, as changed by its Addendum 1, A9) — the BK configurators: stylesheets, then the pure money rules, the Sales flow's form engine, the bridge, ONE minified engine file
      (qb/kc.min.js, built by scripts/kc-bundle.js: the build logic is not committed as sources), the host and the live reads (qb/), as the same parser-inserted defer scripts, with the same ?v= rule.
      Order is load-bearing: qb/kc-live.js is last and sets D7.live only when every piece is there. A missing or broken file leaves the feature off and the page exactly as it was (shim below, L1).
@@ -2515,6 +2524,9 @@ const MS_MAX_ROWS=24;    // sanity cap — a contract with 25 stages is a data-e
 // drag handle on this keeps touch users on the up/down buttons only and
 // guarantees a finger-swipe can never be mistaken for a drag start.
 const IS_TOUCH=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
+// QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §7.1 — ENGINE MODE: the review page loads this same file hidden (?engine=1) to work out a quote's totals at the President's own prices. In that mode the page keeps NOTHING
+// of its own: no localStorage write (his unsaved draft on this device is never touched), no cloud draft, no resume or tutorial banner, no toast, no filing. It only answers ENGINE_READY / FIGURES_RESULT (see engineApply).
+const QB_ENGINE = new URLSearchParams(location.search).has('engine');
 let _dragIdx=null;
 let currentCatFilter='all', focusedSearchIdx=-1;
 let DB={products:[],categories:[],laborRoles:[],constants:{}};
@@ -2641,6 +2653,7 @@ function draftClientChanged(){
 function setSavedDraft(id, key){
   savedDraftDocId = id||null;
   savedDraftClientKey = id ? (key||'') : '';
+  if(QB_ENGINE) return;   // engine mode: nothing is written to this device
   try{
     if(id){ localStorage.setItem('bkqb_draft_docid', id); localStorage.setItem('bkqb_draft_key', savedDraftClientKey); }
     else { localStorage.removeItem('bkqb_draft_docid'); localStorage.removeItem('bkqb_draft_key'); }
@@ -2967,6 +2980,7 @@ function setStatus(type, msg){
 // filing gates, share errors). Doesn't freeze the page like alert() did.
 let _toastTimer=null;
 function showToast(msg,type){
+  if(QB_ENGINE) return;   // engine mode: the frame is hidden and speaks only through ENGINE_READY / FIGURES_RESULT
   const t=document.getElementById('qbToast')||(()=>{
     const el=document.createElement('div');
     el.id='qbToast'; el.className='qb-toast no-print';
@@ -3084,6 +3098,7 @@ function initUI(){
   D7.h('core.ready');   // D7:E23 — D7.ready = true; draws the tab row and the cards; reprices the kc lines (runs again on every "Reload DB")
   kcAdoptEngineIfBlank();   // KC:L3 — the office switch has been read (KCLive.load, in loadDatabase): a blank quote takes the engine it gives. D7.core.ready may have done it already; this returns at once then
   if(typeof initTutorial==='function') initTutorial();   // B5 — the same switch decides whether the configurators' What's New entry counts: the gold dot, the banner and the list are measured again now that it is known
+  qbMarkUiReady();   // QUOTE-PRESIDENT-FIGURES-SPEC: the catalogue, prices and settings are in — the engine's ENGINE_READY and an auto-applied "Apply President's figures" wait for this
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4636,8 +4651,16 @@ function configureInstead(sku){
   openConfigurator(mig.familyId, { config:mig.config, dims:mig.dims });
 }
 
+// QUOTE-PRESIDENT-FIGURES-SPEC 7.2: a line at the President's own price says so (who and when in the tooltip, Sales' price it replaced); a line only HELD at Sales' price says that. Print is unchanged: the client document shows the price alone.
+function presPriceChipHtml(item){
+  const p=item&&item.priceBy;
+  if(!p||p.role!=='president') return '';
+  const tip=p.held?'Held at the price Sales set, because another line\'s price moved.':('Set by '+(p.name||'the President')+(p.at?' on '+String(p.at).slice(0,10):'')+'. Sales\' price was '+formatPeso(p.salesPrice)+'.');
+  return `<span class="ms-chip" style="font-size:9px;background:#fff3d6;color:#8a5a00;" title="${attrEsc(tip)}">${p.held?'price held':'President\'s price'}</span>`;
+}
 function priceBasisChipHtml(item, long){
   const pb = item.priceBasis;
+  if(item.priceBy&&item.priceBy.role==='president') return presPriceChipHtml(item);
   // D7:E14 (spec 3.6, M11) — the fourth basis: a kc line priced by the R1 formula from the materials price list. 'manual' (a typed price) keeps its chip below.
   // D7:R4 (owner Q23) — a Chef Mode line sold from the Standard Product Price List says "list price" (its list price plus what the options add by formula); every other configured line says "cost-based"
   if (pb === 'configured' && item._kc && item._kc.list) return `<span class="ms-chip ok" style="font-size:9px;" title="List price: the model's price on the Standard Product Price List (Nov 19), plus what the options add by formula, to the nearest ₱10. Type a price to override it.">list price</span>`;
@@ -4729,7 +4752,7 @@ function applyCostBasedToAll(){
   const targets = items.filter(i => i.id !== 'MISCFEE' && itemCostBasis(i, liveById).hasBasis && (i.priceManual || (i.priceBasis !== undefined && i.priceBasis !== 'cost')));
   if (!targets.length) { showToast('Every line that has a cost basis is already priced by cost.'); return; }
   if (!confirm(`Switch ${targets.length} line(s) to the cost-based price?\n\nThe website and hand-typed prices on those lines are replaced by the calculator's figure (you can switch a line back any time).`)) return;
-  targets.forEach(i => { i.priceBasis = 'cost'; delete i.priceManual; });
+  targets.forEach(i => { i.priceBasis = 'cost'; delete i.priceManual; delete i.priceBy; });   // (a computed price is no longer the President's figure: QUOTE-PRESIDENT-FIGURES-SPEC 5.2)
   saveToStorage(); renderItems(); flashItemSaved();
   showToast(targets.length + ' line(s) now priced by cost.');
 }
@@ -6479,7 +6502,7 @@ function renderItems(){
           </div>
         </td>
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${attrEsc(item.unit||'')}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
-        <td style="text-align:right;"><input class="edit-price${lineNeedsPrice(item)?' needs-price':''}" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"${lineNeedsPrice(item)?' title="No price yet — type one here"':''}><span class="price-print">${(_discFactor>0&&!item.passThrough)?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-_discFactor))}</span>`:formatPeso(item.unitPrice)}</span></td>
+        <td style="text-align:right;"><input class="edit-price${lineNeedsPrice(item)?' needs-price':''}" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"${lineNeedsPrice(item)?' title="No price yet — type one here"':''}>${presFigRowHtml(item)}<span class="price-print">${(_discFactor>0&&!item.passThrough)?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-_discFactor))}</span>`:formatPeso(item.unitPrice)}</span></td>
         <td style="text-align:right;font-weight:600;">${(_discFactor>0&&!item.passThrough)?`<span class="disc-old">${formatPeso(item.amount)}</span> <span class="disc-new">${formatPeso(item.amount*(1-_discFactor))}</span>`:formatPeso(item.amount)}${volNoteHtml}</td>
         <td class="no-print" style="text-align:center;">
           <div class="row-actions">
@@ -6539,7 +6562,7 @@ function d7ItemRowHtml(item,idx,c){
           </div>
           <span class="print-only">${qty} ${txtEsc(item.unit||'pc')}</span>
         </td>
-        <td class="c-up" style="text-align:right;"><input class="edit-price${lineNeedsPrice(item)?' needs-price':''}" type="number" step="0.01" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"${lineNeedsPrice(item)?' title="No price yet — type one here"':''}>${D7.h('pricing.priceNote',item,idx)}<span class="price-print">${disc?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-df))}</span>`:formatPeso(item.unitPrice)}</span></td>
+        <td class="c-up" style="text-align:right;"><input class="edit-price${lineNeedsPrice(item)?' needs-price':''}" type="number" step="0.01" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"${lineNeedsPrice(item)?' title="No price yet — type one here"':''}>${D7.h('pricing.priceNote',item,idx)}${presFigRowHtml(item)}<span class="price-print">${disc?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-df))}</span>`:formatPeso(item.unitPrice)}</span></td>
         <td class="c-amt" style="text-align:right;font-weight:600;">${disc?`<span class="disc-old">${formatPeso(item.amount)}</span> <span class="disc-new">${formatPeso(item.amount*(1-df))}</span>`:formatPeso(item.amount)}${c.volNoteHtml}</td>
         <td class="c-act no-print" style="text-align:center;">
           <div class="row-actions">
@@ -7455,15 +7478,21 @@ function bumpQty(idx,delta){
   saveToStorage();renderItems();flashItemSaved();
 }
 function updateUnit(idx,el){items[idx].unit=el.value;D7.h('adapter.afterItemsChange','updateUnit',idx);/* D7:E16 */saveToStorage();flashItemSaved();}
-function updatePrice(idx,el){
+// QUOTE-PRESIDENT-FIGURES-SPEC 5.2: the data half of a typed price (no save, no render), so the President's figures (QuoteFigures.applyToItems, js/quote-figures-core.js: its pure twin, pinned against this body by
+// tests/quote-builder-static.test.mjs) go through the very same assignments. A hand-typed price is no longer his figure: it lets go of priceBy.
+function setLinePrice(idx,value){
   const it=items[idx];
-  it.unitPrice=parseFloat(el.value)||0;it.amount=it.unitPrice*it.qty;
+  it.unitPrice=parseFloat(value)||0;it.amount=it.unitPrice*it.qty;
   it.priceManual=true;/* OPTION B v2: a hand-typed price sticks — auto-pricing skips it and MK is read as the balancing figure */
   // CONFIGURATOR R4 — a line that carries a price basis (configured, or handed off from a website request) records the typed price as its
   // basis too: priceBasis 'manual' is the PERSISTED twin of priceManual (which the filed payload strips), and a real price clears "needs a price".
   // Plain catalogue lines have no basis and stay byte-identical to before.
   if(it.priceBasis!==undefined){ it.priceBasis='manual'; if(it.unitPrice>0) delete it.needsPrice; }   // D7:E16 — a kc line carries priceBasis 'configured', so a typed price makes it 'manual' here
+  delete it.priceHeld; delete it.priceBy;
   D7.h('adapter.afterItemsChange','updatePrice',idx);   // D7:E16
+}
+function updatePrice(idx,el){
+  setLinePrice(idx,el.value);
   saveToStorage();renderItems();flashItemSaved();
 }
 function deleteItem(idx){items.splice(idx,1);D7.h('adapter.afterItemsChange','deleteItem',idx);/* D7:E16 */saveToStorage();renderItems();}
@@ -8263,7 +8292,7 @@ function resetPricesToComputed(){
   // CONFIGURATOR R4: a hand-typed or website-basis line that HAS a cost basis goes back to the cost rule too; one without a basis keeps its price
   const liveById = new Map((DB.products||[]).map(p => [p.id, p]));
   items.forEach(i => {
-    delete i.priceManual;
+    delete i.priceManual; delete i.priceBy;   // QUOTE-PRESIDENT-FIGURES-SPEC 5.2: "↺" — the line goes back to the computed price, so it is no longer his figure
     if ((i.priceBasis==='manual' || i.priceBasis==='website') && i.id!=='MISCFEE' && itemCostBasis(i, liveById).hasBasis) i.priceBasis = 'cost';
   });
   computeMarginSummary();
@@ -8749,6 +8778,7 @@ function flushSaveToStorageNow(){
 }
 function _flushSaveToStorage(){
   _saveToStorageTimer=null;
+  if(QB_ENGINE) return;   // engine mode: never overwrite the localStorage draft of the person whose session this is
   try{
     const client={
       clientName:document.getElementById('clientName').value,
@@ -8767,7 +8797,7 @@ function _flushSaveToStorage(){
       qnoSeq:document.getElementById('qnoSeq').value,
     };
     localStorage.setItem('bkqb_client',JSON.stringify(client));
-    localStorage.setItem('bkqb_items',JSON.stringify(items,(k,v)=>(k==='_cfg'||k==='_kc')?undefined:v));   // CONFIGURATOR: `_cfg` is runtime-only; D7:E18 — so is a kc line's `_kc`
+    localStorage.setItem('bkqb_items',JSON.stringify(items,(k,v)=>(k==='_cfg'||k==='_kc'||k==='_pf')?undefined:v));   // CONFIGURATOR: `_cfg` is runtime-only; D7:E18 — so is a kc line's `_kc`; QUOTE-PRESIDENT-FIGURES-SPEC 7.2 — and so is `_pf`
     localStorage.setItem('bkqb_source',JSON.stringify(cleanSourceRef(sourceRef,true)));
     localStorage.setItem('bkqb_terms_content',JSON.stringify(termsContent));
     localStorage.setItem('bkqb_terms_enabled',JSON.stringify(termsEnabled));
@@ -9016,6 +9046,7 @@ function captureDraftSnapshot(){
   }catch(e){ _draftSnapshot=null; }
 }
 function checkDraftResume(){
+  if(QB_ENGINE) return;
   if(!_draftSnapshot) return;
   const c=_draftSnapshot.client||{};
   const label=document.getElementById('draftResumeLabel');
@@ -9566,6 +9597,7 @@ async function reserveAtomicQnoSeq(){
 }
 
 async function fileQuotation(){
+  if(QB_ENGINE) return;   // engine mode can never file a quote
   if(_isFiling) return; // double-tap guard — see note above canFile()
   // Fable review F2 (2026-11-20): opened on its own (not inside the app) the page is its own parent, so a filed quote would be posted to nobody while the badge said FILED.
   if(window.parent===window){ showToast('Filing needs the app — open the builder from Sales › Quote Builder. Nothing was filed; your work is still kept on this device.','error'); return; }
@@ -9732,7 +9764,7 @@ function buildQuotePayload(){
   // CONFIGURATOR: `_cfg` (a configured line's base, option deltas and reason — runtime only, recomputed on load) is stripped here too.
   // D7:E18 — also strip `_kc` (a kc line's runtime figures: project cost, materials…); then chunk B's D7.adapter.publicItem() takes the typed costs (cfg.custom[].m / .lab, a custom item's cfg.m / .lab) out of
   // the line's cfg. The peso costs ride the SIDECAR (buildCostSidecar), never the payload (spec 3.9).
-  let strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, _uid, _miscId, _cfg, _kc, ...rest }) => rest);
+  let strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, _uid, _miscId, _cfg, _kc, _pf, ...rest }) => rest);   // _pf: the President's figures beside this line (runtime only, QUOTE-PRESIDENT-FIGURES-SPEC 7.2)
   strippedItems = strippedItems.map(x => (x && x.kcKind) ? (D7.h('adapter.publicItem', x) || x) : x);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
@@ -9956,6 +9988,7 @@ function loadEditableState(state, opts){
       return k==='|' ? '' : k;
     })());
     fileMode='revision';
+    _presFig=null; renderPresFigBar();   // QUOTE-PRESIDENT-FIGURES-SPEC 7.2 — same reset-every-load posture: another quote's figures never follow this one (PRESIDENT_FIGURES arrives after LOAD_QUOTE)
     // CONFIGURATOR §6 — the website request / brief this state came from (null for everything else); same reset-every-load posture
     sourceRef=cleanSourceRef(state.sourceRef,true); estimateReason='';
     // COSTING-QB-UX-SPEC-2026-08-26 §3 — same reset-every-load posture as the
@@ -10008,11 +10041,16 @@ function qbOnMessage(d){
   if(d.type==='LOAD_QUOTE' && d.payload){
     loadEditableState(d.payload.editableState||d.payload, { asRevision: !!d.payload.asRevision });
     hideDraftResumeBanner(); // Wave 3 Q1 — a real reopen takes priority over the local-draft prompt
-    if(quoteEngine==='kc1') D7.h('live.afterLoad', d.payload.editableState||d.payload);   // KC:L6 — the approval this quote carries, its typed costs, the prices (qb/kc-live.js); a legacy quote is never touched by it
+    // KC:L6 — the approval this quote carries, its typed costs, the prices (qb/kc-live.js); a legacy quote is never touched by it. The promise it answers with is kept: the President's figures (below) wait for it.
+    _loadSettled=Promise.resolve(quoteEngine==='kc1' ? D7.h('live.afterLoad', d.payload.editableState||d.payload) : '').catch(function(){});
+    if(QB_ENGINE){ _engineLoaded=true; _loadSettled.then(function(){ _engineLoadDone=true; engineMaybeReady(); }); }
   }
+  // QUOTE-PRESIDENT-FIGURES-SPEC 2.3 / 7.2 — the review page's engine asks for the totals at his prices; Sales' builder is handed the figures a returned quote carries
+  if(d.type==='APPLY_FIGURES' && QB_ENGINE) engineApply(d);
+  if(d.type==='PRESIDENT_FIGURES' && d.payload && !QB_ENGINE) presidentFiguresArrived(d.payload);
   // Host (president review mode) asks for the current edited state to save it back
-  // to the original quote without going through the File flow.
-  if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload() }, window.location.origin); }catch(e){} }
+  // to the original quote without going through the File flow. The cost record rides the envelope (QUOTE-PRESIDENT-FIGURES-SPEC 6.4: "Save edits & Approve" stores it with the prices it saves).
+  if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload(), costSidecar: buildCostSidecar() }, window.location.origin); }catch(e){} }
   // Wave 3 Q6 — parent acked a cloud draft save; flip the chip to "Saved".
   if(d.type==='QUOTE_DRAFT_SAVED') showDraftSavedChip();
   // QB-DRAFTS-SPEC-2026-09-11 — parent acked an explicit 💾 Save draft (a
@@ -10050,14 +10088,145 @@ window.addEventListener('message',ev=>{
 });
 
 // ═══════════════════════════════════════════════════════════════════
+//  QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 — THE PRESIDENT'S OWN PRICES
+//  Two halves, one file. (1) ENGINE MODE (?engine=1, a hidden frame the review page hosts, §2 / §7.1): after LOAD_QUOTE it answers ENGINE_READY with what it computed for the quote as stored (the page proves it
+//  reproduces the stored totals before it trusts anything: P1), and on APPLY_FIGURES it puts the figures on the lines EXACTLY as a typed price (QuoteFigures.applyToItems), runs the builder's own re-price and render,
+//  holds any line nobody touched that moved (an additional cost spread across the non-manual lines can do that, §5.2 step 4) and answers FIGURES_RESULT with the builder's own payload and cost record. The page
+//  proves that too (P2). No totals math lives anywhere but here. (2) SALES' BUILDER (§7.2): a returned quote's figures arrive as PRESIDENT_FIGURES; a banner shows them beside each line and "Apply President's figures"
+//  puts them on the lines (with Undo). Nothing about attribution is ever printed: the client document shows the price alone.
+// ═══════════════════════════════════════════════════════════════════
+let _loadSettled=Promise.resolve();       // the promise KCLive.afterLoad answered for the last LOAD_QUOTE (resolved at once when there is none)
+let _uiReadyOnce=false, _uiReadyWaiters=[]; // initUI() has finished once (the catalogue, the prices and the settings are in)
+let _engineLoaded=false, _engineLoadDone=false, _engineSent=false, _engineSnap=null;
+function qbUiReady(cb){ if(_uiReadyOnce){ try{ cb(); }catch(e){} } else _uiReadyWaiters.push(cb); }
+function qbMarkUiReady(){ _uiReadyOnce=true; const w=_uiReadyWaiters; _uiReadyWaiters=[]; w.forEach(function(f){ try{ f(); }catch(e){} }); if(QB_ENGINE) engineMaybeReady(); }
+function qbPost(msg){ try{ window.parent.postMessage(msg, window.location.origin); return true; }catch(e){ return false; } }
+
+// ENGINE_READY: once, after the quote is loaded, the catalogue / prices are in and (KC mode) afterLoad has settled. base = the totals of the quote as the builder now computes them; units = every line's unit price,
+// by index. The snapshot taken here is the "Sales' prices" every APPLY_FIGURES starts from.
+function engineMaybeReady(){
+  if(!QB_ENGINE || _engineSent || !_engineLoaded || !_engineLoadDone || !_uiReadyOnce) return;
+  _engineSent=true;
+  try{
+    renderItems();   // settle: the prices are in, so every auto line is priced and any held line is decided before the baseline is taken
+    const QFg=window.QuoteFigures;
+    if(!QFg){ qbPost({ type:'ENGINE_READY', base:null, units:null, kc:d7On(), kcState:'no-core' }); return; }
+    _engineSnap=QFg.snapshot(items);
+    qbPost({ type:'ENGINE_READY', base:QFg.summary(buildQuotePayload()), units:items.map(function(it){ return Number(it&&it.unitPrice)||0; }), kc:d7On(), kcState:(window.KCLive&&KCLive.state)||'' });
+  }catch(err){ qbPost({ type:'ENGINE_READY', base:null, units:null, kc:false, kcState:'error' }); }
+}
+// APPLY_FIGURES { seq, figures: [{ i, to }], by: { uid, name }, at } -> FIGURES_RESULT { seq, ok, error?, applied, held, payload, costSidecar, summary }
+function engineApply(d){
+  const reply=function(o){ qbPost(Object.assign({ type:'FIGURES_RESULT', seq:d&&d.seq }, o)); };
+  try{
+    const QFg=window.QuoteFigures;
+    if(!QFg || !_engineSnap){ reply({ ok:false, error:'not-ready' }); return; }
+    if(!QFg.restore(items,_engineSnap)){ reply({ ok:false, error:'lines-changed' }); return; }   // back to Sales' prices on every line first: each request starts from the same place
+    const figures=Array.isArray(d.figures)?d.figures:[];
+    const by=d.by||{};
+    const meta={ uid:String(by.uid||''), name:String(by.name||''), at:String(d.at||''), snap:_engineSnap };
+    const ap=QFg.applyToItems(items,figures,meta);
+    if(ap.skipped.length){ reply({ ok:false, error:'not-applied' }); return; }   // a figure the builder would not put on its line: fail closed
+    ap.applied.forEach(function(i){ D7.h('adapter.afterItemsChange','presidentFigures',i); });   // the builder's own change hook (KC mode: re-links and re-prices; a typed price's "review reset" is not a figure's)
+    renderItems();
+    const held=QFg.holdMoved(items,_engineSnap,ap.applied,meta);
+    if(held.length){ D7.h('adapter.afterItemsChange','presidentFigures',held[0]); renderItems(); }
+    if(QFg.movedLines(items,_engineSnap,ap.applied).length){ reply({ ok:false, error:'unstable' }); return; }   // one hold pass only
+    const payload=buildQuotePayload();
+    reply({ ok:true, applied:ap.applied, held:held, payload:payload, costSidecar:buildCostSidecar(), summary:QFg.summary(payload) });
+  }catch(err){ reply({ ok:false, error:'error' }); }
+}
+
+// ── Sales' builder: the figures banner, the note beside each line, Apply and Undo (§7.2) ─────────────────────────────────────────────────────────────────────
+let _presFig=null;   // { by, byName, at, ref, rows, unmatched, applied, undo }
+function presidentFiguresArrived(p){
+  const QFg=window.QuoteFigures;
+  const rows=Array.isArray(p.lines)?p.lines:[];
+  Promise.resolve(_loadSettled).then(function(){
+    items.forEach(function(it){ if(it) delete it._pf; });
+    const m=QFg?QFg.matchForApply(items,rows):{ matched:[], unmatched:rows };
+    m.matched.forEach(function(x){ items[x.idx]._pf={ to:(x.row.to===null||x.row.to===undefined)?null:Number(x.row.to), from:x.row.from, note:String(x.row.note||''), byName:String(p.byName||''), at:String(p.at||'') }; });
+    _presFig={ by:String(p.by||''), byName:String(p.byName||''), at:String(p.at||''), ref:String(p.ref||''), rows:rows, unmatched:m.unmatched, applied:0, undo:null };
+    renderItems(); renderPresFigBar();
+    if(p.autoApply) qbUiReady(function(){ applyPresidentFigures(); });   // "Apply President's figures" from the review page / the Quotes list: after the load AND the prices have settled
+  });
+}
+function presFigCounts(){
+  const rows=(_presFig&&_presFig.rows)||[];
+  return { prices:rows.filter(function(r){ return r&&r.to!==null&&r.to!==undefined; }).length, notes:rows.filter(function(r){ return r&&String(r.note||'').trim(); }).length };
+}
+function renderPresFigBar(){
+  const bar=document.getElementById('presFigBar');
+  if(!bar) return;
+  const P=_presFig;
+  if(!P){ bar.style.display='none'; bar.innerHTML=''; return; }
+  const c=presFigCounts();
+  const word=function(n){ return n+' '+(n===1?'line':'lines'); };
+  let head;
+  if(P.applied>0) head=`The President's prices are applied to ${word(P.applied)}.`;
+  else head=(c.prices?`The President set prices on ${word(c.prices)}`+(c.notes?` and left notes on ${c.notes}`:''):`The President left notes on ${word(c.notes)}`)+'.';
+  const buttons=(P.applied>0
+    ? `<button type="button" class="btn btn-outline btn-sm" id="presFigUndo" onclick="undoPresidentFigures()">Undo</button>`
+    : (c.prices?`<button type="button" class="btn btn-primary btn-sm" id="presFigApply" onclick="applyPresidentFigures()">Apply President's figures</button>`:''))
+    + (P.ref?`<button type="button" class="btn btn-outline btn-sm" onclick="openPresidentComments()">See comments</button>`:'');
+  const lost=P.unmatched.length?`<div class="pf-lost">Could not be matched to a line (the line changed): ${P.unmatched.map(function(r){ return txtEsc(String(r.name||'A line'))+(r.to!==null&&r.to!==undefined?': '+formatPeso(r.to):''); }).join('; ')}</div>`:'';
+  bar.innerHTML=`<div class="pf-line"><div class="pf-text">${txtEsc(head)}</div><div class="pf-btns">${buttons}</div></div>${lost}`
+    +`<div class="pf-hint">Send from this quote, not from a draft, to keep the President's prices.</div>`;
+  bar.style.display='';
+}
+function openPresidentComments(){
+  const P=_presFig; if(!P||!P.ref) return;
+  qbPost({ type:'QB_OPEN_APPROVAL', payload:{ ref:P.ref } });
+}
+// "President: X" with his note under a line's price, while his price is not on the line yet; his note stays. The chip (presPriceChipHtml) takes over once it is applied. Never printed.
+function presFigRowHtml(item){
+  const f=item&&item._pf;
+  if(!f) return '';
+  const showPrice=f.to!==null&&f.to!==undefined&&Math.abs((Number(item.unitPrice)||0)-Number(f.to))>0.004;
+  if(!showPrice && !String(f.note||'').trim()) return '';
+  return `<div class="pf-row no-print">`+(showPrice?`<strong>President: ${formatPeso(f.to)}</strong>`:'')+(f.note?`${showPrice?' · ':'<strong>President&#39;s note: </strong>'}${txtEsc(f.note)}`:'')+`</div>`;
+}
+// Apply: his figures on the lines exactly as typed prices, the builder's own change hook and render, the moved lines held (§5.2), saved. Undo puts every price key back.
+function applyPresidentFigures(){
+  const P=_presFig, QFg=window.QuoteFigures;
+  if(!P||!QFg||P.applied>0) return;
+  const figs=[];
+  items.forEach(function(it,i){ if(it&&it._pf&&it._pf.to!==null&&it._pf.to!==undefined&&QFg.eligible(it)) figs.push({ i:i, to:it._pf.to }); });
+  if(!figs.length){ showToast('There are no prices to apply on this quote.','error'); return; }
+  const snap=QFg.snapshot(items);
+  const meta={ uid:P.by, name:P.byName, at:P.at, snap:snap };
+  const ap=QFg.applyToItems(items,figs,meta);
+  ap.applied.forEach(function(i){ D7.h('adapter.afterItemsChange','presidentFigures',i); });
+  renderItems();
+  const held=QFg.holdMoved(items,snap,ap.applied,meta);
+  if(held.length){ D7.h('adapter.afterItemsChange','presidentFigures',held[0]); renderItems(); }
+  P.undo=snap; P.applied=ap.applied.length;
+  saveToStorage();
+  renderPresFigBar();
+  showToast('Applied to '+ap.applied.length+(ap.applied.length===1?' line.':' lines.'));
+}
+function undoPresidentFigures(){
+  const P=_presFig, QFg=window.QuoteFigures;
+  if(!P||!QFg||!P.undo) return;
+  if(!QFg.restore(items,P.undo)){ showToast('Could not undo: the lines changed after the prices were applied.','error'); return; }
+  D7.h('adapter.afterItemsChange','presidentFigures',null);
+  renderItems();
+  P.undo=null; P.applied=0;
+  saveToStorage();
+  renderPresFigBar();
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  Wave 3 Q6 — CLOUD DRAFT (debounced 5s idle → parent → draft_{uid} doc)
 // ═══════════════════════════════════════════════════════════════════
 function scheduleDraftSave(){
+  if(QB_ENGINE) return;   // engine mode: no cloud draft (QUOTE-PRESIDENT-FIGURES-SPEC 7.1)
   if(quoteStatus==='filed'||quoteStatus==='pending_approval') return; // nothing to autosave once filed/submitted
   if(draftSaveTimer) clearTimeout(draftSaveTimer);
   draftSaveTimer=setTimeout(sendQuoteDraft,5000);
 }
 function sendQuoteDraft(){
+  if(QB_ENGINE) return;   // engine mode: nothing is posted but ENGINE_READY / FIGURES_RESULT
   try{
     const hasItems=items.length>0;
     const hasClient=!!(document.getElementById('clientName')?.value?.trim()||document.getElementById('clientCompany')?.value?.trim());
@@ -10323,12 +10492,15 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 53;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 54;   // integer; bump on every user-visible quote-builder change
 // CONFIGURATOR §7 — what the Verify & File modal does when the quote's total sits outside the estimate range the client saw online.
 // 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
 // them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
 const ESTIMATE_RANGE_MODE = 'warn';
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon. An entry with kc:true is the configurators' own and is shown only while they are on for this person (kcWhatsNewOn(), Addendum 2 B5).
+  { ver:54, date:'2026-11-20', kc:true, items:[
+    'When the President returns a quote with his own prices, the builder shows them beside each line with his notes. Tap Apply President\'s figures to fill them in, then send again: a quote sent at his prices is filed as approved. A quote he approved at his own prices opens with those prices and is ready to send as a PDF.'
+  ]},
   { ver:53, date:'2026-11-20', kc:true, items:[   // kc:true: shown with the configurators (on for everyone since 2026-11-20), so a switched-off builder keeps its 50 baseline
     'The standard warranty is now 12 months: the Warranty plan, the Warranty term, the summary line under the grand total and the “Our standard” page all say 12-month service warranty. Full kitchen is the same 12-month warranty, with 12 months of KitchenShield™ preventive maintenance offered at a discount — it no longer reads as extra warranty months, and no PMS price prints.'
   ]},
@@ -10587,7 +10759,7 @@ const TOUR_STEPS = [
    kcBody:'The calculator — one surface, two cards. The build: materials + labor (30 / 50 / 70 %) + 10 % misc = the PROJECT COST, the floor a discount never goes below. The President sets one Markup for this quote (blank = the standard, times 2) and every cost-based line, custom items included, is priced at project cost times that number (a Chef Mode line keeps its list-price offset); the OH and MK dials are gone. The per-line table shows each line with its computed price and an editable price. It all lands on the quote, live. Only the President sees the costs; clients never do.',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
-   kcBody:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price". A line that needs review, or a quote priced below the standard, cannot be filed by Sales: Verify & File says why, and "Send for approval" then gives you a link to the quote itself, to pass to the President by Messenger or Viber: he opens it, sees every line, and approves, returns or comments. The Pending Approval badge and the Approval link button on the Quotes list show the link again.',
+   kcBody:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price". A line that needs review, or a quote priced below the standard, cannot be filed by Sales: Verify & File says why, and "Send for approval" then gives you a link to the quote itself, to pass to the President by Messenger or Viber: he opens it, sees every line, and approves, returns or comments. The Pending Approval badge and the Approval link button on the Quotes list show the link again. When the President returns a quote with his own prices, they show beside each line: tap Apply President\'s figures and send again.',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price".' },
  { target:'#btnPrint', kcTarget:'#btnPdfMenu', title:'Save PDF, Agent & Workforce copies',
    kcBody:'The 📄 PDF button opens a small menu. Download PDF saves the client document as an A4 PDF named by its quote number and nothing else (the R number at the end of it is the revision) — the ONLY way a quotation is shared. Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: the drawing and the build detail of each line, with quantity and unit — no prices anywhere.',
@@ -10859,6 +11031,7 @@ function endTour(){
 // read/write in try/catch — this must never break boot (called from the
 // DOMContentLoaded handler above).
 function initTutorial(){
+  if(QB_ENGINE) return;   // engine mode: no banner, no gold dot, no What's New
   try{
     let seenVer=0, dismissedVer=-1;
     try{ const sv=parseInt(localStorage.getItem('qbTutSeenVer'),10); seenVer=isNaN(sv)?0:sv; }catch(e){}

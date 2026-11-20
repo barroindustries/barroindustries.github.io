@@ -154,9 +154,10 @@ describe('the page — static: the loaders, the shim, the gate, the stamp, what 
   });
 
   it('the tutorial (repo contract): TUTORIAL_VERSION 52 (the approval link, on top of the configurators\' 51 and Q70\'s 50), What\'s New 51 in plain words, Help has the Configurators section and the device row, every TOUR_STEPS target resolves', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 53;/);
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 54;/);
     const wn52 = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.equal(wn52[0].ver, 53, 'owner 2026-11-20: the 12-month warranty note is the newest entry'); assert.equal(wn52[0].kc, true); wn52.shift();
+    assert.equal(wn52[0].ver, 54, 'QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20: the President\'s figures note is the newest entry'); assert.equal(wn52[0].kc, true); wn52.shift();
+    assert.equal(wn52[0].ver, 53, 'owner 2026-11-20: the 12-month warranty note'); assert.equal(wn52[0].kc, true); wn52.shift();
     assert.equal(wn52[0].ver, 52, 'QUOTE-APPROVAL-LINK-SPEC-2026-11-20: the approval link is the newest entry');
     const wn = wn52.slice(1);   // 51 and below: what this test has always pinned
     assert.equal(wn[0].ver, 51);
@@ -670,10 +671,10 @@ describe('Addendum 2 B5: the configurators\' What\'s New entries (v51, and v52 t
   const seen = (b) => b.store.get('qbTutSeenVer') || null;
 
   it('static: the v51 and v52 entries are the two flagged kc:true (nothing else is), the version constant is 52, the helpers exist, and initUI measures the tutorial again once the switch has been read', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 53;/);
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 54;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.deepEqual(wn.filter((e) => e.kc).map((e) => e.ver), [53, 52, 51], 'only the configurators\' entry, the approval-link entry and the warranty note are held');
-    assert.equal(wn[0].ver, 53); assert.equal(wn[1].ver, 52); assert.equal(wn[2].ver, 51); assert.equal(wn[3].ver, 50); assert.equal(wn[3].kc, undefined);
+    assert.deepEqual(wn.filter((e) => e.kc).map((e) => e.ver), [54, 53, 52, 51], 'only the configurators\' entry, the approval-link entry, the warranty note and the President\'s figures note are held');
+    assert.equal(wn[0].ver, 54); assert.equal(wn[1].ver, 53); assert.equal(wn[2].ver, 52); assert.equal(wn[3].ver, 51); assert.equal(wn[4].ver, 50); assert.equal(wn[4].kc, undefined);
     for (const f of ['kcWhatsNewOn', 'whatsNewList', 'tutorialVersion', 'tutMarkSeen']) assert.ok(SCRIPT.includes(`function ${f}(`), f);
     assert.match(fnSource('kcWhatsNewOn'), /KCLive\.allowsNew\(\)/, 'the one question the page already asks for a new quote');
     const ui = stripComments(fnSource('initUI')); assert.ok(ui.indexOf('kcAdoptEngineIfBlank()') > 0 && ui.indexOf('initTutorial()') > ui.indexOf('kcAdoptEngineIfBlank()'), 'initTutorial runs again after the switch was read');
@@ -685,11 +686,11 @@ describe('Addendum 2 B5: the configurators\' What\'s New entries (v51, and v52 t
     const b = mk(false); b.run('initTutorial()');
     assert.deepEqual(vers(b)[0], 50); assert.equal(vers(b).includes(51), false, 'no v51 entry'); assert.equal(vers(b).includes(52), false, 'no v52 entry'); assert.equal(/seven tabs|configurator/i.test(list(b)), false, 'nothing about the configurators');
     assert.equal(b.run('tutorialVersion()'), 50); assert.equal(b.run('kcWhatsNewOn()'), false);
-    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length') - 3);
+    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length') - 4);
   });
   it('switch ON (kcMode "on", or "president" for the President, or the device force: all of them are KCLive.allowsNew()): the list starts at 52 and the version is 52', () => {
     const b = mk(true); b.run('initTutorial()');
-    assert.equal(vers(b)[0], 53); assert.equal(vers(b)[1], 52); assert.equal(vers(b)[2], 51); assert.ok(/seven tabs/.test(list(b))); assert.equal(b.run('tutorialVersion()'), 53); assert.equal(b.run('kcWhatsNewOn()'), true);
+    assert.equal(vers(b)[0], 54); assert.equal(vers(b)[1], 53); assert.equal(vers(b)[2], 52); assert.equal(vers(b)[3], 51); assert.ok(/seven tabs/.test(list(b))); assert.equal(b.run('tutorialVersion()'), 54); assert.equal(b.run('kcWhatsNewOn()'), true);
     assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length'));
   });
   it('the question is asked of the live layer and nothing else: no layer (D7.live off), no KCLive, no allowsNew, one that throws, or one that says no: all of these hold the entry back', () => {
@@ -713,8 +714,8 @@ describe('Addendum 2 B5: the configurators\' What\'s New entries (v51, and v52 t
     b.run('initTutorial()'); assert.equal(dot(b), false, 'switch still off: nothing new'); assert.equal(bannerText(b), '');
     switchTo(b, true); b.run('initTutorial()');
     assert.equal(dot(b), true, 'the switch is on: v52 is news'); assert.match(bannerText(b), /The quote builder was updated/); assert.equal(seen(b), '50', 'initTutorial does not mark anything as seen');
-    assert.equal(vers(b)[0], 53);
-    b.run('openHelpModal()'); assert.equal(seen(b), '53'); assert.equal(dot(b), false); assert.equal(b.el('qbTutBanner').style.display, 'none');
+    assert.equal(vers(b)[0], 54);
+    b.run('openHelpModal()'); assert.equal(seen(b), '54'); assert.equal(dot(b), false); assert.equal(b.el('qbTutBanner').style.display, 'none');
     b.run('initTutorial()'); assert.equal(dot(b), false, 'once seen, it stays seen'); assert.equal(bannerText(b), '');
   });
   it('the update banner and the Help button are measured against what the person can see: with the switch off and 50 seen, nothing is pending; a person who last saw 49 is told, and Dismiss is remembered for the version they could see', () => {
@@ -725,24 +726,24 @@ describe('Addendum 2 B5: the configurators\' What\'s New entries (v51, and v52 t
     switchTo(b, true); b.run('initTutorial()'); assert.match(bannerText(b), /updated/, 'dismissing 50 does not hide 52');
   });
   it('what a person has seen only grows: a person who saw 52 while it was on keeps 52 when it is switched off, and Help or the tour with the switch off never lowers it', () => {
-    const b = mk(true); b.run('openHelpModal()'); assert.equal(seen(b), '53'); b.run('closeHelpModal()');
-    switchTo(b, false); b.run('openHelpModal()'); assert.equal(seen(b), '53', 'never lowered to 50'); b.run('closeHelpModal()');
+    const b = mk(true); b.run('openHelpModal()'); assert.equal(seen(b), '54'); b.run('closeHelpModal()');
+    switchTo(b, false); b.run('openHelpModal()'); assert.equal(seen(b), '54', 'never lowered to 50'); b.run('closeHelpModal()');
     b.run('initTutorial()'); assert.equal(dot(b), false);
-    b.run('showTourStep = function () {}; startTour()'); assert.equal(seen(b), '53', 'the tour does not lower it either');
+    b.run('showTourStep = function () {}; startTour()'); assert.equal(seen(b), '54', 'the tour does not lower it either');
     b.run('endTour()');
     const t = mk(false); t.run('showTourStep = function () {}; startTour()'); assert.equal(seen(t), '50', 'the tour with the switch off marks 50, not 52'); assert.equal(dot(t), false);
     switchTo(t, true); t.run('initTutorial()'); assert.equal(dot(t), true, 'and 52 is still news the day it is on');
-    const d = mk(true); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '53'); switchTo(d, false); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '53', 'a dismissal is not lowered either');
+    const d = mk(true); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '54'); switchTo(d, false); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '54', 'a dismissal is not lowered either');
   });
   it('initTutorial is a pure function of the state it reads: run again after the switch is read, a banner that no longer applies goes away (it is never left showing)', () => {
     const b = mk(true); b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/);
-    b.store.set('qbTutSeenVer', '53'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'seen 53 with the switch on: nothing to tell');
-    b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/); b.store.set('qbTutDismissedVer', '53'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'dismissed at this version');
+    b.store.set('qbTutSeenVer', '54'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'seen 54 with the switch on: nothing to tell');
+    b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/); b.store.set('qbTutDismissedVer', '54'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'dismissed at this version');
   });
   it('the Help list is redrawn every time Help opens, so it follows the switch as it is then (and the device row of Help, which can turn it off)', () => {
-    const b = mk(true); b.run('initTutorial()'); assert.equal(vers(b)[0], 53);
+    const b = mk(true); b.run('initTutorial()'); assert.equal(vers(b)[0], 54);
     switchTo(b, false); b.run('openHelpModal()'); assert.equal(vers(b)[0], 50, 'off now: the v51 and v52 entries are gone from the list');
-    switchTo(b, true); b.run('openHelpModal()'); assert.equal(vers(b)[0], 53);
+    switchTo(b, true); b.run('openHelpModal()'); assert.equal(vers(b)[0], 54);
   });
   it('the keys are the same (qbTutSeenVer, qbTutDismissedVer) and are never renamed or cleared by the gate', () => {
     for (const k of ['qbTutSeenVer', 'qbTutDismissedVer']) assert.ok(SCRIPT.includes(`'${k}'`), k);
@@ -1001,9 +1002,9 @@ describe('Fable review F13 (2026-11-20): Help and the tour say what the page pri
     assert.equal(/"<quote no\.> Rev\. 1"|Rev\. 1"/.test(HTML), false);
   });
   it('the tutorial version is NOT bumped by these copy fixes (a bump would pop the "updated" banner for everyone on launch day); it moved to 52 only for the approval link (QUOTE-APPROVAL-LINK-SPEC-2026-11-20)', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 53;/);
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 54;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.equal(wn[0].ver, 53); assert.equal(wn[1].ver, 52); assert.equal(wn[2].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
+    assert.equal(wn[0].ver, 54); assert.equal(wn[1].ver, 53); assert.equal(wn[2].ver, 52); assert.equal(wn[3].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
   });
 });
 
@@ -1053,7 +1054,9 @@ describe('owner 2026-11-20 "make the approved quote PDF one tap": a quote reopen
   });
   it('the app reopens a filed (or approved) quote as filed, never one waiting for or refused approval', () => {
     const app = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
-    assert.match(app, /if \(!window\._qbReopenState\.filedAt && q\.status === 'filed' && !\['pending_review', 'returned', 'rejected'\]\.includes\(appr\)\)/);
+    // (QUOTE-PRESIDENT-FIGURES-SPEC 2.3: the preparation moved into window.qbStateForDoc, which reopenQuoteFromDoc and the review page's engine frame both call; a pending quote has status 'pending_approval', so it is never stamped)
+    assert.match(app, /if \(!state\.filedAt && q\.status === 'filed' && !\['pending_review', 'returned', 'rejected'\]\.includes\(appr\)\)/);
+    assert.match(app, /window\._qbReopenState = await window\.qbStateForDoc\(collection, id, q\);/);
     assert.match(app, /const t = q\.approvedAt \|\| q\.filedAt \|\| q\.createdAt;/);
   });
 });

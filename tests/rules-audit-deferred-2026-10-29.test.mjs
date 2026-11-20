@@ -71,7 +71,7 @@ describe('D1 quote_costs: a Sales Agent reaches only their own cost sidecars', (
     const app = read('js/app.js');
     const at = app.indexOf("collection('quote_costs').doc(coll + '_' + id).set(");
     assert.ok(at > 0, 'the sidecar save moved — update this test');
-    assert.match(app.slice(at, at + 300), /createdBy: currentUser\.uid/);
+    assert.match(app.slice(at, at + 300), /createdBy: opts\.createdBy \|\| currentUser\.uid/, 'the stamp defaults to the signed-in user; the one other caller (the President deciding on someone else\'s quote) names the quote\'s creator, never his own uid');
   });
 });
 

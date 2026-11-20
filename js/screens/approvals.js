@@ -1563,8 +1563,13 @@ window.syncQuoteStatusToRequest = async function (coll, quoteId, state) {
 // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §4 — ONE decision function. Approve / Return used to live in three copies (the two wrappers below, the review panel's two inline handlers in
 // openQuoteApprovalReview, and the builder's review bar in js/app.js saveReviewedPartnerQuote); the copies had drifted (different notification wording, the builder bar never
 // synced the website request, nothing stopped a second approval). They are all callers of this now.
-//   o = { coll, quoteId, action: 'approve' | 'return', notes, edits, agentId, quoteNumber, clientName, toastOk }
-//   -> { ok: true } | { ok: false, reason: 'missing' | 'state' | 'busy' | 'offline' | 'error', state? }.  Never throws.
+//   o = { coll, quoteId, action: 'approve' | 'return', notes, edits, agentId, quoteNumber, clientName, toastOk, figures, expectSig, costSidecar }
+//   -> { ok: true } | { ok: false, reason: 'missing' | 'state' | 'busy' | 'offline' | 'changed' | 'error', state? }.  Never throws.
+// QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §6.4 (all three options are additive; a call without them is byte for byte what it was):
+//   figures      { mode: 'approve' | 'return', lines, changed, totals, exact, carry, held } — the President's own prices and per-line notes. Written as presidentFigures in the SAME update (the President only:
+//                for anyone else it is ignored). A decision with no figures deletes a presidentFigures the doc already carries (an earlier offer must not outlive a plain decision).
+//   expectSig    P3, QuoteFigures.sig of the quote the page computed its figures on: when the fresh read differs the decision is refused with reason 'changed' and NOTHING is written.
+//   costSidecar  the builder's cost record at the new prices (an approval that saves money edits: at his figures, or the builder's Save edits & Approve): replaces the stored one after the update, keeping the creator's createdBy.
 // The guard is get-then-update (no transaction: there is one approver) plus an in-flight Set, and callers wrap the button in window.busy. A quote that is not waiting for approval
 // (already approved, already returned, never sent) is refused with no write at all. The thread entry (step 9) is best-effort: a refused write (rules not deployed yet, a manager
 // deciding here instead of on the review page) costs the thread entry only.
@@ -1590,13 +1595,34 @@ async function decideQuoteApproval(o){
         : 'This quote is not waiting for approval.', 'info');
       return { ok:false, reason:'state', state: d.approvalStatus || d.status || '' };
     }
+    // P3 (QUOTE-PRESIDENT-FIGURES-SPEC §2.4): the quote must still be the one the figures were worked out on (a missing core fails closed, like a different quote). No write.
+    if(o.expectSig !== undefined && o.expectSig !== null){
+      const QF = window.QuoteFigures;
+      if(!QF || typeof QF.sig !== 'function' || QF.sig(d) !== o.expectSig){
+        Notifs.showToast('This quote changed since you opened it. It was reloaded: check your prices.','info');
+        return { ok:false, reason:'changed' };
+      }
+    }
     const FV = firebase.firestore.FieldValue;
+    const byNameNow = (typeof userProfile !== 'undefined' && userProfile && userProfile.displayName) || currentUser.email || '';
+    // the President's figures: his own call only (the rules refuse presidentFigures from anyone else); the edits and the mode must agree with each other, or nothing is written
+    const fig = (o.figures && typeof o.figures === 'object' && typeof currentRole !== 'undefined' && currentRole === 'president') ? o.figures : null;
+    const figRows = fig && Array.isArray(fig.lines) ? fig.lines.slice(0, 60) : [];
+    const figChanged = fig ? (Number(fig.changed) || 0) : 0;
+    if(fig && figChanged > 0){
+      const e0 = o.edits || {};
+      const withMoney = Array.isArray(e0.items) && typeof e0.total === 'number';
+      if((approve && (fig.mode !== 'approve' || !withMoney)) || (!approve && (fig.mode !== 'return' || Array.isArray(e0.items) || Object.prototype.hasOwnProperty.call(e0, 'total')))){
+        Notifs.showToast('The prices and the decision do not agree. Nothing was saved.','error');
+        return { ok:false, reason:'error' };
+      }
+    }
     // P1 (SALES-FLOW-SPEC §6.5): the approval also records WHAT was approved — the bar a later revision is compared with (PriceGate, js/price-gate-core.js).
     // Built from priceCheck when the quote has one, else its total and items. The President's edits count; edits that change the money make the builder's priceCheck stale, so it is ignored then.
     // The ONE place it is written (every Approve goes through this function). Best-effort: a snapshot that cannot be built never blocks the approval (the gate rebuilds one from the quote).
     let snapFields = {};
     if(approve){
-      const byName = (typeof userProfile !== 'undefined' && userProfile && userProfile.displayName) || currentUser.email || '';
+      const byName = byNameNow;
       snapFields = { approvedByName: byName };
       try{
         if(window.PriceGate && typeof window.PriceGate.snapshotFromQuote === 'function'){
@@ -1608,16 +1634,55 @@ async function decideQuoteApproval(o){
         }
       }catch(snapErr){ console.warn('[approvals] approvedSnapshot not built (non-blocking)', snapErr); }
     }
+    // presidentFigures (the President's own prices and notes): replaced whole on every decision that carries figures, deleted by a decision that does not when the doc has one. `carry` is true only for a
+    // return that worked its totals out (a bar needs a total to compare with) and changed at least one price.
+    let figFields = {};
+    if(fig){
+      const num2 = x => (typeof x === 'number' && isFinite(x)) ? x : null;
+      const tot = t => (t && typeof t === 'object') ? { subtotal: num2(t.subtotal), netAmount: num2(t.netAmount), total: num2(t.total) } : null;
+      const totals = (fig.totals && fig.totals.before && fig.totals.after) ? { before: tot(fig.totals.before), after: tot(fig.totals.after) } : null;
+      figFields = { presidentFigures: { v: 1, mode: fig.mode === 'approve' ? 'approve' : 'return', by: currentUser.uid, byName: String(byNameNow).slice(0,120), at: new Date().toISOString(), atTs: FV.serverTimestamp(),
+        lines: figRows, changed: figChanged, totals, exact: fig.exact === true,
+        carry: !approve && fig.mode === 'return' && fig.exact === true && fig.carry === true && figChanged > 0 && !!totals && totals.after.total !== null,
+        held: approve && Array.isArray(fig.held) ? fig.held.filter(x => Number.isInteger(x)).slice(0,60) : [] } };
+    } else if(d.presidentFigures !== undefined && d.presidentFigures !== null){
+      figFields = { presidentFigures: FV.delete() };
+    }
     await db.collection(coll).doc(quoteId).update({
       ...(o.edits || {}),
       ...(approve ? window.quoteStateFields('approved') : window.quoteStateFields('needs_revision')),
       ...(approve ? { approvedAt: FV.serverTimestamp(), approvedBy: currentUser.uid, ...snapFields } : { returnedAt: FV.serverTimestamp(), returnedBy: currentUser.uid }),
-      ...(notes ? { presidentNotes: notes } : {}) });
+      ...(notes ? { presidentNotes: notes } : {}),
+      ...figFields });
     await window.syncQuoteStatusToRequest(coll, quoteId, approve ? 'approved' : 'needs_revision');   // best-effort: the website request this quote came from follows its status
-    await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(x=>x.ref.update({status: approve ? 'approved' : 'returned'}))));
+    const e1 = o.edits || {};
+    await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(x=>x.ref.update({status: approve ? 'approved' : 'returned', ...(typeof e1.total === 'number' ? { total: e1.total } : {})}))));
+    // an approval that SAVED NEW MONEY (approve at the President's figures, and the builder's "Save edits & Approve", whose answer now carries the whole money set, F-10): the builder's cost record, the website request's total
+    // and the client's public page follow the new prices. Each best-effort and logged: the approval above is already saved.
+    if(approve && Array.isArray(e1.items) && typeof e1.total === 'number'){
+      try{
+        if(o.costSidecar && typeof window.qbSaveCostSidecar === 'function'){
+          let createdBy = d.createdBy || '';   // never the President's uid: an agent who made the quote must keep reading his own cost record (quote_costs rule)
+          try{ const cs = await db.collection('quote_costs').doc(coll + '_' + quoteId).get(); if(cs && cs.exists && cs.data() && cs.data().createdBy) createdBy = cs.data().createdBy; }catch(_){}
+          await window.qbSaveCostSidecar(coll, quoteId, o.costSidecar, { createdBy });
+        }
+      }catch(scErr){ console.warn('[approvals] the cost record was not updated (non-blocking)', scErr); }
+      try{ if(typeof window.linkQuoteToRequest === 'function') await window.linkQuoteToRequest(d.sourceRef, { docId: quoteId, coll, total: e1.total, byName: byNameNow }); }
+      catch(lkErr){ console.warn('[approvals] the website request was not updated (non-blocking)', lkErr); }
+      try{
+        if(d.shareToken){
+          if(typeof window.resyncPublicQuoteMirror !== 'function' && typeof window.ensureScript === 'function'){ try{ await window.ensureScript('js/screens/sales.js'); }catch(_){} }
+          if(typeof window.resyncPublicQuoteMirror === 'function'){
+            const fs2 = await db.collection(coll).doc(quoteId).get();
+            if(fs2 && fs2.exists) await window.resyncPublicQuoteMirror(coll, quoteId, { id: quoteId, ...fs2.data() });
+          }
+        }
+      }catch(mirErr){ console.warn('[approvals] the client page was not refreshed (non-blocking)', mirErr); }
+    }
     try{
       await window.QuoteThread.add({ coll, quoteId, q: d, kind: approve ? 'approved' : 'returned', text: notes,
-        uid: currentUser.uid, name: (typeof userProfile !== 'undefined' && userProfile && userProfile.displayName) || currentUser.email || '', role: (typeof currentRole !== 'undefined') ? currentRole : '' });
+        uid: currentUser.uid, name: (typeof userProfile !== 'undefined' && userProfile && userProfile.displayName) || currentUser.email || '', role: (typeof currentRole !== 'undefined') ? currentRole : '',
+        ...(figRows.length ? { lines: figRows } : {}) });
     }catch(thErr){ console.warn('[approvals] the thread entry was not written (non-blocking)', thErr); }
     const to = o.agentId || d.createdBy;
     if(to && to !== currentUser.uid){
@@ -1625,11 +1690,19 @@ async function decideQuoteApproval(o){
       const link = ref ? 'quote-approval/' + ref : (coll === 'bk_quotes' ? 'bk-quotations' : 'bs-quotations');
       const qno = o.quoteNumber || d.quoteNumber || '';
       const name = (o.edits && o.edits.clientName) || o.clientName || d.clientName || '';
+      // QUOTE-PRESIDENT-FIGURES-SPEC §9: no peso amount in any body written for his figures, and his general note is not copied into the figures notification (the page shows it). A plain decision keeps today's
+      // wording and gains " Notes on M line(s)." when he left line notes.
+      const ln = n => n + ' ' + (n === 1 ? 'line' : 'lines');
+      const nPrices = figChanged, nNotes = figRows.filter(r => r && typeof r.note === 'string' && r.note.trim()).length;
+      const noteTail = (!nPrices && nNotes) ? ' Notes on ' + ln(nNotes) + '.' : '';
+      const body = approve
+        ? (nPrices ? `"${qno}" for ${name} was approved with the President's prices on ${ln(nPrices)}. Open it and send the PDF. No re-send is needed.` : `Quotation "${qno}" for ${name} was approved and filed.${noteTail}`)
+        : (nPrices ? `"${qno}" for ${name}: the President set prices on ${ln(nPrices)}${nNotes ? ' and left notes on ' + nNotes : ''}. Open it and tap Apply President's figures.` : `"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.${noteTail}`);
       await Notifs.send(to, approve
-        ? { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`.slice(0,2000), icon:'✅', type:'quote_approved', link }
-        : { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`.slice(0,2000), icon:'✎', type:'quote_returned', link });
+        ? { title: nPrices ? '✅ Quote approved at the President\'s prices' : '✅ Quote Approved!', body: body.slice(0,2000), icon:'✅', type:'quote_approved', link }
+        : { title: nPrices ? '↩ Quote returned with the President\'s prices' : '↩ Quote Returned for Revision', body: body.slice(0,2000), icon:'✎', type:'quote_returned', link });
     }
-    window.logAudit && window.logAudit('update','quote',quoteId, { ...(approve ? { approved:true } : { returned:true }), ...(o.edits ? { edited:true } : {}) });
+    window.logAudit && window.logAudit('update','quote',quoteId, { ...(approve ? { approved:true } : { returned:true }), ...(o.edits ? { edited:true } : {}), ...(fig ? { figures: { mode: fig.mode === 'approve' ? 'approve' : 'return', changed: figChanged } } : {}) });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
     if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
     if(o.toastOk !== false){ if(approve) Notifs.success('Quote approved and filed!'); else Notifs.error('Quote returned.'); }

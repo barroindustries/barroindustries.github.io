@@ -348,8 +348,10 @@
   /* ============================== the approval carry and the typed costs (spec 3.4) ============================== */
   function cleanCarry(c) {
     if (!isObj(c) || !isNum(c.lastApprovedNet)) return null;
-    return { lastApprovedNet: c.lastApprovedNet, lastApprovedGrand: isNum(c.lastApprovedGrand) ? c.lastApprovedGrand : 0, approvedAt: c.approvedAt ? str(c.approvedAt) : null,
+    var out = { lastApprovedNet: c.lastApprovedNet, lastApprovedGrand: isNum(c.lastApprovedGrand) ? c.lastApprovedGrand : 0, approvedAt: c.approvedAt ? str(c.approvedAt) : null,
       approvedBy: str(c.approvedBy), approvedByName: str(c.approvedByName), sourceColl: str(c.sourceColl), sourceDocId: str(c.sourceDocId) };
+    if (c.kind === 'figures') out.kind = 'figures';                                           // QUOTE-PRESIDENT-FIGURES-SPEC 7.3: the bar is the prices the President set on a quote he returned, not an approval; absent for every other carry
+    return out;
   }
   KCLive.carry = function () { return carry ? Object.assign({}, carry) : null; };
   KCLive.setCarry = function (c) { carry = cleanCarry(c); return KCLive.carry(); };
@@ -360,6 +362,14 @@
     var u = currentUser();
     return cleanCarry({ lastApprovedNet: net, lastApprovedGrand: isNum(d.grandTotal) ? d.grandTotal : 0, approvedAt: isoOf(d.approvedAt), approvedBy: str(d.approvedBy),
       approvedByName: str(d.approvedByName) || (u && d.approvedBy && u.uid === d.approvedBy ? KCLive.userName : ''), sourceColl: coll, sourceDocId: id });
+  }
+  /* QUOTE-PRESIDENT-FIGURES-SPEC 7.3: a quote the President RETURNED with his own prices (presidentFigures.carry) offers the net he worked out at those prices as the bar: a re-send at or above it is covered, so the
+     below-standard rule does not force an approval and the envelope says approvalCovered true.  Only a returned doc whose offer says carry true and carries an "after" net. */
+  function carryFromFigures(d, coll, id) {
+    var pf = isObj(d.presidentFigures) ? d.presidentFigures : null;
+    if (!pf || pf.carry !== true || !isObj(pf.totals) || !isObj(pf.totals.after) || !isNum(pf.totals.after.netAmount)) return null;
+    return cleanCarry({ lastApprovedNet: pf.totals.after.netAmount, lastApprovedGrand: isNum(pf.totals.after.total) ? pf.totals.after.total : 0, approvedAt: pf.at ? str(pf.at) : null,
+      approvedBy: str(pf.by), approvedByName: str(pf.byName), sourceColl: coll, sourceDocId: id, kind: 'figures' });
   }
   function carryFromSidecar(a, coll, id) {
     return cleanCarry({ lastApprovedNet: a.lastApprovedNet, lastApprovedGrand: a.lastApprovedGrand, approvedAt: a.approvedAt, approvedBy: a.approvedBy, approvedByName: a.approvedByName,
@@ -403,7 +413,9 @@
       var coll = str(d.sourceCollection), id = str(d.sourceDocId);
       return Promise.all([getDocSafe(coll, id), getDocSafe('quote_costs', coll + '_' + id)]).then(function (r) {
         var qd = r[0], sc = r[1], c = null;
+        var fc = (qd.ok && qd.exists && qd.data.approvalStatus === 'needs_revision') ? carryFromFigures(qd.data, coll, id) : null;
         if (qd.ok && qd.exists && qd.data.approvalStatus === 'approved') c = carryFromDoc(qd.data, coll, id);
+        else if (fc) c = fc;
         else if (sc.ok && sc.exists && isObj(sc.data.approval)) c = carryFromSidecar(sc.data.approval, coll, id);
         carry = c;                                                                                // a failed read leaves it null (the stricter rules of spec 1.3 item 1 then apply)
         var grafted = (sc.ok && sc.exists) ? graftTyped(sc.data) : 0;

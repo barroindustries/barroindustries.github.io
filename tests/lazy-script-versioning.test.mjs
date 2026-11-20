@@ -14,7 +14,7 @@
 //   4. APP KIT    every local <script> in index.html's app-kit carries ?v=<APP_VERSION> and is precached under that exact URL; the pre-commit hook
 //                 rewrites js/*.js?v= in index.html and sw.js; sw.js's deploy-diff compares entries by bare path (so a per-release ?v= does not
 //                 re-download every unchanged kit file) and reads the old response back under its exact old key.
-//   5. BUILDER    js/app.js opens the quote builder as quote-builder-v2.html?v=APP_VERSION (&co=BS…); the builder's one-line loader writes its seven
+//   5. BUILDER    js/app.js opens the quote builder as quote-builder-v2.html?v=APP_VERSION (&co=BS…); the builder's one-line loader writes its eight
 //                 local scripts, in the old order, with that ?v= (bare when opened without one, and never with a non-version value); sw.js's
 //                 HTML route has the same ignoreSearch fallback across caches, so the versioned iframe URL still opens offline.
 //   6. HTML       sw.js's HTML route revalidates (cache: 'no-cache') instead of taking the browser's max-age=600 copy of index.html; freshRequest()
@@ -136,8 +136,8 @@ describe('the quote builder loads its scripts with the app version (2026-10-29)'
     vm.runInNewContext(loader, { location: { search }, URLSearchParams, document: { write: (h) => written.push(h) } });
     return written;
   };
-  const FILES = ['js/firebase-config.js', 'js/letterhead.js', 'js/pricing-core.js', 'js/qr-families.js', 'js/product-families.js', 'js/qb-configured.js', 'js/qb-spec-sheet.js'];
-  it('the loader writes the seven local scripts in order with ?v= (js/qb-spec-sheet.js last, QB-SELLING-QUOTE-SPEC Phase 1), bare without one, and refuses a non-version value', () => {
+  const FILES = ['js/firebase-config.js', 'js/letterhead.js', 'js/pricing-core.js', 'js/qr-families.js', 'js/product-families.js', 'js/qb-configured.js', 'js/qb-spec-sheet.js', 'js/quote-figures-core.js'];
+  it('the loader writes the eight local scripts in order with ?v= (js/quote-figures-core.js last, QUOTE-PRESIDENT-FIGURES-SPEC; js/qb-spec-sheet.js before it, QB-SELLING-QUOTE-SPEC Phase 1), bare without one, and refuses a non-version value', () => {
     assert.ok(loader, 'the builder\'s script loader is gone');
     assert.deepEqual(run('?v=14.0.999&co=BS'), FILES.map((f) => `<script defer src="${f}?v=14.0.999"></script>`));
     assert.deepEqual(run(''), FILES.map((f) => `<script defer src="${f}"></script>`));

@@ -1974,6 +1974,7 @@ describe('Fable review F7: the typed costs of a custom item survive an update in
     return APP.slice(start, end + 4);
   })();
   const KEEP = (APP.match(/^function keepTypedCosts\([\s\S]*?\n\}/m) || [])[0];
+  const SAVE_SIDECAR = (APP.match(/^window\.qbSaveCostSidecar = async function[\s\S]*?\n\};/m) || [])[0];     // the writer the listener's closure delegates to (QUOTE-PRESIDENT-FIGURES-SPEC 3.3: extracted, unchanged)
   const ORIGIN = 'https://app.test';
   function makeBridge(docs = {}, opt = {}) {
     const store = new Map(Object.entries(docs).map(([k, v]) => [k, plain(v)])), reads = [], sets = [], listeners = [], FRAME = {};
@@ -1988,7 +1989,7 @@ describe('Fable review F7: the typed costs of a custom item survive an update in
     const ctx = vm.createContext({ window: win, db, console: { log() {}, error() {}, warn() {} }, document: { getElementById: (id) => (id === 'qb-frame' ? { contentWindow: FRAME } : null) },
       firebase: { firestore: { FieldValue: { serverTimestamp: () => ({ ts: 1 }) } } }, currentUser: { uid: 'u-sales', email: 's@example.test' }, userProfile: { displayName: 'Sales One' }, currentRole: 'employee',
       Notifs: { showToast() {}, success() {}, sendToOwner: async () => {} }, dbCacheInvalidate() {}, setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, clearTimeout });
-    vm.runInContext('function _qbCleanSourceRef() { return null; } function _qbCleanEstimateCheck() { return null; } function _qbCleanPriceCheck() { return null; } async function _qbChainGate() { return { mode: "none" }; } function _qbRevOf() { return 0; } async function _qbChainQuotes() { return []; } function _qbGateText() { return ""; }\n' + (opt.noKeep ? '' : KEEP + '\n') + LISTENER, ctx);       // the two sanitisers are not what this is about
+    vm.runInContext('function _qbCleanSourceRef() { return null; } function _qbCleanEstimateCheck() { return null; } function _qbCleanPriceCheck() { return null; } async function _qbChainGate() { return { mode: "none" }; } function _qbRevOf() { return 0; } async function _qbChainQuotes() { return []; } function _qbGateText() { return ""; } function _qbFiguresNote() { return ""; }\n' + (opt.noKeep ? '' : KEEP + '\n') + SAVE_SIDECAR + '\n' + LISTENER, ctx);       // the two sanitisers are not what this is about
     const send = async (type, payload, extra) => { await listeners[0]({ origin: ORIGIN, source: FRAME, data: Object.assign({ type, payload }, extra || {}) }); };
     return { store, reads, sets, send, ctx };
   }
@@ -2054,7 +2055,10 @@ describe('Fable review F7: the typed costs of a custom item survive an update in
     assert.deepEqual(alone.reads.filter(r => r.startsWith('quote_costs/')), ['quote_costs/bk_quotes_new1']);
   });
   it('the sidecar write keeps its shape: the whole document is replaced (set, no merge), the call sites are as they were, and a bridge without the helper still writes', async () => {
-    assert.match(LISTENER, /await db\.collection\('quote_costs'\)\.doc\(coll \+ '_' \+ id\)\.set\(\{\s*\.\.\.sc, items: rows, quoteColl: coll, quoteDocId: id,/);
+    assert.ok(SAVE_SIDECAR, 'window.qbSaveCostSidecar is a top-level function of js/app.js');
+    assert.match(SAVE_SIDECAR, /await db\.collection\('quote_costs'\)\.doc\(coll \+ '_' \+ id\)\.set\(\{\s*\.\.\.sc, items: rows, quoteColl: coll, quoteDocId: id,/);
+    assert.match(SAVE_SIDECAR, /createdBy: opts\.createdBy \|\| currentUser\.uid,/, 'the record is stamped with the creator the caller names, else the signed-in user');
+    assert.match(LISTENER, /await window\.qbSaveCostSidecar\(coll, id, sc, \{ parentId: payload && payload\.parentQuoteId \}\);/, 'the listener delegates (QUOTE-PRESIDENT-FIGURES-SPEC 3.3)');
     assert.equal((LISTENER.match(/saveCostSidecar\(coll, docRef\.id\)/g) || []).length, 2); assert.match(LISTENER, /saveCostSidecar\(collection, docId\)/);
     const b = makeBridge({ 'quote_costs/bk_quotes_q1': sidecarOf([row({ custom: [], m: 9, lab: 9 })]) }, { noKeep: true });
     await b.send('QUOTE_UPDATE', quote(), { docId: 'q1', collection: 'bk_quotes', costSidecar: sidecarOf([row(null)]) });
@@ -2189,6 +2193,94 @@ describe('Fable review F12: the line chip and the panel say the same about a lin
     const host = fs.readFileSync(path.join(QB, 'kc/host-d7.js'), 'utf8');
     assert.ok(host.includes('until then the quote goes to the President for approval.'), 'the panel says it');
     assert.match(env.D7.h('flow.approvalReason'), /need review/, 'and Verify & File really does send it for approval');
+  });
+});
+
+// ═════════════════════════════ QUOTE-PRESIDENT-FIGURES-SPEC-2026-11-20 §7.3 / §5.2 / §13.5 ═════════════════════════════
+// MUTATION LOG (2026-11-20, scratch copy of qb/kc-live.js; each mutant KILLED by the test named):
+//   K1  afterLoad reads totals.before instead of totals.after            -> "a returned doc that offers a carry: ..."
+//   K2  the figures carry is built for carry false / an approved doc loses to it  -> "carry false sets none ..." and "an approved doc still wins ..."
+//   K3  cleanCarry drops kind (or keeps a kind that is not "figures")      -> "cleanCarry passes kind through ..."
+//   K4  a priceBy key is added to D7.adapter.COST_KEYS (publicItem's scrub would take it out)  -> "none of the priceBy keys is on D7.adapter.COST_KEYS ..."
+describe('QUOTE-PRESIDENT-FIGURES-SPEC 7.3: the builder\'s own carry verdict reads the prices the President set on a returned quote', () => {
+  const returnedDoc = (pf, over = {}) => ({ approvalStatus: 'needs_revision', netAmount: 4000, grandTotal: 4500, vatAmount: 500,
+    presidentFigures: Object.assign({ v: 1, mode: 'return', by: 'u-pres', byName: 'The President', at: '2026-11-20T01:00:00.000Z', carry: true, lines: [], changed: 1, totals: { before: { subtotal: 4400, netAmount: 4000, total: 4500 }, after: { subtotal: 5000, netAmount: 4800, total: 5300 } } }, pf || {}), ...over });
+  async function setup(docs) {
+    const env = readyEnv('sales'); env.win.db = makeFakeDb(docs);
+    env.KC.addLine('custom', { cat: 'prep', name: 'Cart', desc: '', dims: '', rows: [{ k: 'sh12', q: 1 }], m: null, lab: null }, { render: false });
+    env.run('reopenSourceDocId = "q1"; reopenSourceCollection = "bk_quotes"');
+    return env;
+  }
+  const load = (env) => env.KCLive.afterLoad({ sourceDocId: 'q1', sourceCollection: 'bk_quotes' });
+  it('a returned doc that offers a carry: the bar is the net at HIS prices (totals.after), kind "figures", his name and the time of his decision', async () => {
+    const env = await setup({ 'bk_quotes/q1': returnedDoc() }); await load(env);
+    assert.deepEqual(plain(env.KCLive.carry()), { lastApprovedNet: 4800, lastApprovedGrand: 5300, approvedAt: '2026-11-20T01:00:00.000Z', approvedBy: 'u-pres', approvedByName: 'The President', sourceColl: 'bk_quotes', sourceDocId: 'q1', kind: 'figures' });
+    assert.equal(plain(env.KCLive.sidecarExtras().approval).kind, 'figures', 'it rides the cost sidecar with the rest of the carry');
+    // the verdict the envelope carries: a net at or above his bar is covered, one below is not
+    env.run('items.length = 0');
+    assert.equal(env.KCRules.approvalCovers({ carry: env.KCLive.carry(), net: 4800, standardTotal: 9000, costKnown: false }), true);
+    assert.equal(env.KCRules.approvalCovers({ carry: env.KCLive.carry(), net: 4799, standardTotal: 9000, costKnown: false }), false);
+  });
+  it('carry false sets none from the figures (and with no sidecar, no carry at all); a returned doc without a presidentFigures offer sets none; a figures offer with no "after" net sets none', async () => {
+    for (const doc of [returnedDoc({ carry: false }), returnedDoc({ carry: 'true' }), returnedDoc({ totals: null }), returnedDoc({ totals: { before: { netAmount: 1 } } }), returnedDoc({ totals: { before: { netAmount: 1 }, after: { netAmount: 'x', total: 1 } } }), { approvalStatus: 'needs_revision', netAmount: 4000 }]) {
+      const env = await setup({ 'bk_quotes/q1': doc }); await load(env); assert.equal(env.KCLive.carry(), null, JSON.stringify(doc).slice(0, 60));
+    }
+    const env = await setup({ 'bk_quotes/q1': returnedDoc({ carry: false }), 'quote_costs/bk_quotes_q1': { items: [], approval: { lastApprovedNet: 900, approvedAt: 'x', approvedBy: 'u', sourceColl: 'bk_quotes', sourceDocId: 'q0' } } }); await load(env);
+    assert.equal(env.KCLive.carry().lastApprovedNet, 900, 'the sidecar fallback is unchanged when the offer is not a carry');
+    assert.equal('kind' in env.KCLive.carry(), false);
+  });
+  it('an approved doc still wins the existing branch (a pending doc or any other state never builds a figures carry)', async () => {
+    const ap = await setup({ 'bk_quotes/q1': { approvalStatus: 'approved', netAmount: 5000, grandTotal: 5600, vatAmount: 600, approvedAt: { seconds: 1763517600 }, approvedBy: 'u-pres', presidentFigures: returnedDoc().presidentFigures } }); await load(ap);
+    assert.equal(ap.KCLive.carry().lastApprovedNet, 5000); assert.equal('kind' in ap.KCLive.carry(), false);
+    const pend = await setup({ 'bk_quotes/q1': Object.assign(returnedDoc(), { approvalStatus: 'pending_review' }) }); await load(pend); assert.equal(pend.KCLive.carry(), null);
+  });
+  it('cleanCarry passes kind through only as "figures"; any other value (or none) is absent', () => {
+    const env = readyEnv('sales');
+    assert.equal(plain(env.KCLive.setCarry({ lastApprovedNet: 5, kind: 'figures' })).kind, 'figures');
+    for (const k of ['approved', '', null, undefined, 7, 'FIGURES']) assert.equal('kind' in plain(env.KCLive.setCarry({ lastApprovedNet: 5, kind: k })), false, String(k));
+  });
+});
+
+describe('QUOTE-PRESIDENT-FIGURES-SPEC 3.1 / 5.2: priceBy survives the configurators\' cost scrub, and the real engine holds a line that an additional cost moved', () => {
+  const PB = { role: 'president', uid: 'u-pres', name: 'The President', at: '2026-11-20T01:00:00.000Z', salesPrice: 1000, held: true };
+  it('none of the priceBy keys is on D7.adapter.COST_KEYS (so publicItem\'s scrub keeps it); if that list ever names one, this fails and the key must be renamed', () => {
+    const env = readyEnv('president');
+    assert.deepEqual(Object.keys(PB).filter(k => env.D7.adapter.COST_KEYS.includes(k)), []);
+    const kept = plain(env.D7.adapter.publicItem({ kcKind: 'custom', cfg: { custom: [], m: 5, lab: 6 }, name: 'Cart', priceBy: PB }));
+    assert.deepEqual(kept.priceBy, PB, 'publicItem keeps priceBy and takes the typed costs out');
+    assert.equal('m' in kept.cfg, false);
+  });
+  it('real engine: a figure on one kc line makes it manual, the additional cost that was spread over both lines now lands on the other, QuoteFigures holds that line at its snapshot price, P2 passes and the cost summary\'s net is the payload\'s net', () => {
+    const env = readyEnv('president');
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/price-gate-core.js'), 'utf8'), env.ctx); vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/quote-figures-core.js'), 'utf8'), env.ctx);
+    const QFg = env.win.QuoteFigures;
+    addStation(env, 1); addStation(env, 2);
+    env.run('ensureItemUids(); miscCosts.push({ id: "m1", type: "delivery", desc: "Delivery", cost: 4000, reflect: false, distTo: [] }); D7.h("pricing.autoPrice")');
+    const unit = (i) => Number(env.run(`items[${i}].unitPrice`));
+    const before = [unit(0), unit(1)];
+    assert.ok(before[0] > 0 && before[1] > 0, 'both lines are priced');
+    const snapItems = plain(env.run('items'));
+    const q = { quoteNumber: 'X', total: 0, items: snapItems.map((it) => ({ name: it.name, qty: it.qty, unit: it.unit, unitPrice: it.unitPrice, id: it.id })) };
+    const snap = QFg.snapshot(env.run('items'));
+    // the figure: line 0 a hundred pesos under its price
+    const to = before[0] - 100;
+    const meta = { uid: 'u-pres', name: 'The President', at: '2026-11-20T01:00:00.000Z', snap };
+    const ap = QFg.applyToItems(env.run('items'), [{ i: 0, to }], meta);
+    assert.deepEqual(plain(ap.applied), [0]);
+    env.run('D7.h("adapter.afterItemsChange", "presidentFigures", 0); renderItems(); D7.h("pricing.autoPrice")');   // the page's renderItems() = sync + autoPrice (the stand-in renders only the first half)
+    assert.notEqual(unit(1), before[1], 'the share of the distributed cost moved the OTHER line (the reason step 4 exists)');
+    const held = QFg.holdMoved(env.run('items'), snap, [0], meta);
+    assert.deepEqual(plain(held), [1]);
+    env.run('D7.h("adapter.afterItemsChange", "presidentFigures", 1); renderItems(); D7.h("pricing.autoPrice")');
+    assert.equal(unit(1), before[1], 'held at its snapshot price, and the next pricing pass leaves it (it is manual now)');
+    assert.deepEqual(plain(QFg.movedLines(env.run('items'), snap, [0])), []);
+    const items = plain(env.run('items'));
+    assert.equal(items[0].priceBy.salesPrice, before[0]); assert.equal(items[1].priceBy.held, true); assert.equal(items[1].priceBasis, 'manual');
+    const tot = env.run('computeTotals()');
+    const payload = { quoteNumber: 'X', items: items.map((it) => ({ name: it.name, qty: it.qty, unit: it.unit, unitPrice: it.unitPrice, amount: it.amount, id: it.id })), netAmount: tot.net, total: tot.grand };
+    assert.deepEqual(plain(QFg.verifyResult(q, payload, [{ i: 0, to }])), { ok: true });
+    const ex = plain(env.KCLive.sidecarExtras());
+    assert.equal(ex.kcSummary.net, Math.round(tot.net * 100) / 100, 'the cost summary and the payload agree on the net');
   });
 });
 
