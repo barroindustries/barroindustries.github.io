@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.19';
+window.APP_VERSION = '15.0.21';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -935,6 +935,12 @@ window.fetchUsersWithPayroll = async function() {
   // as soon as a fetch for that key succeeds or the key is explicitly invalidated.
   const _failStore = {};
   const FAIL_TTL = 4000;
+  // Generation (2026-11-20 review): bumped by EVERY dbCacheInvalidate call. A fetch that was
+  // already in flight when the cache was cleared still answers its caller, but must not write its
+  // result back: after a sign-out that would re-seed the store with the previous user's data
+  // (salaries, private cash advances) for the next user of the tab, and after a write it would
+  // re-cache the pre-write snapshot for the full TTL.
+  let _gen = 0;
   window.dbCachedGet = async function(key, fetcher, ttlMs = 30000) {
     // The 'users' key must always carry merged pay data — and consistently,
     // regardless of which call site populates the cache first — so force the
@@ -950,11 +956,20 @@ window.fetchUsersWithPayroll = async function() {
     // instead of re-hitting Firestore for a key that just errored.
     const fail = _failStore[key];
     if (fail && Date.now() - fail.ts < FAIL_TTL) throw fail.err;
+    const gen = _gen;
     const promise = fetcher().then(data => {
+      if (gen !== _gen) {   // invalidated while in flight: answer the caller, cache nothing
+        if (_store[key] && _store[key].pending === promise) delete _store[key];
+        return data;
+      }
       _store[key] = { data, ts: Date.now(), pending: null };
       delete _failStore[key];
       return data;
     }).catch(err => {
+      if (gen !== _gen) {
+        if (_store[key] && _store[key].pending === promise) delete _store[key];
+        throw err;
+      }
       delete _store[key];
       _failStore[key] = { ts: Date.now(), err };
       throw err;
@@ -986,6 +1001,7 @@ window.fetchUsersWithPayroll = async function() {
     'all-quotes': { alsoKeys: ['bs_quotes-ord-all', 'bs_quotes-flat-all'], prefixes: ['bs_quotes-ord-own-', 'bs_quotes-flat-own-'] },
   };
   window.dbCacheInvalidate = function(key) {
+    _gen++;
     if (!key) {
       Object.keys(_store).forEach(k => delete _store[k]);
       Object.keys(_failStore).forEach(k => delete _failStore[k]);
