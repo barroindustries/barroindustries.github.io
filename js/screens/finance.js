@@ -353,6 +353,7 @@ function openFinanceToolsPage() {
         <button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">${emojiIcon('🩹',16)} Fix undated rows</button>
         <button class="btn-secondary btn-sm" onclick="window.runMigrateLedgerIds(this)" title="Migrate legacy random-id ledger rows to deterministic ids (dry-run first)">${emojiIcon('🧭',16)} Migrate ledger ids</button>
         <button class="btn-secondary btn-sm" onclick="window.runRebuildRollups(this)" title="Recompute finance_rollup monthly aggregates from a full ledger scan — the fix for any Overview-totals drift">${emojiIcon('🔁',16)} Rebuild rollups</button>
+        ${(typeof isPresident === 'function' && isPresident()) ? `<button class="btn-secondary btn-sm" onclick="window.runMoveCaDeductRequests(this)" title="One-time: move existing CA deduction requests into their own private collection (President, Finance and the requesting employee only)">${emojiIcon('💳',16)} Move CA deduction requests</button>` : ''}
       </div>
     </div>
     <div class="card">
@@ -390,6 +391,24 @@ window.runRebuildRollups = async function(btn) {
       Notifs.success(`Rebuilt ${r.months} month${r.months===1?'':'s'} of rollups from ${r.scanned} ledger row${r.scanned===1?'':'s'} ✓`);
     } catch (e) {
       Notifs.showToast('Rebuild failed: '+(e.message||e),'error');
+    }
+  });
+};
+
+// One-time (President, Finance Tools): move legacy CA deduction requests out of approval_requests
+// into ca_deduct_requests — see window.migrateCaDeductRequests (js/migrations.js).
+window.runMoveCaDeductRequests = async function(btn) {
+  if (typeof window.migrateCaDeductRequests !== 'function') { Notifs.showToast('Migration not loaded', 'error'); return; }
+  if (!(typeof isPresident === 'function' && isPresident())) { Notifs.showToast('President only', 'error'); return; }
+  if (!(await confirmDialog({message:'Move existing CA deduction requests into their own private collection?\n\nEach request is copied first, then the original is removed. Afterwards only the requesting employee, the President and Finance can see them. Safe to run repeatedly.'}))) return;
+  await window.busy(btn, async () => {
+    Notifs.showToast('Moving CA deduction requests…');
+    try {
+      const r = await window.migrateCaDeductRequests();
+      window.logAudit && window.logAudit('move-ca-deduct-requests','ca_deduct_requests',null,r);
+      Notifs.success(`Moved ${r.moved} CA deduction request${r.moved===1?'':'s'} ✓`);
+    } catch (e) {
+      Notifs.showToast('Move failed: '+(e.message||e),'error');
     }
   });
 };

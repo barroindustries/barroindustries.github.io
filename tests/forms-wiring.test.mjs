@@ -44,7 +44,7 @@ describe('1. files and wiring', () => {
     assert.ok(!/forms-core|forms-set-1|forms-pdf/.test(cfg), 'config.js (PAGE_SCRIPTS) is not touched by Phase 1 — QF loads the engine with ensureScript');
   });
   it('the registry says what each form needs: the body set, and production.js for the job-based forms', () => {
-    for (const e of FC.list()) assert.equal(e.bodySet, 'js/forms-set-1.js');
+    for (const e of FC.list()) assert.equal(e.bodySet, ['sales_order', 'payment_ack', 'job_order', 'handoff_pack'].includes(e.id) ? 'js/forms-set-1.js' : 'js/forms-set-2.js');
     assert.deepEqual(FC.get('job_order').needs, ['js/screens/production.js']); assert.deepEqual(FC.get('handoff_pack').needs, ['js/screens/production.js']);
     assert.deepEqual(plain(FC.get('sales_order').needs || []), []); assert.deepEqual(plain(FC.get('payment_ack').needs || []), []);
   });

@@ -13,6 +13,7 @@
   "/bk_quotes/{docId} :: allow update #1",
   "/bs_clients/{docId} :: allow read #1",
   "/bs_quotes/{docId} :: allow read #1",
+  "/ca_deduct_requests/{docId} :: allow create #1",
   "/campaigns/{docId} :: allow read #1",
   "/client_info_requests/{ref} :: allow read #1",
   "/client_info_requests/{ref}/notes/{nid} :: allow read #1",

@@ -973,7 +973,7 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList, caDedReqSnap] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
@@ -1002,6 +1002,9 @@ async function renderPresidentDashboard() {
       ledgerForPeriod('prev'),
       dbCachedGet('inventory_items',     () => safeGet(db.collection('inventory_items'), 'inventory_items'),                                       45000),
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(e => { _dashWarnOnce('projects', e); return []; }),
+      // CA deduction requests live in their own collection (President + Finance only, rules 2026-11-20);
+      // this is the President dashboard, so it may read it. Manager/Secretary dashboards must not.
+      dbCachedGet('approvals-pending:ca_deduct_requests-pending', () => safeGet(db.collection('ca_deduct_requests').where('status','==','pending'), 'ca_deduct_requests'), 30000),
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1026,7 +1029,7 @@ async function renderPresidentDashboard() {
     // theirs. Output is byte-identical to the previous inline calc.
     const _rawQuotes = quotesSnap.docs.map(d=>d.data());
     const totalQuotes = window.quotePipelineValue ? window.quotePipelineValue(_rawQuotes) : 0;
-    const pendingApprovals = approvalsSnap.size;
+    const pendingApprovals = approvalsSnap.size + (caDedReqSnap.size || 0);   // + CA deduction requests (own collection)
     const pendingCA   = caSnap.size;
     const pendingSignups = signupSnap.size || 0;
     // v14 fix — the remaining 9 Approvals-page sources (approvals.js:145-154).
@@ -3191,8 +3194,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       // amount), which is why this fetcher resolves rather than rejects and the
       // wrapper's error card is only a backstop for a synchronous throw. Either
       // way there is no path that leaves the skeleton up forever.
-      () => db.collection('approval_requests')
-        .where('userId','==',currentUser.uid).where('type','==','ca_deduct').where('month','==',month).where('status','==','pending')
+      () => db.collection('ca_deduct_requests')
+        .where('userId','==',currentUser.uid).where('month','==',month).where('status','==','pending')
         .limit(1).get().catch(()=>({docs:[]})),
       (existing) => {
         // CLOSED MID-FLIGHT: Back can land before the query does. `caBody` is
@@ -3235,8 +3238,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           const amt = parseFloat(caBody.querySelector('#ca-override-amt').value)||0;
           const note = caBody.querySelector('#ca-override-note').value.trim();
           if (amt <= 0 || amt > totalBal) { Notifs.showToast(`Enter an amount between ₱1 and ₱${formatNum(totalBal)}.`, 'error'); return; }
-          await db.collection('approval_requests').add({
-            type: 'ca_deduct',
+          await db.collection('ca_deduct_requests').add({
             userId: currentUser.uid,
             userName: userProfile.displayName || currentUser.email,
             month, amount: amt, reason: note,

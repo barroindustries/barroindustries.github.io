@@ -37,3 +37,36 @@ describe('it_software (licence keys): IT tier only', () => {
     assert.deepEqual(readers, ['js/screens/govit.js']);
   });
 });
+
+// Owner ruling 2026-11-20: client and quote data is for OFFICE STAFF only — not commission sales agents, not
+// HR-managed worker logins. Sales orders / job orders are untouched (production needs them).
+describe('client and quote data: office staff only', () => {
+  const RAW = read('firestore.rules');
+  it('isOfficeStaff() excludes agents and worker logins, reusing the cached users get()', () => {
+    const def = RULES.match(/function isOfficeStaff\(\) \{[\s\S]*?\n    \}/);
+    assert.ok(def, 'isOfficeStaff() is not defined');
+    const body = def[0].replace(/\s+/g, ' ');
+    assert.match(body, /let u = get\(\/databases\/\$\(database\)\/documents\/users\/\$\(request\.auth\.uid\)\)\.data;/);
+    assert.match(body, /u\.get\('role', ''\) != 'agent'/);
+    assert.match(body, /u\.get\('hrManagedAccount', false\) != true/);
+  });
+  for (const head of ['match /clients/{docId}', 'match /client_info_requests/{ref}', 'match /client_info_requests/{ref}/notes/{nid}',
+    'match /quote_requests/{ref}', 'match /quote_requests/{ref}/notes/{nid}', 'match /approval_requests/{docId}']) {
+    it(`${head}: read is office staff only`, () => {
+      assert.equal(readRule(block(head + ' {')), 'if isAuth() && hasProfile() && isOfficeStaff()');
+    });
+  }
+  it('bs_quotes: an agent still reads their OWN quotes (createdBy arm), everyone else\'s only as office staff', () => {
+    assert.equal(readRule(block('match /bs_quotes/{docId} {')),
+      "if isAuth() && ( resource.data.createdBy == request.auth.uid || (hasProfile() && isOfficeStaff()) || docId == 'draft_' + request.auth.uid )");
+  });
+  it('the non-privileged bs_quotes lists query by createdBy, so the own-quotes arm can satisfy them', () => {
+    assert.match(read('js/screens/sales.js'), /db\.collection\('bs_quotes'\)\.where\('createdBy','==',currentUser\.uid\)/);
+    assert.match(read('js/departments.js'), /db\.collection\('bs_quotes'\)\.where\('createdBy','==',currentUser\.uid\)/);
+  });
+  it('sales orders and job orders are untouched (production needs them)', () => {
+    assert.doesNotMatch(block('match /sales_orders/{docId} {'), /isOfficeStaff/);
+    assert.doesNotMatch(block('match /job_projects/{docId} {'), /isOfficeStaff/);
+    assert.ok(RAW.includes('function isOfficeStaff()'));
+  });
+});

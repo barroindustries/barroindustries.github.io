@@ -108,7 +108,7 @@ window.renderApprovals = async function(currentUser) {
     'review-task':    ['president','manager','secretary'],
     'leave':          ['president','manager','secretary'],
     'ca':             ['president','manager'],
-    'ca_deduct':      ['president','manager'], // v12 WS22 — employee's CA-deduction-for-this-run request
+    'ca_deduct':      ['president','finance'], // v12 WS22 — employee's CA-deduction request; President + Finance only (owner ruling 2026-11-20, ca_deduct_requests)
     'raise':          ['president'], // v12 WS23 — only the President approves/rejects a raise request
     'quote-approval': ['president','manager'],
     'po-approval':    ['president','manager'], // v12 WS30 — PO gate; money-moving → secretary escalates
@@ -151,6 +151,7 @@ window.renderApprovals = async function(currentUser) {
   // construction: it reacts to what the boundary actually did, not to a guess
   // about who is signed in, so it keeps working for any future role scoping.
   const _deniedQueues = [];
+  const _cadRole = (_role === 'president' || _role === 'finance');   // who may read ca_deduct_requests
   // PERF-WAVE1 WP6 — each of these 15 queries used to hit Firestore fresh on
   // every renderApprovals() call (every nav to this page). Now routed through
   // dbCachedGet keyed 'approvals-pending:<collName>' (30s TTL). The 'all'
@@ -166,7 +167,7 @@ window.renderApprovals = async function(currentUser) {
     _deniedQueues.push({ label, chip, denied });
     return { size: 0, docs: [], failed: true, denied };
   });
-  const [sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2, deptSpendSnap2] = await Promise.all([
+  const [sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2, deptSpendSnap2, caDedSnap2] = await Promise.all([
     _apq('Sign-ups', 'signups', 'signup_requests-pending',                                 db.collection('signup_requests').where('status','==','pending')),
     _apq('Cash Advances', 'ca', 'cash_advances-pending',                                    window.caScope(db.collection('cash_advances').where('status','==','pending'))),
     _apq('Work submissions', 'all', 'submissions-pending',                                  db.collection('submissions').where('status','==','pending')),
@@ -183,7 +184,11 @@ window.renderApprovals = async function(currentUser) {
     // DEPT-BUDGETS-SPEC-2026-08-11 — pending department spends waiting on
     // Finance's confirm/reject, folded into the SAME 'finance-requests' chip
     // as the two delete queues (equality-only filter, no composite index).
-    _apq('Dept spend confirmations', 'finance-requests', 'dept_spend_logs-pending',         db.collection('dept_spend_logs').where('status','==','pending'))
+    _apq('Dept spend confirmations', 'finance-requests', 'dept_spend_logs-pending',         db.collection('dept_spend_logs').where('status','==','pending')),
+    // CA deduction requests: readable only by the President and Finance (rules,
+    // 2026-11-20) — any other role must not even issue the query.
+    _cadRole ? _apq('CA deduction requests', 'all', 'ca_deduct_requests-pending',           db.collection('ca_deduct_requests').where('status','==','pending'))
+             : Promise.resolve({ size: 0, docs: [] })
   ]);
   // Chips whose count is now known to be incomplete, and the human labels behind
   // them. 'All Requests' sums every queue, so ANY failure makes it incomplete.
@@ -208,7 +213,7 @@ window.renderApprovals = async function(currentUser) {
   // Persistent marker on any chip whose count cannot be complete, independent of
   // what the number happens to be this render.
   const _lbl = (chip, label) => _incompleteChips.has(chip) ? (label + ' 🔒') : label;
-  let _cachedAllSnaps = { sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, deptSpendSnap2 };
+  let _cachedAllSnaps = { sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, deptSpendSnap2, caDedSnap2 };
   const pendingSignups = sgSnap.size || 0;
   const pendingCA      = caSnap2.size || 0;
   const pendingSubs    = subSnap2.size || 0;
@@ -216,12 +221,15 @@ window.renderApprovals = async function(currentUser) {
   // DEPT-BUDGETS-SPEC-2026-08-11 — dept spend confirmations fold into the same
   // Finance Requests chip as the two delete queues (§6.4).
   const pendingFinReqs = (finReqSnap2.size || 0) + (finDelSnap2.size || 0) + (deptSpendSnap2.size || 0);
-  const pendingQApprovals = qApprSnap2.size || 0;
+  const _legacyCadDocs = qApprSnap2.docs.filter(d => d.data().type === 'ca_deduct');
+  const pendingQApprovals = (qApprSnap2.docs.length - _legacyCadDocs.length);
+  // new-collection requests + (transition) legacy ca_deduct docs still in approval_requests
+  const pendingCaDed      = _cadRole ? ((caDedSnap2.size || 0) + _legacyCadDocs.length) : 0;
   const pendingDeletes    = (delQSnap2.size || 0) + (delBKQSnap2.size || 0) + (delCSnap2.size || 0);
   const pendingLeave      = leaveSnap2.size || 0;
   const pendingPO         = poSnap2.size || 0;
   const pendingRaises     = raiseSnap2.size || 0;
-  const totalPending   = pendingSignups + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave + pendingPO + pendingRaises;
+  const totalPending   = pendingSignups + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave + pendingPO + pendingRaises + pendingCaDed;
 
   // ── Grading queue count (President's grading subtab) ──────────────────
   // Completed/approved tasks awaiting a presidentScore + employees whose
@@ -448,16 +456,16 @@ window.renderApprovals = async function(currentUser) {
       // v13 Phase 35 — reuse the count fetch above on the very first load instead
       // of re-querying all 13 collections a second time. Only a later re-visit
       // to this tab (cache already consumed) hits Firestore again here.
-      let sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2;
+      let sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, caDedSnap2;
       if (_cachedAllSnaps) {
-        ({ sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2 } = _cachedAllSnaps);
+        ({ sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, caDedSnap2 } = _cachedAllSnaps);
         _cachedAllSnaps = null;
       } else {
         // PERF-WAVE1 WP6 — same dbCachedGet keys as the count-phase _apq()
         // fetch above (30s TTL), so a same-session revisit to 'all' (once the
         // single-use _cachedAllSnaps hop is spent) hits cache instead of
         // re-querying all 13 collections again.
-        ([sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2] = await Promise.all([
+        ([sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, caDedSnap2] = await Promise.all([
           dbCachedGet('approvals-pending:signup_requests-pending', () => db.collection('signup_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:cash_advances-pending', () => window.caScope(db.collection('cash_advances').where('status','==','pending')).get(), 30000).catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:submissions-pending', () => db.collection('submissions').where('status','==','pending').get(), 30000).catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
@@ -470,7 +478,9 @@ window.renderApprovals = async function(currentUser) {
           dbCachedGet('approvals-pending:clients-delete', () => db.collection('clients').where('deleteRequested','==',true).get(), 30000).catch(e=>{console.error('clients delete query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:leave_requests-pending', () => db.collection('leave_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:pending_raises-pending', () => db.collection('pending_raises').where('status','==','pending_approval').get(), 30000).catch(e=>{console.error('pending_raises query failed',e);return {docs:[]};}),
-          dbCachedGet('approvals-pending:purchase_requisitions-pending', () => db.collection('purchase_requisitions').where('approvalStatus','==','pending').get(), 30000).catch(e=>{console.error('purchase_requisitions query failed',e);return {docs:[]};})
+          dbCachedGet('approvals-pending:purchase_requisitions-pending', () => db.collection('purchase_requisitions').where('approvalStatus','==','pending').get(), 30000).catch(e=>{console.error('purchase_requisitions query failed',e);return {docs:[]};}),
+          _cadRole ? dbCachedGet('approvals-pending:ca_deduct_requests-pending', () => db.collection('ca_deduct_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('ca_deduct_requests query failed',e);return {docs:[]};})
+                   : Promise.resolve({ docs: [] })
         ]));
       }
 
@@ -485,7 +495,10 @@ window.renderApprovals = async function(currentUser) {
         // approval_requests also hosts v12 WS22's ca_deduct requests — split by
         // `type` so those don't get mislabeled as quote approvals.
         ...qApprSnap2.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Staff'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
-        ...qApprSnap2.docs.filter(d=>d.data().type==='ca_deduct').map(d=>{const x=d.data();return {id:d.id,...x,type:'ca_deduct',icon:'💳',label:'CA Deduction Request',name:x.userName||'Employee',detail:`₱${fmt(x.amount||0)} this month${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
+        // CA deduction requests: ca_deduct_requests (President/Finance only), plus — until the one-time
+        // migration has run — legacy ca_deduct docs still in approval_requests (tagged legacy:true).
+        ...(_cadRole ? caDedSnap2.docs : []).map(d=>{const x=d.data();return {id:d.id,...x,type:'ca_deduct',icon:'💳',label:'CA Deduction Request',name:x.userName||'Employee',detail:`₱${fmt(x.amount||0)} this month${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
+        ...(_cadRole ? qApprSnap2.docs.filter(d=>d.data().type==='ca_deduct') : []).map(d=>{const x=d.data();return {id:d.id,...x,type:'ca_deduct',legacy:true,icon:'💳',label:'CA Deduction Request',name:x.userName||'Employee',detail:`₱${fmt(x.amount||0)} this month${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
         // Quote delete requests (bs_quotes + internal bk_quotes + client folder) — president approves or denies
         ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bs_quotes',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
         // bk_quotes holds both Barro Kitchens and Barro Industries (general
@@ -541,8 +554,8 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">${emojiIcon('✓',16)} Approve CA</button>
                 <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='ca_deduct'?`
-                <button class="btn-success btn-sm cad-approve-btn" data-id="${item.id}" data-uid="${item.userId||''}" data-amount="${item.amount||0}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm cad-reject-btn" data-id="${item.id}" data-uid="${item.userId||''}" data-amount="${item.amount||0}">${emojiIcon('✗',16)} Reject</button>
+                <button class="btn-success btn-sm cad-approve-btn" data-id="${item.id}" data-coll="${item.legacy?'approval_requests':'ca_deduct_requests'}" data-uid="${item.userId||''}" data-amount="${item.amount||0}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm cad-reject-btn" data-id="${item.id}" data-coll="${item.legacy?'approval_requests':'ca_deduct_requests'}" data-uid="${item.userId||''}" data-amount="${item.amount||0}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='review-task'?`
                 <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">${emojiIcon('👁',16)} View Task</button>
                 <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
@@ -630,8 +643,9 @@ window.renderApprovals = async function(currentUser) {
       // find out indirectly via their payslip. Now notifies like every sibling
       // approve/reject handler on this page.
       wrap.querySelectorAll('.cad-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          const ok = await transitionStatus(db.collection('approval_requests').doc(btn.dataset.id), 'pending', { status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:approval_requests-pending');
+          const _cadColl = btn.dataset.coll === 'approval_requests' ? 'approval_requests' : 'ca_deduct_requests';
+          const ok = await transitionStatus(db.collection(_cadColl).doc(btn.dataset.id), 'pending', { status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('approvals-pending:ca_deduct_requests-pending'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); dbCacheInvalidate('ca-pending'); }
           if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'✅ CA Deduction Approved', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was approved.`, icon:'✅', type:'ca_deduct_reviewed', link:'personal-finance'
@@ -640,8 +654,9 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          const ok = await transitionStatus(db.collection('approval_requests').doc(btn.dataset.id), 'pending', { status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:approval_requests-pending');
+          const _cadColl = btn.dataset.coll === 'approval_requests' ? 'approval_requests' : 'ca_deduct_requests';
+          const ok = await transitionStatus(db.collection(_cadColl).doc(btn.dataset.id), 'pending', { status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('approvals-pending:ca_deduct_requests-pending'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); dbCacheInvalidate('ca-pending'); }
           if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'❌ CA Deduction Rejected', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was rejected.`, icon:'❌', type:'ca_deduct_reviewed', link:'personal-finance'
@@ -978,7 +993,7 @@ window.renderApprovals = async function(currentUser) {
       // complete. Routed through _paneQ so this pane can name what it did not
       // get; the page-level banner above was computed once from the COUNT phase
       // and is not re-derived per pane, so History has to say it itself.
-      const [sgH, caH, subH, frH, fdH, qaH, lvH, rzH, poH] = await Promise.all([
+      const [sgH, caH, subH, frH, fdH, qaH, lvH, rzH, poH, cdH] = await Promise.all([
         _paneQ('Sign-ups',                 db.collection('signup_requests').orderBy('createdAt','desc').limit(150)),
         _paneQ('Cash Advances',            window.caScope(db.collection('cash_advances')).orderBy('createdAt','desc').limit(150)),
         _paneQ('Work submissions',         db.collection('submissions').orderBy('createdAt','desc').limit(150)),
@@ -987,9 +1002,12 @@ window.renderApprovals = async function(currentUser) {
         _paneQ('Quote / ROA',              db.collection('approval_requests').orderBy('createdAt','desc').limit(150)),
         _paneQ('Leave',                    db.collection('leave_requests').orderBy('createdAt','desc').limit(150)),
         _paneQ('Raises',                   db.collection('pending_raises').orderBy('createdAt','desc').limit(150)),
-        _paneQ('Purchase approvals',       db.collection('purchase_requisitions').orderBy('createdAt','desc').limit(150))
+        _paneQ('Purchase approvals',       db.collection('purchase_requisitions').orderBy('createdAt','desc').limit(150)),
+        // CA deduction requests: President/Finance only (rules 2026-11-20); other roles never query it.
+        _cadRole ? _paneQ('CA deduction requests', db.collection('ca_deduct_requests').orderBy('createdAt','desc').limit(150))
+                 : Promise.resolve({ docs: [] })
       ]);
-      const histBanner = _paneDeniedBanner([sgH, caH, subH, frH, fdH, qaH, lvH, rzH, poH]);
+      const histBanner = _paneDeniedBanner([sgH, caH, subH, frH, fdH, qaH, lvH, rzH, poH, cdH]);
       const tsOf = x => (x.resolvedAt || x.approvedAt || x.decidedAt || x.updatedAt || x.createdAt);
       const mk = (d, type, icon, label, name, detail) => {
         const x = d.data(); const ts = tsOf(x);
@@ -1007,7 +1025,9 @@ window.renderApprovals = async function(currentUser) {
         ...frH.docs.map(d=>mk(d,'finance-req','💼','Finance Request', `Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`, `by ${d.data().requestedByName||'?'}`)),
         ...fdH.docs.map(d=>mk(d,'finance-del','🗑','Finance Delete', `Delete: ${d.data().label||'record'}`, `by ${d.data().requestedByName||'?'}`)),
         ...qaH.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>mk(d,'quote-approval','📤','Quote Approval', `${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`, `${d.data().agentName||'Staff'} · ₱${fmt(d.data().total||0)}`)),
-        ...qaH.docs.filter(d=>d.data().type==='ca_deduct').map(d=>mk(d,'ca_deduct','💳','CA Deduction Request', d.data().userName||'Employee', `₱${fmt(d.data().amount||0)}`)),
+        ...cdH.docs.map(d=>mk(d,'ca_deduct','💳','CA Deduction Request', d.data().userName||'Employee', `₱${fmt(d.data().amount||0)}`)),
+        // legacy ca_deduct docs still in approval_requests (until the one-time migration) — President/Finance only
+        ...(_cadRole ? qaH.docs.filter(d=>d.data().type==='ca_deduct') : []).map(d=>mk(d,'ca_deduct','💳','CA Deduction Request', d.data().userName||'Employee', `₱${fmt(d.data().amount||0)}`)),
         ...lvH.docs.map(d=>mk(d,'leave','🌴','Leave Request', d.data().userName||'Employee', `${d.data().days||0}d ${d.data().type||'leave'}`)),
         ...rzH.docs.map(d=>mk(d,'raise','💸','Raise Request', d.data().subjectName||'Employee', `₱${fmt(d.data().oldAmount||0)} → ₱${fmt(d.data().newAmount||0)}`)),
         ...poH.docs.map(d=>mk(d,'po-approval','🛒','PO Approval', `${d.data().prNo||d.data().rfqNo||'PO'} — ${d.data().supplier||'supplier'}`, `${d.data().requestingDept||'Purchasing'} · ₱${fmt(d.data().total||0)}`))

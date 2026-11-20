@@ -34,7 +34,8 @@
   const TERM = {
     completion: ['Completion', 'Work will be completed within the agreed timeline from date of down payment receipt. Delays due to client-side changes or site issues are not included.'],
     payment: ['Payment Terms', 'Down payment due upon confirmation; balance settled per the Payment Schedule above. All payments are non-refundable once fabrication has commenced.'],
-    warranty: ['Warranty', '6-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.'],
+    // owner 2026-11-20: the warranty is 12 months on the Sales Order and the Job Order (production.js says the same)
+    warranty: ['Warranty', '12-month warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.'],
     scope: ['Scope of Work', 'Price covers fabrication, delivery, and installation as specified. Electrical works, gas connections, and civil works are excluded unless stated.'],
     acceptance: ['Acceptance', 'By signing this sales order, the client accepts all terms and conditions stated herein.'],
   };
@@ -165,6 +166,7 @@
     const dr = (d.drawings || []).map((x) => x.title + ' (Rev ' + x.rev + ')').concat(has(d.clientDrawing) ? [d.clientDrawing + ' (client-supplied)'] : []);
     sched.push({ label: 'Drawings', value: dr.length ? h.raw(dr.map(h.e).join('<br>')) : 'Not drawn yet' });
     out.push(h.section('Project Timeline & Completion', h.infoTable(sched)));
+    if ((d.standing || []).length) out.push(h.section('Standing Instructions', h.text(d.standing.map((x) => '• ' + x).join('\n'))));
     out.push(h.section('Special Requests', h.text(crewRequests(d) || 'None')));
     const revs = d.revisions || [];
     if (revs.length) {
