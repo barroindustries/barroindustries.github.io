@@ -37,7 +37,7 @@
      typeof guard before this move and still do.
    - SOPs: renderSOPs, openSOPEditor.
    - Personal Finance + KPI/attendance-score cluster: renderPersonalFinance,
-     getKpiScore, countWorkDays, _attRecScore, getAttendanceScore,
+     getKpiScore, getKpiInfo, countWorkDays, _attRecScore, getAttendanceScore,
      openEmpStandingsModal, openWorkerProfilePanel, renderWorkerProfileTab.
    - Progress Reports: renderProgressReports.
    - Company: renderCompany, renderCompanyBiOps, renderCompanyOverview,
@@ -1688,9 +1688,18 @@ async function renderEmployeeDashboard() {
     // "x of y tasks this month" — from the payroll's own breakdown helper when it is loaded (js/pay-policy.js is lazy);
     // never re-derived here, so the counts can't drift from the score.
     const _kb = window.kpiMonthBreakdown ? window.kpiMonthBreakdown(myTasks, kpiMonth) : null;
-    const kpiCountTxt = _kb ? `${_kb.doneInM}/${_kb.inScopeCount} tasks this month` : 'this month, as on your payslip';
+    // SALES MANAGER KPI (rollout step 6) — one person, one KPI: for the person whose sales_kpi is in force this month the card shows the Sales KPI (the score
+    // pay uses), not the task score above; if it cannot be read, "KPI unavailable" — never the task KPI. salesKpiState never rejects and is the same
+    // answer My Finance and the pay run get. Everyone else: nothing changes (state 'tasks', one small fresh read of their own sales_kpi document).
+    const kpiSt = await window.salesKpiState(uid, kpiMonth);
+    const kpiSrc = kpiSt.state;                     // 'tasks' | 'sales' | 'unavailable'
+    const kpiShown = kpiSrc === 'sales' ? Math.round(kpiSt.kpi.kpiScore * 100) : (kpiSrc === 'unavailable' ? null : taskScore);
+    const kpiShownTxt = kpiShown == null ? '—' : kpiShown + '%';
+    const kpiCountTxt = kpiSrc === 'sales' ? 'Sales KPI — confirmed sales + client rating'
+      : kpiSrc === 'unavailable' ? 'KPI unavailable'
+      : (_kb ? `${_kb.doneInM}/${_kb.inScopeCount} tasks this month` : 'this month, as on your payslip');
     const targetScore = kpiTarget.targetScore || 80;
-    const kpiColor = taskScore >= targetScore ? 'var(--success)' : taskScore >= 60 ? 'var(--warning)' : 'var(--danger)';
+    const kpiColor = kpiShown == null ? 'var(--text-muted)' : kpiShown >= targetScore ? 'var(--success)' : kpiShown >= 60 ? 'var(--warning)' : 'var(--danger)';
 
     // Recent CA
     const recentCA = caSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
@@ -1716,7 +1725,7 @@ async function renderEmployeeDashboard() {
         </div>
       </div>` : '';
 
-    const taskOutcomeMet = myTasks.length > 0 && taskScore >= targetScore;
+    const taskOutcomeMet = kpiSrc === 'sales' ? kpiShown >= targetScore : (kpiSrc === 'unavailable' ? false : (myTasks.length > 0 && taskScore >= targetScore));
 
     if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     c.innerHTML = `
@@ -1739,8 +1748,8 @@ async function renderEmployeeDashboard() {
         </div>
         <div class="kpi-card">
           <div class="kpi-card-top"><div class="kpi-label">KPI this month</div>${window.iconTile('target',kpiColor,null,28)}</div>
-          <div class="kpi-value" style="color:${kpiColor}">${taskScore}%</div>
-          <div class="kpi-sub">${taskOutcomeMet?`${emojiIcon('✅',16)} Target met`:`${emojiIcon('❌',16)} Below target`} (${targetScore}%)</div>
+          <div class="kpi-value" style="color:${kpiColor}">${kpiShownTxt}</div>
+          <div class="kpi-sub">${kpiSrc==='unavailable'?'KPI unavailable':`${taskOutcomeMet?`${emojiIcon('✅',16)} Target met`:`${emojiIcon('❌',16)} Below target`} (${targetScore}%)`}</div>
         </div>
         <div class="kpi-card green">
           <div class="kpi-card-top"><div class="kpi-label">Base pay</div>${window.iconTile('wallet','var(--success)',null,28)}</div>
@@ -1761,7 +1770,7 @@ async function renderEmployeeDashboard() {
         <div class="card-body" style="display:flex;gap:16px;flex-wrap:wrap;padding:12px 16px">
           <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(10,132,255,0.08);border-radius:10px">
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">KPI</div>
-            <div style="font-size:22px;font-weight:800;color:${kpiColor}">${taskScore}%</div>
+            <div style="font-size:22px;font-weight:800;color:${kpiColor}">${kpiShownTxt}</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${kpiCountTxt}</div>
           </div>
           <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(255,100,0,0.08);border-radius:10px">
@@ -1803,13 +1812,13 @@ async function renderEmployeeDashboard() {
             <div class="card-body">
               <div style="margin-bottom:10px">
                 <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px">
-                  <span>KPI (${kpiCountTxt})</span><strong style="color:${kpiColor}">${taskScore}%</strong>
+                  <span>KPI (${kpiCountTxt})</span><strong style="color:${kpiColor}">${kpiShownTxt}</strong>
                 </div>
-                <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${taskScore}%;background:${kpiColor}"></div></div>
+                <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${kpiShown == null ? 0 : kpiShown}%;background:${kpiColor}"></div></div>
               </div>
               <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:8px">
                 <span style="color:var(--text-muted)">Expected Outcome</span>
-                <strong style="color:${taskOutcomeMet?'var(--success)':'var(--danger)'}">${taskOutcomeMet?`${emojiIcon('✅',16)} Met`:`${emojiIcon('❌',16)} Not Met`}</strong>
+                <strong style="color:${kpiSrc==='unavailable'?'var(--text-muted)':taskOutcomeMet?'var(--success)':'var(--danger)'}">${kpiSrc==='unavailable'?'—':taskOutcomeMet?`${emojiIcon('✅',16)} Met`:`${emojiIcon('❌',16)} Not Met`}</strong>
               </div>
               <button class="btn-secondary btn-sm" style="margin-top:12px;width:100%" onclick="navigateTo('personal-finance')">
                 Full Payslip & KPI →
@@ -2097,14 +2106,19 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       const kpiTargetD  = kpiTargetsMap[u.id] || {};
       const delivScore  = typeof kpiTargetD.deliverableScore === 'number'
         ? Math.min(1, kpiTargetD.deliverableScore / 100) : 0.5;
-      const kpi = taskScore * 0.7 + delivScore * 0.3;
+      // SALES MANAGER KPI (rollout step 6) — one person, one KPI: for the person whose sales_kpi is in force this month the row shows the Sales KPI (the
+      // score pay uses); if it cannot be read, "KPI unavailable" (kpi null) — never the task KPI. Everyone else is exactly as before.
+      const skSt = await window.salesKpiState(u.id, defaultMonth2);
+      const kpi = skSt.state === 'sales' ? skSt.kpi.kpiScore
+        : skSt.state === 'unavailable' ? null
+        : taskScore * 0.7 + delivScore * 0.3;
       // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3 — office attendance is retired
       // (no writer left), so this quick-glance reference figure is KPI-only
       // now. This was always a client-side estimate, never the real pay
       // computation (see the card caption below) — actual pay runs through
       // computePayLine/Finance → Payroll.
       const mult = kpi;
-      const computed = net * mult * (daysElapsed2 / daysInMonth2);
+      const computed = kpi == null ? null : net * mult * (daysElapsed2 / daysInMonth2);
       const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
       // Eval — from the already-fetched bulk snapshot (no extra reads)
       const evalD = evalsMap[u.id] || {};
@@ -2113,8 +2127,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <td class="tc-name">${escHtml(u.displayName||u.email)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
         <td class="tc-detail" data-label="Dept">${escHtml(depts)}</td>
         <td class="tc-detail" data-label="Net Pay">₱${formatNum(net)}</td>
-        <td class="tc-detail" data-label="Task KPI">${Math.round(kpi*100)}%<br><span style="font-size:10px;color:var(--text-muted)">${tasksDone}/${tasksTotal} tasks</span></td>
-        <td class="tc-net"><strong style="color:var(--primary-light)">₱${formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
+        <td class="tc-detail" data-label="Task KPI">${kpi == null ? '—' : Math.round(kpi*100) + '%'}<br><span style="font-size:10px;color:var(--text-muted)">${skSt.state === 'sales' ? 'Sales KPI' : skSt.state === 'unavailable' ? 'KPI unavailable' : `${tasksDone}/${tasksTotal} tasks`}</span></td>
+        <td class="tc-net"><strong style="color:var(--primary-light)">${computed == null ? '—' : '₱' + formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
         <td class="tc-detail" data-label="Self /10" style="text-align:center">
           ${selfDone2
             ? `<span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':`${emojiIcon('✅',16)}`}</span>
@@ -2140,7 +2154,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h3>Performance &amp; KPI — ${monthLabel}</h3></div>
-        <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Task KPI — a performance reference, not the pay computation. Actual pay runs through Finance → Payroll.</div>
+        <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Task KPI — a performance reference, not the pay computation (a person on the Sales KPI shows that instead). Actual pay runs through Finance → Payroll.</div>
         <div class="table-wrap">
           <table class="data-table table-cards">
             <thead><tr><th>Employee</th><th>Dept</th><th>Net Pay</th><th>Task KPI</th><th>Earned So Far</th><th>Self /10</th><th>Pres /10</th><th></th></tr></thead>
@@ -2330,7 +2344,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     // no citation renders this load — never a guess at what it says.
     db.collection('settings').doc('payrollLegalBasis').get().catch(() => null)
   ]);
-  const kpi = await getKpiScore(currentUser.uid, myTasksSnap.docs.map(d=>d.data()), kpiTargetSnap);
+  // SALES MANAGER KPI (SALES-MANAGER-KPI-SPEC-2026-11-20, rollout step 6) — one person, one KPI. getKpiInfo says whose KPI this page shows: the task KPI
+  // exactly as before, or — for the person whose sales_kpi is in force this month — the Sales KPI pay uses (confirmed sales 70% + client rating 30%), or
+  // 'unavailable' when that could not be read. `kpi` is null then, and the page says "KPI unavailable": it is never the task KPI in its place.
+  const kpiInfo = await getKpiInfo(currentUser.uid, myTasksSnap.docs.map(d=>d.data()), kpiTargetSnap);
+  const kpi = kpiInfo.score;
 
   // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 1 — resolve the active policy
   // ONCE per render. A failed read (or a stored value outside the §6.1
@@ -2409,6 +2427,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // below shows the FROZEN line, not a live re-projection.
   const frozenThisMonth = salaryHistory.find(h => h.month === currentMonth);
   const isFinalMonth    = !!frozenThisMonth;
+  // SALES MANAGER KPI — which KPI this page shows. A FINALISED month shows its frozen line: the source and the working mirrored onto salary_history at
+  // disburse (js/departments.js), never worked out again. A month still running shows today's answer; 'unavailable' can only apply to it.
+  const kpiSrc         = isFinalMonth ? (frozenThisMonth.kpiSource === 'sales' ? 'sales' : 'tasks') : kpiInfo.source;
+  const kpiUnavailable = kpiSrc === 'unavailable';
+  const salesWork      = kpiSrc === 'sales' ? (isFinalMonth ? (frozenThisMonth.salesKpi || null) : kpiInfo.sales.salesKpi) : null;
   const dispKpi = isFinalMonth ? (frozenThisMonth.kpiScore ?? kpi) : kpi;
   // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3 — dispAtt is null for a still-
   // running month (no live attendance data left to show, R1). It stays a real
@@ -2418,7 +2441,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const dispAtt = isFinalMonth ? (frozenThisMonth.attScore ?? null) : null;
   // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 1 — a failed/corrupted policy
   // read disables the live projection entirely (never a guessed number).
-  const projUnavailable = !isFinalMonth && policySettingsFailed;
+  const projUnavailable = !isFinalMonth && (policySettingsFailed || kpiUnavailable);   // no KPI to project with (Sales KPI unavailable) = no projection, never one on the task KPI
   // PAYROLL-SYNC-FIX-2026-08-13 — a person with no salary on file must never
   // be told they earned a negative wage this month. Before this, base ₱0.00
   // ran straight through computePayLine, and a placeholder statutory
@@ -2480,7 +2503,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         netBeforeCA: frozenThisMonth.netPay ?? frozenThisMonth.finalPay }
     : projLine;
   const payBasisSentenceText = (!noPayRecordWords && typeof window.payBasisSentence === 'function' && payBasisLine)
-    ? window.payBasisSentence(payBasisLine) : '';
+    ? window.payBasisSentence(kpiSrc === 'sales' ? Object.assign({}, payBasisLine, { kpiSource: 'sales' }) : payBasisLine) : '';
 
   // PAYROLL-CARD-WORKING-SPEC-2026-08-13 — the owner's July 2026 report on
   // the payroll roster ("wheres the ca deduction" / "computation as well how
@@ -2613,7 +2636,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const ytdPay    = ytdHistory.reduce((s,h)=>s+(h.finalPay||h.netPay||0),0) + (earnedSoFar || 0);
 
   const monthLabel = new Date(bzYear, bzMonth, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
-  const kpiColor  = dispKpi>=0.8?'var(--success)':dispKpi>=0.6?'var(--warning)':'var(--danger)';
+  const kpiColor  = kpiUnavailable ? 'var(--text-muted)' : dispKpi>=0.8?'var(--success)':dispKpi>=0.6?'var(--warning)':'var(--danger)';
   // dispAtt is null on a live (not-yet-frozen) month — see its definition
   // above. attColor is only ever consumed where dispAtt != null is already
   // checked, so this fallback color is unreachable in practice; kept only so
@@ -2649,6 +2672,16 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // inference, nothing a reader could mistake for a verified citation.
   const payExplainHtml = (() => {
     if (!payTeamKnown) return '';
+    // SALES MANAGER KPI — no KPI to explain: say so, rather than explain a pay model on a score that is not there.
+    if (kpiUnavailable && !isOpsTeam) {
+      return `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>How your pay is worked out</h3></div>
+        <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
+          <p style="margin:0"><strong>KPI unavailable.</strong> Your Sales KPI could not be read just now, so this explanation is not shown. Try again in a moment.</p>
+        </div>
+      </div>`;
+    }
     const K = Math.round(dispKpi * 100);
     // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3 — dispAtt is null on a live
     // month (no attendance writer left, R1); `attKnown` gates every sentence
@@ -2685,14 +2718,33 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       const kpiPct = Math.round(_bkKpiFactor * 100);
       const factorLine = noPayRecordWords
         ? `You do not have a pay record set up yet, so this does not apply to your pay right now.`
-        : `₱${formatNum(baseAmt)} of your pay is a protected base — paid in full every month, never reduced. The remaining ₱${formatNum(_bkIncentiveFull)} is an incentive that depends on this month's KPI score (tasks 70%, deliverables 30%). This month your KPI factor is <strong>${kpiPct}%</strong>, so ₱${formatNum(_bkIncentiveEarned)} of that incentive is earned so far. Attendance does not affect your pay at all.`;
+        : `₱${formatNum(baseAmt)} of your pay is a protected base — paid in full every month, never reduced. The remaining ₱${formatNum(_bkIncentiveFull)} is an incentive that depends on this month's KPI score (${kpiSrc === 'sales' ? 'confirmed sales 70%, client rating 30%' : 'tasks 70%, deliverables 30%'}). This month your KPI factor is <strong>${kpiPct}%</strong>, so ₱${formatNum(_bkIncentiveEarned)} of that incentive is earned so far. Attendance does not affect your pay at all.`;
       return `
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h3>How your pay is worked out</h3></div>
         <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
           <p style="margin:0 0 10px"><strong>Base + KPI incentive.</strong> Your role on the Office Team pays a protected base plus a KPI-dependent incentive — not a fixed 9-to-5 schedule, and not tied to attendance.</p>
           <p style="margin:0 0 10px">${factorLine}</p>
-          <p style="margin:0 0 10px">Your KPI score comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${taskBase} this month) — plus any deliverable score your manager sets.</p>
+          <p style="margin:0 0 10px">${kpiSrc === 'sales'
+            ? 'Your KPI score comes from the payments the President has confirmed this month against your sales target (70%) and your clients\' ratings (30%). Tasks do not count toward it.'
+            : `Your KPI score comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${taskBase} this month) — plus any deliverable score your manager sets.`}</p>
+          <p style="margin:0">If you have questions about a specific month's pay, the Payroll Breakdown below shows the same figures and the same working Finance sees for you.</p>
+          ${legalRow}
+        </div>
+      </div>`;
+    }
+    // SALES MANAGER KPI — a person whose KPI is the Sales KPI under a superseded policy (flat/performance/taskbased): no task wording at all.
+    if (kpiSrc === 'sales') {
+      return `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>How your pay is worked out</h3></div>
+        <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
+          <p style="margin:0 0 10px"><strong>Your KPI is your Sales KPI.</strong> It comes from the payments the President has confirmed this month against your sales target (70%) and your clients' ratings (30%). Tasks do not count toward it.</p>
+          <p style="margin:0 0 10px">${noPayRecordWords
+            ? 'You do not have a pay record set up yet, so this does not apply to your pay right now.'
+            : multiplierDrivesPay
+              ? `This month, your performance factor is <strong>${F}%</strong>, worked out from your Sales KPI (${K}%). Your take-home pay above, after government and other deductions, is multiplied by this factor.`
+              : `This pay model is not switched on for the Office Team right now, so your Sales KPI (${K}%) does not change your pay — everyone is paid the full amount regardless of it.`}</p>
           <p style="margin:0">If you have questions about a specific month's pay, the Payroll Breakdown below shows the same figures and the same working Finance sees for you.</p>
           ${legalRow}
         </div>
@@ -2729,6 +2781,43 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       </div>`;
   })();
 
+  // SALES MANAGER KPI — the compact scorecard (KPI %, the sales line, the rating line) for the person whose KPI is the Sales KPI, in the one set of words
+  // (js/pay-policy.js salesKpiWords → SalesKpi.sentence) read off the same working the pay line freezes (live, or the frozen mirror for a finalised month).
+  // It is drawn by SalesKpiUI (js/screens/sales-kpi.js, lazy) when that loads; if it cannot, the same lines as plain text. Nothing here shows a client name.
+  const salesWords = (kpiSrc === 'sales' && typeof window.salesKpiWords === 'function')
+    ? window.salesKpiWords({ kpiSource: 'sales', salesKpi: salesWork }, dispKpi, currentMonth) : null;
+  if (salesWords && !window.SalesKpiUI && typeof window.ensureScript === 'function') {
+    try { await window.ensureScript('js/screens/sales-kpi.js'); } catch (_) { /* the plain lines below */ }
+  }
+  const salesCardHtml = salesWords
+    ? ((window.SalesKpiUI && window.SalesKpiUI.html && typeof window.SalesKpiUI.html.compact === 'function')
+        ? window.SalesKpiUI.html.compact({ words: salesWords, label: isFinalMonth ? 'Final' : 'Used for pay' })
+        : `<div style="font-size:13px;line-height:1.55">${salesWords.lines.map(l => `<div>${escHtml(l)}</div>`).join('')}</div>`)
+    : '';
+  const kpiEvalMainHtml = (kpiSrc === 'sales' || kpiUnavailable)
+    ? `
+        <div style="margin-bottom:14px">
+          ${kpiUnavailable
+            ? `<div style="font-size:13px;color:var(--danger)"><strong>KPI unavailable</strong> — your Sales KPI could not be read just now. Try again in a moment.</div>`
+            : (salesCardHtml || `<div style="font-size:13px">Your KPI is your Sales KPI: <strong>${Math.round(dispKpi*100)}%</strong>.</div>`)}
+          ${kpiUnavailable ? '' : `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Your KPI is your Sales KPI — confirmed sales 70%, client rating 30%. Tasks do not count toward it.</div>`}
+        </div>`
+    : `
+        <!-- Tasks section -->
+        <div style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px">
+            <span style="font-weight:600">Tasks Completed</span>
+            <strong style="color:${kpiColor}">${doneTasks.length} of ${taskBase}</strong>
+          </div>
+          <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${taskPct}%;background:${kpiColor}"></div></div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-muted)">
+            <span>Target: ${targetScore}%</span>
+            <strong style="color:${outcomeMet?'var(--success)':'var(--danger)'}">
+              ${outcomeMet?`${emojiIcon('✅',16)} Expected Outcome Met`:`${emojiIcon('❌',16)} Expected Outcome Not Met`}
+            </strong>
+          </div>
+        </div>`;
+
   c.innerHTML = `
     <div class="page-header">
       <h2>Personal Finance</h2>
@@ -2759,9 +2848,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       </div>
       ${isOpsTeam ? '' : `
       <div class="kpi-card">
-        <div class="kpi-label">Task KPI</div>
-        <div class="kpi-value" style="color:${kpiColor}">${taskPct}%</div>
-        <div class="kpi-sub">${doneTasks.length}/${taskBase} done this month</div>
+        <div class="kpi-label">${kpiSrc === 'sales' ? 'Sales KPI' : kpiUnavailable ? 'KPI' : 'Task KPI'}</div>
+        <div class="kpi-value" style="color:${kpiColor}">${kpiUnavailable ? '—' : (kpiSrc === 'sales' ? Math.round(dispKpi*100) : taskPct) + '%'}</div>
+        <div class="kpi-sub">${kpiSrc === 'sales' ? 'confirmed sales + client rating' : kpiUnavailable ? 'KPI unavailable' : `${doneTasks.length}/${taskBase} done this month`}</div>
       </div>`}
       ${dispAtt!=null ? `
       <div class="kpi-card accent">
@@ -2791,20 +2880,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <button class="btn-secondary btn-sm" id="self-eval-btn">Self Evaluate</button>
       </div>
       <div class="card-body">
-        <!-- Tasks section -->
-        <div style="margin-bottom:14px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px">
-            <span style="font-weight:600">Tasks Completed</span>
-            <strong style="color:${kpiColor}">${doneTasks.length} of ${taskBase}</strong>
-          </div>
-          <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${taskPct}%;background:${kpiColor}"></div></div>
-          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-muted)">
-            <span>Target: ${targetScore}%</span>
-            <strong style="color:${outcomeMet?'var(--success)':'var(--danger)'}">
-              ${outcomeMet?`${emojiIcon('✅',16)} Expected Outcome Met`:`${emojiIcon('❌',16)} Expected Outcome Not Met`}
-            </strong>
-          </div>
-        </div>
+        ${kpiEvalMainHtml}
         <!-- Grades -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
           <div style="background:var(--s2);border-radius:10px;padding:12px;border:1.5px solid var(--border)">
@@ -2843,10 +2919,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="payslip-row"><span>Net Pay (Full Month)</span><strong>₱${formatNum(net)}</strong></div>
         ${isOpsTeam ? '' : `
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
-        ${isBasekpiLine ? `
+        ${kpiUnavailable ? `
+        <div class="payslip-row"><span style="color:var(--text-muted)"><strong>KPI unavailable</strong> — your Sales KPI could not be read just now.</span></div>
+        ` : isBasekpiLine ? `
         <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${isFinalMonth?'KPI Incentive (final)':'KPI Incentive'}</div>
         <div class="payslip-row">
-          <span>KPI Factor — ${taskPct}% task completion</span>
+          <span>KPI Factor — ${kpiSrc === 'sales' ? 'Sales KPI' : taskPct + '% task completion'}</span>
           <span style="color:${kpiColor}">${Math.round(_bkKpiFactor*100)}%</span>
         </div>
         <div class="payslip-row">
@@ -2861,7 +2939,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         ` : `
         <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${multiplierDrivesPay ? (isFinalMonth?'Performance Multiplier (final)':'Performance Multiplier') : 'Performance Snapshot — informational, does not affect pay'}</div>
         <div class="payslip-row">
-          <span>Task KPI${multiplierDrivesPay?' (70%)':''} — ${taskPct}% completion</span>
+          <span>${kpiSrc === 'sales' ? 'Sales KPI' : 'Task KPI'}${multiplierDrivesPay?' (70%)':''} — ${kpiSrc === 'sales' ? Math.round(dispKpi*100) + '%' : taskPct + '% completion'}</span>
           <span style="color:${kpiColor}">${multiplierDrivesPay ? (dispKpi*0.7).toFixed(2)+'×' : Math.round(dispKpi*100)+'%'}</span>
         </div>
         ${dispAtt!=null ? `
@@ -3308,6 +3386,20 @@ async function getKpiScore(uid, preTasks, preKpiSnap) {
   } catch { return 0.5; }
 }
 
+// getKpiInfo(uid, preTasks?, preKpiSnap?) — WHOSE KPI IS THIS, and what is it (Sales Manager KPI, rollout step 6). getKpiScore above is the TASK KPI and
+// nothing else; a person's KPI is this. Same optional pre-fetched inputs, passed straight through to getKpiScore for the task case.
+//   { source: 'tasks',       score: <the task KPI>,                    sales: null }
+//   { source: 'sales',       score: <the Sales KPI pay uses>,          sales: <window.resolveSalesKpi's result> }   the person's sales_kpi is in force this month
+//   { source: 'unavailable', score: null, sales: null, error }                                                         it is, but it could not be read / has no target
+// ⚠ 'unavailable' is NEVER answered with the task KPI (nor 0.5): every caller shows "KPI unavailable" and nothing else for the KPI. The month is the
+// current Manila month — a screen showing a FINALISED month reads its frozen line instead and does not rely on this (renderPersonalFinance).
+async function getKpiInfo(uid, preTasks, preKpiSnap) {
+  const st = await window.salesKpiState(uid, bizDate().slice(0, 7));
+  if (st.state === 'sales') return { source: 'sales', score: st.kpi.kpiScore, sales: st.kpi };
+  if (st.state === 'unavailable') return { source: 'unavailable', score: null, sales: null, error: st.error };
+  return { source: 'tasks', score: await getKpiScore(uid, preTasks, preKpiSnap), sales: null };
+}
+
 // ── Shared helpers — used by all attendance/KPI calcs ──────────────────────
 
 /**
@@ -3631,8 +3723,10 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       // fix applied to renderPersonalFinance's President "Team" table above
       // (both are informational client-side estimates, never the real pay
       // computation — see this panel's own "Payslip" button for the real one).
-      const [kpi, caSnap, userSnap, evalSnap] = await Promise.all([
-        getKpiScore(uid),
+      // SALES MANAGER KPI (rollout step 6) — one person, one KPI: getKpiInfo answers with the task KPI, the Sales KPI pay uses (for the person whose
+      // sales_kpi is in force this month) or 'unavailable' (score null: shown as "KPI unavailable", never as the task KPI).
+      const [kpiInfo, caSnap, userSnap, evalSnap] = await Promise.all([
+        getKpiInfo(uid),
         (uid === currentUser.uid ? db.collection('cash_advances').where('userId','==',currentUser.uid) : window.caScope(db.collection('cash_advances')).where('userId','==',uid)).get().catch(()=>({docs:[]})),
         db.collection('users').doc(uid).get().catch(()=>null),
         db.collection('kpi_evals').doc(uid).get().catch(()=>null)
@@ -3641,14 +3735,16 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       const evalD = evalSnap?.exists ? evalSnap.data() : {};
       const caBalance = caSnap.docs.map(d=>d.data()).filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
       const net = (preloaded.salary||0)+(preloaded.allowance||0)-(preloaded.deductions||0);
-      const mult = kpi;
+      const kpi = kpiInfo.score;                 // null = KPI unavailable
+      const kpiOk = kpi != null;
+      const mult = kpiOk ? kpi : 0;
       const _bzS = bizDate();
       const bzSY = +_bzS.slice(0,4), bzSM = +_bzS.slice(5,7)-1, bzSD = +_bzS.slice(8,10);
       const daysElapsed = countWorkDays(bzSY, bzSM, bzSD);
       const daysInMonth = countWorkDays(bzSY, bzSM, new Date(bzSY,bzSM+1,0).getDate());
-      const earnedSoFar = net*mult*(daysElapsed/daysInMonth);
-      const kpiPct = Math.round(kpi*100);
-      const kpiColor = kpiPct>=80?'var(--success)':kpiPct>=50?'var(--warning)':'var(--danger)';
+      const earnedSoFar = kpiOk ? net*mult*(daysElapsed/daysInMonth) : null;
+      const kpiPct = kpiOk ? Math.round(kpi*100) : null;
+      const kpiColor = !kpiOk ? 'var(--text-muted)' : kpiPct>=80?'var(--success)':kpiPct>=50?'var(--warning)':'var(--danger)';
       const dept = (Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):u.department)||'—';
       const role = u.role?(window.ROLES?.[u.role]?.label||u.role):'—';
       const monthLabel = new Date(bzSY, bzSM, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
@@ -3666,7 +3762,7 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">Task KPI</div><div style="font-size:24px;font-weight:800;color:${kpiColor}">${kpiPct}%</div><div style="font-size:10px;color:var(--text-muted)">${preloaded.mDone||0}/${preloaded.mTotal||0} done</div></div>
+          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">${kpiInfo.source==='sales'?'Sales KPI':kpiInfo.source==='unavailable'?'KPI':'Task KPI'}</div><div style="font-size:24px;font-weight:800;color:${kpiColor}">${kpiOk?kpiPct+'%':'—'}</div><div style="font-size:10px;color:var(--text-muted)">${kpiInfo.source==='sales'?'confirmed sales + client rating':kpiInfo.source==='unavailable'?'KPI unavailable':`${preloaded.mDone||0}/${preloaded.mTotal||0} done`}</div></div>
           <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">CA Balance</div><div style="font-size:20px;font-weight:800;color:${caBalance>0?'var(--danger)':'var(--success)'}">₱${formatNum(caBalance)}</div><div style="font-size:10px;color:var(--text-muted)">${caBalance>0?'outstanding':'cleared'}</div></div>
         </div>
         <div style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px">
@@ -3675,8 +3771,8 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
           <div class="payslip-row"><span style="color:var(--success)">+ Allowances</span><span style="color:var(--success)">₱${formatNum(preloaded.allowance)}</span></div>
           <div class="payslip-row"><span style="color:var(--danger)">− Deductions</span><span style="color:var(--danger)">₱${formatNum(preloaded.deductions)}</span></div>
           <div class="payslip-row" style="font-weight:700;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Net (Full Month)</span><span>₱${formatNum(net)}</span></div>
-          <div class="payslip-row"><span style="color:var(--text-muted)">× Multiplier (${mult.toFixed(2)}×)</span><span></span></div>
-          <div class="payslip-row" style="font-size:15px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Earned So Far</span><span style="color:var(--primary-light)">₱${formatNum(earnedSoFar)}</span></div>
+          <div class="payslip-row"><span style="color:var(--text-muted)">× Multiplier (${kpiOk?mult.toFixed(2)+'×':'—'})</span><span></span></div>
+          <div class="payslip-row" style="font-size:15px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Earned So Far</span><span style="color:var(--primary-light)">${earnedSoFar==null?'—':'₱'+formatNum(earnedSoFar)}</span></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Self Grade</div><div style="font-size:28px;font-weight:800;color:${selfGrade!=null?'var(--primary-light)':'var(--text-muted)'}">${selfGrade!=null?selfGrade:'—'}<span style="font-size:12px;font-weight:400">/10</span></div></div>
