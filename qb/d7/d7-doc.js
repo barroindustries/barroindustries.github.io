@@ -433,7 +433,7 @@
     dlTitle: 'Download the quotation as an A4 PDF file, named by its quote number. The quote must be filed first.'
   });
   /* the A4 page of the PDF in CSS px (96 dpi): 210 x 297 mm.  The margins are the print margins (10 mm sides, 11 mm top) with a 13 mm foot that holds the running line "<number> - <client>   Page n of N". */
-  const A4 = Object.freeze({ w: 794, h: 1123, left: 38, right: 38, top: 42, bottom: 50 });
+  const A4 = Object.freeze({ w: 794, h: 1123, left: 30, right: 30, top: 34, bottom: 46 });   // ≈8 mm sides, 9 mm top (the PDF adds no margin of its own: margin 0)
   const warned = Object.create(null);
   const warn = (name, err) => { if (!warned[name]) { warned[name] = 1; try { console.error('D7 doc: ' + name + ' failed', err); } catch (e) { /* no console */ } } };
   const d7on = () => { try { return typeof d7On === 'function' && !!d7On(); } catch (e) { return false; } };
@@ -804,7 +804,7 @@
       /* The engine cuts what it is given into A4 bands at the top edge of a table row or a block (its default cut list), which is its own page layout and not this one: the container already holds one exact
          A4 page per .d7-a4-page, so the page tops are the ONLY cut points (cutSelector) and the keep-with-next rule is switched off (a selector that matches nothing).  Without this the real engine re-cut
          the pages: a subtotal bar left alone at the top of a page, the running footer in the middle of a page, a seventh page, a photo cut in half. */
-      try { res = await window.FormsPdf.download(built.node, name, { cutSelector: '.d7-a4-page', keepNextSelector: '[data-pdf-no-keep]' }); } catch (err) { res = { ok: false, error: msg(err) }; }
+      try { res = await window.FormsPdf.download(built.node, name, { cutSelector: '.d7-a4-page', keepNextSelector: '[data-pdf-no-keep]', margin: 0 }); } catch (err) { res = { ok: false, error: msg(err) }; }   // margin 0: the A4 page carries its own margins (owner 2026-11-20: the engine's extra 10 mm made them too large)
       if (res && res.ok) { const saved = trim(res.fileName) || name; D7.toast('PDF saved: ' + saved + '.'); return { ok: true, fileName: saved }; }
       printInstead('The PDF file could not be made.');
       return { ok: false, fileName: name, error: trim(res && res.error) || 'The PDF maker did not finish.' };

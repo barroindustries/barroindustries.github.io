@@ -362,9 +362,9 @@ html body.d7-on .qb-doc-sheet .d7-blk .kc-d-row > b{color:#1F3A5F;}
 .d7-a4-doc{position:absolute;left:-10000px;top:0;width:794px;margin:0;padding:0;background:#fff;pointer-events:none;}
 .d7-a4-page{position:relative;box-sizing:border-box;width:794px;height:1123px;margin:0;padding:0;overflow:hidden;background:#fff;color:#000;}
 html body.d7-on .d7-a4-doc .qb-doc-sheet.d7-a4-body{box-sizing:border-box;max-width:none;margin:0;padding:0;border:none;border-radius:0;box-shadow:none;background:transparent;color:#000;font-size:9pt;line-height:1.35;}
-html body.d7-on .d7-a4-page > .d7-a4-body{position:absolute;left:38px;top:42px;width:718px;height:1031px;overflow:hidden;}
-html body.d7-on .d7-a4-doc > .d7-a4-flow{position:relative;width:718px;height:auto;overflow:visible;}
-.d7-a4-foot{position:absolute;left:38px;right:38px;bottom:18px;display:flex;justify-content:space-between;gap:12px;padding-top:4px;border-top:.5px solid #ddd;font-size:7pt;line-height:1.2;color:#888;}
+html body.d7-on .d7-a4-page > .d7-a4-body{position:absolute;left:30px;top:34px;width:734px;height:1043px;overflow:hidden;}
+html body.d7-on .d7-a4-doc > .d7-a4-flow{position:relative;width:734px;height:auto;overflow:visible;}
+.d7-a4-foot{position:absolute;left:30px;right:30px;bottom:14px;display:flex;justify-content:space-between;gap:12px;padding-top:4px;border-top:.5px solid #ddd;font-size:7pt;line-height:1.2;color:#888;}
 .d7-a4-run{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .d7-a4-pg{flex:0 0 auto;white-space:nowrap;}
 
