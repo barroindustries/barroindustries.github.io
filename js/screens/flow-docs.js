@@ -110,7 +110,8 @@
       return row;
     }).filter(Boolean);
   }
-  // savePunchList(projectId, items, { clear }) -> { ok, code?, message?, items }. clear: tick every item and write clearedAt / clearedBy.
+  // savePunchList(projectId, items, { clear }) -> { ok, code?, message?, items }. clear: every item must already be ticked done (else code 'items-open',
+  // nothing written); then write clearedAt / clearedBy.
   async function savePunchList(projectId, items, opts) {
     opts = opts || {};
     const p = await readProject(projectId);
@@ -120,7 +121,11 @@
     const who = whoName(), nowIso = new Date().toISOString(), today = (window.today && window.today()) || nowIso.slice(0, 10);
     const prev = p.punchList && !Array.isArray(p.punchList) ? p.punchList.items : (Array.isArray(p.punchList) ? p.punchList : []);
     let rows = cleanItems(items, prev, who, today);
-    if (opts.clear) rows = rows.map(function (r) { return Object.assign({}, r, { done: true, doneDate: r.doneDate || today }); });
+    // Owner 2026-11-20: "Mark all cleared" REFUSES while any item is still open — it never ticks items done for you. Tick each fixed item first.
+    if (opts.clear) {
+      const open = rows.filter(function (r) { return !r.done; });
+      if (open.length) return { ok: false, code: 'items-open', message: open.length + ' item(s) are not ticked done yet. Tick each item once it is fixed, then press Mark all cleared.', open: open.length };
+    }
     const punchList = { items: rows };
     if (opts.clear) { punchList.clearedAt = nowIso; punchList.clearedBy = who; }
     await fsDb().collection('job_projects').doc(projectId).update({
@@ -210,6 +215,8 @@
         harvest();
         const err = panel.querySelector('#pl-err');
         const fail = function (m) { if (err) { err.textContent = m; err.classList.remove('hidden'); } else toast(m, 'error'); };
+        // Refuse at once on the screen (no round trip); savePunchList checks again on the fresh read.
+        if (clear) { const open = items.filter(function (it) { return String(it.text || '').trim() && !it.done; }).length; if (open) { fail(open + ' item(s) are not ticked done yet. Tick each item once it is fixed, then press Mark all cleared.'); return; } }
         try {
           const res = await savePunchList(p.id, items, { clear: clear });
           if (!res.ok) { fail(res.message); return; }
