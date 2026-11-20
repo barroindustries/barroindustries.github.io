@@ -123,7 +123,7 @@ describe('1 · the app kit: an inert <template> holding exactly what the app nee
     for (const s of kitScripts) if (!/^https:/.test(s.attrs.src)) assert.equal(s.attrs.src.split('?v=')[1], sheets[0].split('v=')[1], `${s.attrs.src}: every local kit script carries the stylesheets' ?v= (the hook rewrites all of them)`);
     const hints = kitLinks.filter((l) => l.attrs.rel !== 'stylesheet').map((l) => `${l.attrs.rel} ${l.attrs.href}`);
     assert.deepEqual(hints, ['preconnect https://www.gstatic.com', 'preconnect https://firestore.googleapis.com', 'preconnect https://firebasestorage.googleapis.com',
-      'preconnect https://cdn.jsdelivr.net', 'dns-prefetch https://unpkg.com', 'preload icons/barro-kitchens.png']);
+      'preconnect https://cdn.jsdelivr.net', 'dns-prefetch https://unpkg.com', 'preload icons/barro-industries-horizontal.png']);   // 2026-11-20: the logo every app screen now shows (was the 675 KB round BK logo)
     for (const l of kitLinks.filter((x) => x.attrs.rel === 'preconnect')) assert.ok('crossorigin' in l.attrs, `${l.attrs.href}: the app's own preconnects were crossorigin`);
     const pre = kitLinks.find((l) => l.attrs.rel === 'preload');
     assert.equal(pre.attrs.as, 'image');
@@ -257,15 +257,14 @@ describe('3 · what the website view fetches: site.js, fonts and images — no a
     assert.ok(!/serviceWorker/.test(outside), 'an inline script in the website view touches the service worker');
   });
 
-  it('keeps the three hidden logo images (splash, sign-in, top bar) lazy, so the 848 KB PNG is not fetched for a visitor who never sees them — and the app views preload it', () => {
-    const logos = [...html.matchAll(/<img src="icons\/barro-kitchens\.png"[^>]*>/g)].map((m) => m[0]);
-    assert.equal(logos.length, 1);   // owner 2026-11-20: the top bar and the splash now show the horizontal Barro Industries logo (below)
-    for (const t of logos) assert.ok(/\sloading="lazy"/.test(t), `not lazy: ${t.slice(0, 70)}`);
-    assert.deepEqual(logos.map((t) => t.match(/class="([^"]+)"/)[1]), ['login-logo-img']);
-    assert.ok(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="topbar-hlogo" loading="lazy"/.test(html), 'the top bar: the horizontal Barro Industries logo, lazy');
-    assert.ok(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="splash-hlogo" loading="lazy"/.test(html), 'the splash: the horizontal Barro Industries logo, lazy');
-    assert.ok(kitLinks.some((l) => l.attrs.rel === 'preload' && l.attrs.href === 'icons/barro-kitchens.png'));
-    assert.ok(!/barro-kitchens\.png/.test(outside.replace(/<img src="icons\/barro-kitchens\.png"[^>]*>/g, '')), 'another reference to the large logo in the website view');
+  it('keeps the three hidden logo images (splash, sign-in, top bar) lazy, so a website visitor never fetches them — and the app views preload the one file they share', () => {
+    // owner 2026-11-20: all three show the horizontal Barro Industries logo; the round BK logo is on no app screen any more
+    assert.equal([...html.matchAll(/<img src="icons\/barro-kitchens\.png"[^>]*>/g)].length, 0, 'the round BK logo is back on an app screen');
+    const logos = [...html.matchAll(/<img src="icons\/barro-industries-horizontal\.png"[^>]*>/g)].map((m) => m[0]);
+    assert.deepEqual(logos.map((t) => t.match(/class="([^"]+)"/)[1]), ['splash-hlogo', 'login-hlogo', 'topbar-hlogo']);
+    for (const t of logos) assert.ok(/\sloading="lazy"/.test(t), `not lazy: ${t.slice(0, 90)}`);
+    assert.ok(kitLinks.some((l) => l.attrs.rel === 'preload' && l.attrs.href === 'icons/barro-industries-horizontal.png'));
+    assert.ok(!/barro-industries-horizontal\.png/.test(outside.replace(/<img src="icons\/barro-industries-horizontal\.png"[^>]*>/g, '')), 'another reference to the app logo in the website view');
   });
 
   it('hides every static app container in the website view in CSS and in the no-script case — otherwise, without the app stylesheet, the modal / drawer / overlays render as stray text under the footer', () => {
