@@ -41,7 +41,12 @@ describe('1. files and wiring', () => {
     assert.doesNotMatch(html, /js\/forms(-core|-set-1|-pdf)?\.js/);
     assert.doesNotMatch(html.replace(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="(topbar|splash)-hlogo"[^>]*>/g, ''), /barro-industries-horizontal/, 'only the app top bar and the splash (owner 2026-11-20) reference the horizontal logo');
     const cfg = read('js/config.js');
-    assert.ok(!/forms-core|forms-set-1|forms-pdf/.test(cfg), 'config.js (PAGE_SCRIPTS) is not touched by Phase 1 — QF loads the engine with ensureScript');
+    // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §2.3: the quote review page lists js/forms-core.js (the section headings and item codes it prints) in its OWN PAGE_SCRIPTS entry — the one
+    // mention allowed; every form still loads the engine through ensureScript, and the other three forms files are named nowhere in config.js.
+    const qa = cfg.match(/'quote-approval':\s*\[([^\]]*)\]/);
+    assert.ok(qa && /'js\/forms-core\.js'/.test(qa[1]), 'the review page names forms-core.js in PAGE_SCRIPTS');
+    const rest = cfg.replace(qa[0], '').replace(/\/\/ ── Quote review page \(QUOTE-APPROVAL-LINK-SPEC[^\n]*\n(?:\s*\/\/[^\n]*\n)*/, '');
+    assert.ok(!/forms-core|forms-set-1|forms-pdf/.test(rest), 'config.js (PAGE_SCRIPTS) is not touched by Phase 1 — QF loads the engine with ensureScript');
   });
   it('the registry says what each form needs: the body set, and production.js for the job-based forms', () => {
     for (const e of FC.list()) assert.equal(e.bodySet, 'js/forms-set-1.js');

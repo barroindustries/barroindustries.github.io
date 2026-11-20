@@ -322,12 +322,13 @@ describe('the banned words — in every string this phase adds, and in the whole
 
   it('the What\'s New entry of this phase is clean (the old warranty sentence is not quoted back, even to say it is gone)', () => {
     const wn = new Function(`${sliceBetween(BUILDER, 'const WHATS_NEW = [', '\n];', 'quote-builder-v2.html')}\nreturn WHATS_NEW;`)();
-    // 51 (the configurators, 2026-11-20) and 50 (owner Q70, Back to the form) sit on top; this phase's entries are 49 and 48
-    assert.deepEqual(wn.slice(0, 4).map((e) => e.ver), [51, 50, 49, 48]);
-    assertClean('What\'s New 51', wn[0].items.join(' | '));
-    assertClean('What\'s New 50', wn[1].items.join(' | '));
-    assertClean('What\'s New 49', wn[2].items.join(' | '));
-    assertClean('What\'s New 48', wn[3].items.join(' | '));
+    // 52 (the approval link, 2026-11-20), 51 (the configurators) and 50 (owner Q70, Back to the form) sit on top; this phase's entries are 49 and 48
+    assert.deepEqual(wn.slice(0, 5).map((e) => e.ver), [52, 51, 50, 49, 48]);
+    assertClean('What\'s New 52', wn[0].items.join(' | '));
+    assertClean('What\'s New 51', wn[1].items.join(' | '));
+    assertClean('What\'s New 50', wn[2].items.join(' | '));
+    assertClean('What\'s New 49', wn[3].items.join(' | '));
+    assertClean('What\'s New 48', wn[4].items.join(' | '));
   });
 
   it('Vesta, a project count ("500+") and the old 0960 number appear in NO line of the builder, js/config.js, js/screens/sales.js, q/index.html or the new helper', () => {

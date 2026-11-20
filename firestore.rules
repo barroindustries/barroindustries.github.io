@@ -1426,6 +1426,37 @@ service cloud.firestore {
                 && request.resource.data.get('createdBy', '') == request.auth.uid));
     }
 
+    // ── Quote approval thread (QUOTE-APPROVAL-LINK-SPEC-2026-11-20) ─ one doc per entry, keyed by the revision chain.
+    match /quote_comments/{id} {
+      allow read: if isAuth() && hasProfile()
+        && (isAdmin() || resource.data.get('submitterUid', '') == request.auth.uid);
+      allow create: if isAuth() && hasProfile()
+        && request.resource.data.keys().hasOnly(['threadKey','coll','quoteId','rootQuoteId','quoteNumber','kind','text','authorUid','authorName','authorRole','submitterUid','createdAt'])
+        && request.resource.data.keys().hasAll(['threadKey','coll','quoteId','rootQuoteId','kind','text','authorUid','authorRole','submitterUid','createdAt'])
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.coll in ['bk_quotes', 'bs_quotes']
+        && isBoundedString(request.resource.data.quoteId, 128) && request.resource.data.quoteId.size() > 0
+        && isBoundedString(request.resource.data.rootQuoteId, 128) && request.resource.data.rootQuoteId.size() > 0
+        && request.resource.data.threadKey == request.resource.data.coll + '_' + request.resource.data.rootQuoteId
+        && isBoundedString(request.resource.data.text, 2000)
+        && isBoundedString(request.resource.data.get('quoteNumber', ''), 80)
+        && isBoundedString(request.resource.data.get('authorName', ''), 120)
+        && isBoundedString(request.resource.data.submitterUid, 128)
+        && (request.resource.data.kind != 'comment' || request.resource.data.text.size() > 0)
+        && (
+          (isPresident() && request.resource.data.authorRole == 'president'
+            && request.resource.data.kind in ['comment', 'returned', 'approved', 'submitted'])
+          ||
+          (!isPresident() && request.resource.data.authorRole == 'sales'
+            && request.resource.data.submitterUid == request.auth.uid
+            && request.resource.data.kind in ['comment', 'submitted']
+            && get(/databases/$(database)/documents/$(request.resource.data.coll)/$(request.resource.data.quoteId)).data.get('createdBy', '') == request.auth.uid)
+        );
+      allow update: if false;
+      allow delete: if isAuth() && isPresident();
+    }
+
     // [RN-93] Quote Templates (QUOTE-TEMPLATES-SPEC.md) ─ -> docs/firestore-rules-notes.md#rn-93
     match /quote_templates/{id} {
       allow read:   if isAuth() && hasProfile();   // internal Sales library

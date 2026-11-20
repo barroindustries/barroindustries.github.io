@@ -153,9 +153,11 @@ describe('the page — static: the loaders, the shim, the gate, the stamp, what 
     assert.equal((HTML.match(/<div class="cat-tabs" id="catTabs">[\s\S]*?<\/div>/)[0].match(/<button/g) || []).length, 10);
   });
 
-  it('the tutorial (repo contract): TUTORIAL_VERSION 51 (Q70 shipped 50 first), What\'s New 51 on top in plain words, Help has the Configurators section and the device row, every TOUR_STEPS target resolves', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
-    const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
+  it('the tutorial (repo contract): TUTORIAL_VERSION 52 (the approval link, on top of the configurators\' 51 and Q70\'s 50), What\'s New 51 in plain words, Help has the Configurators section and the device row, every TOUR_STEPS target resolves', () => {
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 52;/);
+    const wn52 = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
+    assert.equal(wn52[0].ver, 52, 'QUOTE-APPROVAL-LINK-SPEC-2026-11-20: the approval link is the newest entry');
+    const wn = wn52.slice(1);   // 51 and below: what this test has always pinned
     assert.equal(wn[0].ver, 51);
     assert.equal(wn[1].ver, 50, 'the Q70 entry stays as history');
     assert.equal(wn[0].date, '2026-11-20');
@@ -431,7 +433,7 @@ describe('what only KC mode changes: whole pesos stay whole in legacy, the items
   });
 });
 
-describe('the approval wiring: the reason the layer gives forces the approval tick and the button; Mark all reviewed only while a review is open; the link panel after sending; a legacy quote is never asked', () => {
+describe('the approval wiring: the reason the layer gives forces the approval tick and the button; Mark all reviewed only while a review is open; the approval link is the app shell\'s window (QUOTE-APPROVAL-LINK-SPEC-2026-11-20), never the layer\'s; a legacy quote is never asked', () => {
   const fillVerify = (b) => { for (const id of ['quoteNo', 'clientName']) b.el(id).value = 'BKLUFB261119-001R1'; b.el('quoteDate').value = '2026-11-19'; b.run('waiveFlags = { salesperson: true, clientPhone: true, clientEmail: true }'); b.run(`items.push(${JSON.stringify(catalogueLine())})`); };
 
   it('reviewBlockReason() is the layer\'s approvalReason in KC mode and \'\' in legacy; the Verify & File row names the reason, ticks and locks the box, and the button reads "Send for approval (get the link)"', () => {
@@ -452,33 +454,44 @@ describe('the approval wiring: the reason the layer gives forces the approval ti
     assert.match(b.el('verifyBody').innerHTML, /<input type="checkbox" id="reqApprovalCheck"\s+style/, 'nothing forces it: the box is free and unticked'); assert.equal(b.el('fileBtn').textContent, '📁 File Quotation');
   });
 
-  it('fileQuotation: a forced approval can never reach QUOTE_FILED — it posts QUOTE_APPROVAL_REQUESTED, asks the layer for the link panel (KC mode only) and the badge reads Pending; legacy is as before', async () => {
+  it('fileQuotation: a forced approval can never reach QUOTE_FILED — it posts QUOTE_APPROVAL_REQUESTED with the approvalWhy envelope field (both modes), asks the layer for NO link panel (the shell owns it), and the badge reads Pending and is clickable in both modes', async () => {
     for (const kcOn of [true, false]) {
       const b = makeEnv(); fillVerify(b); b.run('DB = { products: [], categories: [], laborRoles: [], constants: {} }');
-      b.answer('flow.approvalReason', 'a line needs review'); b.answer('flow.showApprovalLink', 1); b.kc(kcOn);
+      b.answer('flow.approvalReason', 'a line needs review'); b.answer('flow.approvalRequired', { required: true, reasons: ['approve-all', 'review', 'review'] }); b.answer('flow.showApprovalLink', 1); b.kc(kcOn);
       b.run('doVerifyAndFile()');
       if (!kcOn) b.el('reqApprovalCheck').checked = true;   // legacy: the preparer's own "send to the president first" tick
       await b.run('fileQuotation()');
       const types = b.posted.map((p) => p.msg.type);
+      assert.deepEqual(types, ['QUOTE_APPROVAL_REQUESTED'], kcOn ? 'KC' : 'legacy: only the preparer\'s own tick sends it for approval');
+      const env = b.posted[0].msg;
       if (kcOn) {
-        assert.deepEqual(types, ['QUOTE_APPROVAL_REQUESTED']); assert.equal(b.run('quoteStatus'), 'pending_approval'); assert.equal(b.el('filedBadge').textContent, '⏳ Pending Approval');
-        assert.ok(b.calls().some((c) => c[0] === 'flow.showApprovalLink' && c[1] && c[1].editableState), 'the link panel is asked, with the payload');
-        assert.equal(b.el('filedBadge').style.cursor, 'pointer');
+        assert.equal(b.run('quoteStatus'), 'pending_approval'); assert.equal(b.el('filedBadge').textContent, '⏳ Pending Approval');
+        assert.deepEqual(JSON.parse(JSON.stringify(env.approvalWhy)), { reasons: ['approve-all', 'review', 'review'], text: 'a line needs review', ticked: false }, 'KC: the layer\'s codes and sentence ride the envelope as the builder has them (the bridge sanitises)');
       } else {
-        assert.deepEqual(types, ['QUOTE_APPROVAL_REQUESTED'], 'legacy: only the preparer\'s own tick sends it for approval (the layer\'s reason is never read)'); assert.equal(b.calls().some((c) => c[0] === 'flow.showApprovalLink'), false, 'legacy: the link panel is not the layer\'s business');
-        assert.equal(b.el('filedBadge').style.cursor, '', 'legacy: the badge is not made clickable');
+        assert.deepEqual(JSON.parse(JSON.stringify(env.approvalWhy)), { reasons: [], text: '', ticked: true }, 'legacy: the layer is never asked for a reason; only the preparer\'s own tick is recorded');
+        assert.equal(b.calls().some((c) => c[0] === 'flow.approvalRequired' || c[0] === 'flow.approvalReason'), false, 'legacy: the layer is never asked');
       }
+      assert.equal('approvalWhy' in env.payload, false, 'approvalWhy is NOT part of the payload (it rides the envelope, like costSidecar)');
+      assert.equal(b.calls().some((c) => c[0] === 'flow.showApprovalLink'), false, 'no link panel is asked of the layer in either mode: the app shell shows the link');
+      assert.equal(b.el('filedBadge').style.cursor, 'pointer', 'the badge asks for the link again: clickable in both modes');
       assert.ok(b.posted.every((p) => p.origin === 'http://localhost'), 'every message is pinned to the origin');
     }
   });
 
-  it('the badge click shows the approval link only for a pending KC quote; the layer\'s approval-covers answer stops the below-floor tick from coming back', () => {
-    const b = makeEnv(); b.answer('flow.showApprovalLink', 1);
+  it('the badge click asks the app shell for the approval link (QB_SHOW_APPROVAL_LINK, both modes) only for a pending quote, naming the reopened doc and the number / client on the page; the layer\'s approval-covers answer stops the below-floor tick from coming back', () => {
+    const b = makeEnv();
     const onclick = HTML.match(/id="filedBadge" onclick="([^"]*)"/)[1];
-    const click = () => { b.clear(); vm.runInContext(onclick, b.ctx); return b.calls().some((c) => c[0] === 'flow.showApprovalLink'); };
-    b.kc(true); b.run("quoteStatus = 'draft'"); assert.equal(click(), false);
-    b.run("quoteStatus = 'pending_approval'"); assert.equal(click(), true);
-    b.kc(false); b.run("quoteStatus = 'pending_approval'"); assert.equal(click(), false, 'a legacy pending quote is not the layer\'s business');
+    const click = () => { b.posted.length = 0; vm.runInContext(onclick, b.ctx); return JSON.parse(JSON.stringify(b.posted.map((p) => ({ type: p.msg.type, payload: p.msg.payload, origin: p.origin })))); };   // plain objects: the page's own realm has its own prototypes
+    b.el('quoteNo').value = 'BKLUFB261119-001R1'; b.el('clientName').value = 'Juan Cruz';
+    for (const kcOn of [true, false]) {
+      b.kc(kcOn);
+      b.run("quoteStatus = 'draft'"); assert.deepEqual(click(), [], 'not pending: nothing is asked');
+      b.run("quoteStatus = 'pending_approval'");
+      assert.deepEqual(click(), [{ type: 'QB_SHOW_APPROVAL_LINK', origin: 'http://localhost',
+        payload: { docId: null, collection: null, quoteNumber: 'BKLUFB261119-001R1', clientName: 'Juan Cruz' } }], kcOn ? 'KC' : 'legacy: the badge works in both modes (the old panel was KC-only)');
+    }
+    b.run("reopenSourceDocId = 'abc123XYZ'; reopenSourceCollection = 'bk_quotes'");
+    assert.deepEqual(click()[0].payload.docId, 'abc123XYZ'); assert.deepEqual(click()[0].payload.collection, 'bk_quotes');
     b.kc(true); b.answer('flow.approvalCovers', true); assert.equal(b.run('approvalCoversNow()'), true);
     b.kc(false); assert.equal(b.run('approvalCoversNow()'), false);
   });
@@ -646,7 +659,7 @@ describe('QA: linking, unlinking, deleting or reordering a photo redraws the Pho
 });
 
 // ═══════════════════════════════════════════════ Addendum 2 B5: What's New is held until the switch is on ═══════════════════════════════════════════════
-describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only while the configurators are on for this person, and a person who sees the builder with the switch off is never marked as having seen v51', () => {
+describe('Addendum 2 B5: the configurators\' What\'s New entries (v51, and v52 the approval link, QUOTE-APPROVAL-LINK-SPEC-2026-11-20) show only while the configurators are on for this person, and a person who sees the builder with the switch off is never marked as having seen them', () => {
   const mk = (allow) => { const b = makeEnv(); b.run(`D7.live = true; globalThis.KCLive = { allowsNew: function () { return globalThis.__allow; } }; globalThis.__allow = ${allow};`); return b; };
   const switchTo = (b, allow) => b.run(`globalThis.__allow = ${allow}`);
   const list = (b) => b.el('helpWhatsNew').innerHTML;
@@ -655,11 +668,11 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
   const bannerText = (b) => (b.el('qbTutBanner').style.display === 'flex' ? b.el('qbTutBannerText').innerHTML : '');
   const seen = (b) => b.store.get('qbTutSeenVer') || null;
 
-  it('static: the v51 entry is the one flagged kc:true (nothing else is), the version constant is still 51, the helpers exist, and initUI measures the tutorial again once the switch has been read', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
+  it('static: the v51 and v52 entries are the two flagged kc:true (nothing else is), the version constant is 52, the helpers exist, and initUI measures the tutorial again once the switch has been read', () => {
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 52;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.deepEqual(wn.filter((e) => e.kc).map((e) => e.ver), [51], 'only the configurators\' entry is held');
-    assert.equal(wn[0].ver, 51); assert.equal(wn[1].ver, 50); assert.equal(wn[1].kc, undefined);
+    assert.deepEqual(wn.filter((e) => e.kc).map((e) => e.ver), [52, 51], 'only the configurators\' entry and the approval-link entry are held');
+    assert.equal(wn[0].ver, 52); assert.equal(wn[1].ver, 51); assert.equal(wn[2].ver, 50); assert.equal(wn[2].kc, undefined);
     for (const f of ['kcWhatsNewOn', 'whatsNewList', 'tutorialVersion', 'tutMarkSeen']) assert.ok(SCRIPT.includes(`function ${f}(`), f);
     assert.match(fnSource('kcWhatsNewOn'), /KCLive\.allowsNew\(\)/, 'the one question the page already asks for a new quote');
     const ui = stripComments(fnSource('initUI')); assert.ok(ui.indexOf('kcAdoptEngineIfBlank()') > 0 && ui.indexOf('initTutorial()') > ui.indexOf('kcAdoptEngineIfBlank()'), 'initTutorial runs again after the switch was read');
@@ -667,15 +680,15 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
     assert.match(stripComments(fnSource('renderWhatsNew')), /whatsNewList\(\)/, 'the list is the filtered one');
   });
 
-  it('switch OFF: the list ends at 50 (no v51, no word of the configurators), and the version people are measured against is 50', () => {
+  it('switch OFF: the list ends at 50 (no v51 or v52, no word of the configurators), and the version people are measured against is 50', () => {
     const b = mk(false); b.run('initTutorial()');
-    assert.deepEqual(vers(b)[0], 50); assert.equal(vers(b).includes(51), false, 'no v51 entry'); assert.equal(/seven tabs|configurator/i.test(list(b)), false, 'nothing about the configurators');
+    assert.deepEqual(vers(b)[0], 50); assert.equal(vers(b).includes(51), false, 'no v51 entry'); assert.equal(vers(b).includes(52), false, 'no v52 entry'); assert.equal(/seven tabs|configurator/i.test(list(b)), false, 'nothing about the configurators');
     assert.equal(b.run('tutorialVersion()'), 50); assert.equal(b.run('kcWhatsNewOn()'), false);
-    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length') - 1);
+    assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length') - 2);
   });
-  it('switch ON (kcMode "on", or "president" for the President, or the device force: all of them are KCLive.allowsNew()): the list starts at 51 and the version is 51', () => {
+  it('switch ON (kcMode "on", or "president" for the President, or the device force: all of them are KCLive.allowsNew()): the list starts at 52 and the version is 52', () => {
     const b = mk(true); b.run('initTutorial()');
-    assert.equal(vers(b)[0], 51); assert.ok(/seven tabs/.test(list(b))); assert.equal(b.run('tutorialVersion()'), 51); assert.equal(b.run('kcWhatsNewOn()'), true);
+    assert.equal(vers(b)[0], 52); assert.equal(vers(b)[1], 51); assert.ok(/seven tabs/.test(list(b))); assert.equal(b.run('tutorialVersion()'), 52); assert.equal(b.run('kcWhatsNewOn()'), true);
     assert.equal(b.run('whatsNewList().length'), b.run('WHATS_NEW.length'));
   });
   it('the question is asked of the live layer and nothing else: no layer (D7.live off), no KCLive, no allowsNew, one that throws, or one that says no: all of these hold the entry back', () => {
@@ -694,13 +707,13 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
     assert.equal(seen(b), '50', 'seen 50, not 51'); assert.equal(dot(b), false, 'the dot clears'); assert.equal(b.el('qbTutBanner').style.display, 'none');
     assert.equal(vers(b).includes(51), false, 'the Help list has no v51 while the switch is off');
   });
-  it('the person who saw the builder with the switch off still gets the news once it is turned on: dot and the "updated" banner for 51, the list shows v51, and seeing it then marks 51', () => {
+  it('the person who saw the builder with the switch off still gets the news once it is turned on: dot and the "updated" banner for 52, the list shows v52, and seeing it then marks 52', () => {
     const b = mk(false); b.run('initTutorial()'); b.run('openHelpModal()'); assert.equal(seen(b), '50'); b.run('closeHelpModal()');
     b.run('initTutorial()'); assert.equal(dot(b), false, 'switch still off: nothing new'); assert.equal(bannerText(b), '');
     switchTo(b, true); b.run('initTutorial()');
-    assert.equal(dot(b), true, 'the switch is on: v51 is news'); assert.match(bannerText(b), /The quote builder was updated/); assert.equal(seen(b), '50', 'initTutorial does not mark anything as seen');
-    assert.equal(vers(b)[0], 51);
-    b.run('openHelpModal()'); assert.equal(seen(b), '51'); assert.equal(dot(b), false); assert.equal(b.el('qbTutBanner').style.display, 'none');
+    assert.equal(dot(b), true, 'the switch is on: v52 is news'); assert.match(bannerText(b), /The quote builder was updated/); assert.equal(seen(b), '50', 'initTutorial does not mark anything as seen');
+    assert.equal(vers(b)[0], 52);
+    b.run('openHelpModal()'); assert.equal(seen(b), '52'); assert.equal(dot(b), false); assert.equal(b.el('qbTutBanner').style.display, 'none');
     b.run('initTutorial()'); assert.equal(dot(b), false, 'once seen, it stays seen'); assert.equal(bannerText(b), '');
   });
   it('the update banner and the Help button are measured against what the person can see: with the switch off and 50 seen, nothing is pending; a person who last saw 49 is told, and Dismiss is remembered for the version they could see', () => {
@@ -708,27 +721,27 @@ describe('Addendum 2 B5: the configurators\' What\'s New entry (v51) shows only 
     assert.equal(dot(b), true, 'seen 49 < 50'); assert.match(bannerText(b), /updated/);
     b.run('dismissTutBanner()'); assert.equal(b.store.get('qbTutDismissedVer'), '50', 'dismissed at 50, not 51'); assert.equal(b.el('qbTutBanner').style.display, 'none');
     b.run('initTutorial()'); assert.equal(bannerText(b), '', 'not shown again at 50'); assert.equal(dot(b), true, 'the dot stays until it is seen');
-    switchTo(b, true); b.run('initTutorial()'); assert.match(bannerText(b), /updated/, 'dismissing 50 does not hide 51');
+    switchTo(b, true); b.run('initTutorial()'); assert.match(bannerText(b), /updated/, 'dismissing 50 does not hide 52');
   });
-  it('what a person has seen only grows: a person who saw 51 while it was on keeps 51 when it is switched off, and Help or the tour with the switch off never lowers it', () => {
-    const b = mk(true); b.run('openHelpModal()'); assert.equal(seen(b), '51'); b.run('closeHelpModal()');
-    switchTo(b, false); b.run('openHelpModal()'); assert.equal(seen(b), '51', 'never lowered to 50'); b.run('closeHelpModal()');
+  it('what a person has seen only grows: a person who saw 52 while it was on keeps 52 when it is switched off, and Help or the tour with the switch off never lowers it', () => {
+    const b = mk(true); b.run('openHelpModal()'); assert.equal(seen(b), '52'); b.run('closeHelpModal()');
+    switchTo(b, false); b.run('openHelpModal()'); assert.equal(seen(b), '52', 'never lowered to 50'); b.run('closeHelpModal()');
     b.run('initTutorial()'); assert.equal(dot(b), false);
-    b.run('showTourStep = function () {}; startTour()'); assert.equal(seen(b), '51', 'the tour does not lower it either');
+    b.run('showTourStep = function () {}; startTour()'); assert.equal(seen(b), '52', 'the tour does not lower it either');
     b.run('endTour()');
-    const t = mk(false); t.run('showTourStep = function () {}; startTour()'); assert.equal(seen(t), '50', 'the tour with the switch off marks 50, not 51'); assert.equal(dot(t), false);
-    switchTo(t, true); t.run('initTutorial()'); assert.equal(dot(t), true, 'and 51 is still news the day it is on');
-    const d = mk(true); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '51'); switchTo(d, false); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '51', 'a dismissal is not lowered either');
+    const t = mk(false); t.run('showTourStep = function () {}; startTour()'); assert.equal(seen(t), '50', 'the tour with the switch off marks 50, not 52'); assert.equal(dot(t), false);
+    switchTo(t, true); t.run('initTutorial()'); assert.equal(dot(t), true, 'and 52 is still news the day it is on');
+    const d = mk(true); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '52'); switchTo(d, false); d.run('dismissTutBanner()'); assert.equal(d.store.get('qbTutDismissedVer'), '52', 'a dismissal is not lowered either');
   });
   it('initTutorial is a pure function of the state it reads: run again after the switch is read, a banner that no longer applies goes away (it is never left showing)', () => {
     const b = mk(true); b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/);
-    b.store.set('qbTutSeenVer', '51'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'seen 51 with the switch on: nothing to tell');
-    b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/); b.store.set('qbTutDismissedVer', '51'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'dismissed at this version');
+    b.store.set('qbTutSeenVer', '52'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'seen 52 with the switch on: nothing to tell');
+    b.store.set('qbTutSeenVer', '49'); b.run('initTutorial()'); assert.match(bannerText(b), /updated/); b.store.set('qbTutDismissedVer', '52'); b.run('initTutorial()'); assert.equal(b.el('qbTutBanner').style.display, 'none', 'dismissed at this version');
   });
   it('the Help list is redrawn every time Help opens, so it follows the switch as it is then (and the device row of Help, which can turn it off)', () => {
-    const b = mk(true); b.run('initTutorial()'); assert.equal(vers(b)[0], 51);
-    switchTo(b, false); b.run('openHelpModal()'); assert.equal(vers(b)[0], 50, 'off now: the v51 entry is gone from the list');
-    switchTo(b, true); b.run('openHelpModal()'); assert.equal(vers(b)[0], 51);
+    const b = mk(true); b.run('initTutorial()'); assert.equal(vers(b)[0], 52);
+    switchTo(b, false); b.run('openHelpModal()'); assert.equal(vers(b)[0], 50, 'off now: the v51 and v52 entries are gone from the list');
+    switchTo(b, true); b.run('openHelpModal()'); assert.equal(vers(b)[0], 52);
   });
   it('the keys are the same (qbTutSeenVer, qbTutDismissedVer) and are never renamed or cleared by the gate', () => {
     for (const k of ['qbTutSeenVer', 'qbTutDismissedVer']) assert.ok(SCRIPT.includes(`'${k}'`), k);
@@ -986,10 +999,10 @@ describe('Fable review F13 (2026-11-20): Help and the tour say what the page pri
     assert.ok(help.includes('named by its quote number and nothing else'));
     assert.equal(/"<quote no\.> Rev\. 1"|Rev\. 1"/.test(HTML), false);
   });
-  it('the tutorial version is NOT bumped by these copy fixes (a bump would pop the "updated" banner for everyone on launch day)', () => {
-    assert.match(SCRIPT, /const TUTORIAL_VERSION = 51;/);
+  it('the tutorial version is NOT bumped by these copy fixes (a bump would pop the "updated" banner for everyone on launch day); it moved to 52 only for the approval link (QUOTE-APPROVAL-LINK-SPEC-2026-11-20)', () => {
+    assert.match(SCRIPT, /const TUTORIAL_VERSION = 52;/);
     const wn = new Function(`${SCRIPT.slice(SCRIPT.indexOf('const WHATS_NEW = ['), SCRIPT.indexOf('\n];', SCRIPT.indexOf('const WHATS_NEW = [')) + 3)}\nreturn WHATS_NEW;`)();
-    assert.equal(wn[0].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
+    assert.equal(wn[0].ver, 52); assert.equal(wn[1].ver, 51); assert.equal(wn.length, wn.filter((x, i, a) => a.findIndex((y) => y.ver === x.ver) === i).length);
   });
 });
 

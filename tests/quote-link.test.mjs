@@ -43,8 +43,10 @@ const LISTENER = (() => {
   assert.ok(end > start && APP.slice(start, end).includes('QUOTE_FILED'), 'the bridge listener could not be lifted whole');
   return APP.slice(start, end + 4);
 })();
+const CONFIG = read('js/config.js');
+const configPiece = (name) => { const m = CONFIG.match(new RegExp(`^window\\.${name} = function[\\s\\S]*?\\n\\};`, 'm')); assert.ok(m, `${name} not found in js/config.js`); return m[0]; };
 const LINK_CODE = [
-  piece(/^const QB_SOURCE_REF_RE = .*;$/m, 'QB_SOURCE_REF_RE'), fnPiece('_qbCleanSourceRef'), fnPiece('_qbCleanEstimateCheck'),
+  piece(/^const QB_SOURCE_REF_RE = .*;$/m, 'QB_SOURCE_REF_RE'), fnPiece('_qbCleanSourceRef'), fnPiece('_qbCleanEstimateCheck'), fnPiece('_qbCleanApprovalWhy'),
   winPiece('linkQuoteToRequest'), winPiece('openQuoteSource'), winPiece('reopenQuoteFromDoc'),
   fnPiece('_qbIsAuthoritativeLoad'), fnPiece('_qbReopenStripLabel'),
   piece(/^function isBrilliantOnly\(\) \{.*\}$/m, 'isBrilliantOnly'),
@@ -94,6 +96,9 @@ function makeApp(opts) {
     QUOTE_COLLECTIONS: ['bk_quotes', 'bs_quotes'],
     quoteCollectionFor: (co) => (co === 'BS' ? 'bs_quotes' : 'bk_quotes'),
     quoteStateFields: (s) => ({ filed: { status: 'filed', approvalStatus: 'filed' }, pending_approval: { status: 'pending_approval', approvalStatus: 'pending_review' } })[s],
+    // QUOTE-APPROVAL-LINK-SPEC-2026-11-20: the sending of a quote for approval also writes the thread's first entry and shows the shell's link window (both stood in here; the real ones are pinned by tests/quote-approval-link.test.mjs)
+    QuoteThread: { add: async (o) => { ops.push('thread ' + o.kind); return { ok: true, id: 'tc1' }; } },
+    showQuoteApprovalLink: () => { ops.push('link modal'); },
     Clients: { upsertFromQuote: async () => 'client_1' },
     fmtN2: (n) => String(n), logAudit: () => {},
     qrOpen: (r) => opens.push(['qr', r]), cirOpen: (r) => opens.push(['cir', r]),
@@ -109,7 +114,7 @@ function makeApp(opts) {
     navigateTo: async (page, o) => { navs.push([page, o]); if (!opts.navRefused) win.currentPage = page; },
     graftQuoteCosts: async () => {}, dbCacheInvalidate: (k) => invalidated.push(k),
   });
-  vm.runInContext(LINK_CODE + '\n' + LISTENER, ctx);
+  vm.runInContext(configPiece('quoteApprovalRefOf') + '\n' + LINK_CODE + '\n' + LISTENER, ctx);
   const call = (name, ...args) => { ctx.__a = args; return plain(vm.runInContext(`${name}(...__a)`, ctx)); };
   const send = async (type, payload, extra) => { await listeners[0]({ origin: ORIGIN, source: FRAME, data: Object.assign({ type, payload }, extra || {}) }); };
   return { ctx, win, store, ops, toasts, warns, navs, opens, adds, updates, invalidated, call, send, link: (sr, info) => win.linkQuoteToRequest(sr, info), FRAME };

@@ -1321,7 +1321,7 @@ body.d7-on #verifyModal .verify-val label{text-transform:none;letter-spacing:nor
   <div class="topbar-right">
     <button class="btn btn-outline no-print" id="btnHelp" onclick="openHelpModal()" title="Help & guided demo">❓ Help<span class="help-dot" id="helpDot"></span></button>
     <span class="draft-save-chip no-print" id="draftSaveChip"></span>
-    <span class="filed-badge" id="filedBadge" onclick="if(quoteStatus==='pending_approval'&&d7On())D7.h('flow.showApprovalLink')">✓ FILED</span>
+    <span class="filed-badge" id="filedBadge" onclick="if(quoteStatus==='pending_approval')window.parent.postMessage({type:'QB_SHOW_APPROVAL_LINK',payload:{docId:reopenSourceDocId||null,collection:reopenSourceCollection||null,quoteNumber:document.getElementById('quoteNo').value,clientName:document.getElementById('clientName').value}},window.location.origin)">✓ FILED</span>
     <button class="btn btn-outline" id="btnNew" onclick="clearForm()">🗑 New</button>
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
     <!-- Fable review F8 — in KC mode (body.d7-on), on a desktop, the three print buttons fold into this one "📄 PDF ▾" menu (togglePdfMenu). With the switch off, on a legacy quote, on Brilliance Steel or on a phone (which has its own
@@ -9598,6 +9598,11 @@ async function fileQuotation(){
     reopenAsRevisionFlag=true;
   }
   const reqApproval = !!reviewBlockReason() || document.getElementById('reqApprovalCheck')?.checked || false;   // D7:E19 — a line in review can never reach the QUOTE_FILED branch below
+  // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §3.1 — why this quote goes to the President, in the builder's own words: the reason codes the layer gives (KC mode), the sentence the Verify & File row shows,
+  // and whether the preparer ticked "send for approval" himself. Rides the ENVELOPE (like costSidecar), never the payload; the app bridge sanitises it and keeps it on the quote for the review page.
+  const approvalWhy = { reasons: d7On() ? (((D7.h('flow.approvalRequired') || {}).reasons) || []) : [],
+                        text: String(reviewBlockReason() || ''),
+                        ticked: !!document.getElementById('reqApprovalCheck')?.checked };
   const quotePayload = buildQuotePayload();
   const quoteCostSidecar = buildCostSidecar();   // QUOTE-COSTS — rides the envelope, never the payload
 
@@ -9606,14 +9611,14 @@ async function fileQuotation(){
     quoteStatus='pending_approval';
     document.getElementById('verifyModal').style.display='none';
     saveToStorage();
-    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar }, window.location.origin);
-    if(d7On()) D7.h('flow.showApprovalLink', quotePayload);   // KC:L8 — the approval link panel (Copy link, the ready-to-paste message); KC mode only, and a hook that is not there does nothing
+    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar, approvalWhy }, window.location.origin);
+    // the approval LINK is the app shell's window now (js/app.js showQuoteApprovalLink: it knows the new doc id, serves both companies and both modes, and runs navigator.share in the top window) — nothing to show from here
     setSavedDraft(null); // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
     // Show feedback
     document.getElementById('filedBadge').textContent='⏳ Pending Approval';
     document.getElementById('filedBadge').classList.add('show');
     document.getElementById('filedBadge').style.background='#E67E22';
-    document.getElementById('filedBadge').style.cursor=d7On()?'pointer':'';   // KC:L8 — a click shows the approval link again
+    document.getElementById('filedBadge').style.cursor='pointer';   // a click shows the approval link again (the shell's window, both modes)
     return;
   }
 
@@ -10316,12 +10321,15 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 51;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 52;   // integer; bump on every user-visible quote-builder change
 // CONFIGURATOR §7 — what the Verify & File modal does when the quote's total sits outside the estimate range the client saw online.
 // 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
 // them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
 const ESTIMATE_RANGE_MODE = 'warn';
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon. An entry with kc:true is the configurators' own and is shown only while they are on for this person (kcWhatsNewOn(), Addendum 2 B5).
+  { ver:52, date:'2026-11-20', kc:true, items:[
+    'Send for approval now gives you a link to the quote itself: the President opens it, sees every line with its photo, specs and prices, and can approve it, return it with a note, or leave a comment. You get the link right after you send it (Copy link, or Share on a phone), from the Pending Approval badge, and from the Approval link button on the Quotes list. His comments and your replies stay on the quote, and a returned quote shows his note when you reopen it.',
+  ]},
   { ver:51, date:'2026-11-20', kc:true, items:[
     'Add items has seven tabs now — Prep and storage, Washing, Cooking, Ventilation, Refrigeration, Multi-purpose and Mechanical Systems — and each tab shows its configurators ahead of the catalogue items. ➕ Add custom item opens a configurator too: pick the materials from the price list and type the quantities.',
     'A configured line prices itself from the materials price list, and a Chef Mode line starts from the Standard Product Price List. Type a price to override it; ↺ puts the computed price back, and a price below the standard shows a warning. Catalogue items keep their catalogue price.',
@@ -10574,7 +10582,7 @@ const TOUR_STEPS = [
    kcBody:'The calculator — one surface, two cards. The build: materials + labor (30 / 50 / 70 %) + 10 % misc = the PROJECT COST, the floor a discount never goes below. The President sets one Markup for this quote (blank = the standard, times 2) and every cost-based line, custom items included, is priced at project cost times that number (a Chef Mode line keeps its list-price offset); the OH and MK dials are gone. The per-line table shows each line with its computed price and an editable price. It all lands on the quote, live. Only the President sees the costs; clients never do.',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
-   kcBody:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price". A line that needs review, or a quote priced below the standard, cannot be filed by Sales: Verify & File says why, and "Send for approval" then shows a link to pass to the President by Messenger or Viber.',
+   kcBody:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price". A line that needs review, or a quote priced below the standard, cannot be filed by Sales: Verify & File says why, and "Send for approval" then gives you a link to the quote itself, to pass to the President by Messenger or Viber: he opens it, sees every line, and approves, returns or comments. The Pending Approval badge and the Approval link button on the Quotes list show the link again.',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A), lists the lines that still lack specs or a finish (a warning — you can file anyway), blocks a made-to-order line that has no size, and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price".' },
  { target:'#btnPrint', kcTarget:'#btnPdfMenu', title:'Save PDF, Agent & Workforce copies',
    kcBody:'The 📄 PDF button opens a small menu. Download PDF saves the client document as an A4 PDF named by its quote number and nothing else (the R number at the end of it is the revision) — the ONLY way a quotation is shared. Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: the drawing and the build detail of each line, with quantity and unit — no prices anywhere.',

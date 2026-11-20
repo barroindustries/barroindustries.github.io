@@ -1209,23 +1209,16 @@ describe('the approval link and the screens', () => {
     for (const id of ['d7Modal', 'd7ModalTitle', 'd7ModalBody', 'd7ModalFoot', 'd7ModalCard']) env.els.set(id, el());
     return env;
   };
-  it('the link panel shows the Approvals link of the app, a Copy link button, the sentence for Messenger / Viber, and the message to paste', () => {
+  it('the layer no longer draws an approval-link panel (QUOTE-APPROVAL-LINK-SPEC-2026-11-20: the link is the app shell\'s window, js/app.js showQuoteApprovalLink, and points at the quote itself, not at the Approvals list)', () => {
     const env = withModal(readyEnv('sales')); addSink(env, 2); customLineOf(env);
-    const payload = { quoteNumber: 'BKTEST261119-001R1', clientName: 'Juan', clientCompany: 'Cruz Foods', grandTotal: 345.5 };
-    env.D7.h('flow.showApprovalLink', payload);
-    const body = env.els.get('d7ModalBody').innerHTML;
-    assert.match(body, /value="https:\/\/ops\.example\.test\/#\/approvals"/); assert.match(body, /Copy link/); assert.match(body, /Send this link to the President by Messenger or Viber\./);
-    assert.match(body, new RegExp('Quote BKTEST261119-001R1 for Cruz Foods, \\u20B1345\\.50\\. It needs your approval: https://ops\\.example\\.test/#/approvals'));
-    assert.match(body, /need review/, 'the reason is on the panel');
-    assert.equal(env.els.get('d7Modal').hidden, false); assert.equal(env.els.get('d7ModalTitle').textContent, 'Approval link');
-    assert.equal(env.D7.flow.approvalsLink(), 'https://ops.example.test/#/approvals');
-  });
-  it('the badge reopens the same panel with no payload (what was sent is remembered), and escapes every string', () => {
-    const env = withModal(readyEnv('sales')); addSink(env);
-    env.D7.h('flow.showApprovalLink', { quoteNumber: 'Q<b>1', clientName: '<img src=x>', grandTotal: 10 });
-    env.els.get('d7ModalBody').innerHTML = ''; env.D7.h('flow.showApprovalLink');
-    const body = env.els.get('d7ModalBody').innerHTML;
-    assert.match(body, /Q&lt;b&gt;1/); assert.doesNotMatch(body, /<img/); assert.doesNotMatch(body, /<b>1/);
+    assert.equal(env.D7.flow.showApprovalLink, undefined, 'F.showApprovalLink is gone');
+    assert.equal(env.D7.flow.approvalsLink, undefined, 'F.approvalsLink is gone');
+    assert.ok(!env.D7.h('flow.showApprovalLink', { quoteNumber: 'Q<b>1', clientName: '<img src=x>', grandTotal: 10 }), 'a hook that is not there does nothing');
+    assert.equal(env.els.get('d7Modal').hidden, true, 'no panel opened');
+    assert.equal(env.els.get('d7ModalBody').innerHTML, '', 'nothing was drawn into the modal body');
+    const flowSrc = fs.readFileSync(path.join(ROOT, 'qb/d7/d7-flow.js'), 'utf8');
+    assert.equal(/showApprovalLink|approvalsLink|#\/approvals|lastSent|sentFrom/.test(flowSrc), false, 'no trace of the old panel in d7-flow.js');
+    assert.match(flowSrc, /function ensureModal\(\)/, 'the inert modal helpers stay (smaller diff in a tested file)');
   });
   it('the two screen buttons are for the President and Purchasing only (the bar was crowded: Fable review F8), whatever the quote; nothing is drawn when the feature is not live', () => {
     const off = (role, kc) => { const e = readyEnv(role); e.run(`quoteEngine = "${kc ? 'kc1' : 'legacy'}"`); return e.D7.flow.wantsButtons(); };

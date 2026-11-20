@@ -206,7 +206,7 @@ describe('2 · the head script that writes the kit: every view except "site", an
       if (!env.noMatchMedia) { sandbox.matchMedia = mm; sandbox.window.matchMedia = mm; }
       vm.runInNewContext(decisionSrc, sandbox);
       vm.runInNewContext(writerSrc, sandbox);
-      return { view: attrs['data-view'], wrote: writes.length };
+      return { view: attrs['data-view'], wrote: writes.length, wantLogin: sandbox.window._wantLogin === true };
     }
     const CASES = [
       [{}, 'site', 0], [{ hash: '#services' }, 'site', 0], [{ hash: '#/tasks' }, 'site', 0], [{ hash: '#/dashboard' }, 'site', 0],
@@ -214,8 +214,13 @@ describe('2 · the head script that writes the kit: every view except "site", an
       [{ modes: ['standalone'] }, 'boot', 1], [{ modes: ['fullscreen'] }, 'site', 0], [{ modes: ['fullscreen'], hint: true }, 'site', 0], [{ modes: ['fullscreen'], seenApp: true }, 'boot', 1], [{ modes: ['minimal-ui'] }, 'boot', 1], [{ modes: ['window-controls-overlay'] }, 'boot', 1],
       [{ navStandalone: true }, 'boot', 1], [{ modes: ['standalone'], hash: '#login' }, 'boot', 1],
       [{ lsThrows: true }, 'boot', 1], [{ mmThrows: true }, 'boot', 1], [{ noMatchMedia: true }, 'boot', 1],
+      // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §2.4: a quote approval link opened signed out is the SIGN-IN view (the kit is written, the hash is kept), not the website; with a session hint the app boots
+      [{ hash: '#/quote-approval/bk.Abc123XYZ' }, 'login', 1], [{ hash: '#/quote-approval/bk.Abc123XYZ', hint: true }, 'boot', 1],
     ];
-    for (const [env, view, wrote] of CASES) assert.deepEqual(both(env), { view, wrote }, JSON.stringify(env));
+    for (const [env, view, wrote] of CASES) { const r = both(env); assert.deepEqual({ view: r.view, wrote: r.wrote }, { view, wrote }, JSON.stringify(env)); }
+    assert.equal(both({ hash: '#/quote-approval/bk.Abc123XYZ' }).wantLogin, true, 'the approval link asks for the sign-in screen (window._wantLogin), so the hash survives until the user has signed in');
+    assert.equal(both({ hash: '#/quote-approval/bk.Abc123XYZ', hint: true }).wantLogin, true);
+    for (const hash of ['#/tasks', '#/quote-approvals/bk.Abc123XYZ', '#/quote-approval', '#quote-approval/bk.Abc123XYZ']) assert.deepEqual(both({ hash }), { view: 'site', wrote: 0, wantLogin: false }, `${hash} is not an approval link: signed out it is the website`);
   });
 });
 

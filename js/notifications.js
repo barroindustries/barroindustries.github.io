@@ -134,6 +134,14 @@ window.Notifs = (() => {
     }
   }
 
+  // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.4 — a notification link is a page name ('approvals', 'bk-quotations'), except the quote review page, whose link carries the quote:
+  // 'quote-approval/<co>.<docId>' -> navigateTo('quote-approval', { subtab: '<co>.<docId>' }). Old notifications keep their plain page link and work unchanged.
+  function _navLink(link) {
+    const m = /^quote-approval\/(.+)$/.exec(String(link || ''));
+    if (m) navigateTo('quote-approval', { subtab: m[1] });
+    else navigateTo(link);
+  }
+
   // PAYSLIP-OVERHAUL-SPEC.md §5 — `month` (YYYY-MM, optional) is the extra
   // arg a payroll-disburse notification carries (send()'s new field above).
   // For type==='payroll' with a month present, land on personal-finance THEN
@@ -191,7 +199,7 @@ window.Notifs = (() => {
         }
       }
     } else if (link && typeof navigateTo === 'function') {
-      navigateTo(link);
+      _navLink(link);
     }
   }
 
@@ -250,6 +258,7 @@ window.Notifs = (() => {
     quote_filed:{icon:'📄',accent:'#1C7ED6'}, quote_returned:{icon:'↩️',accent:'#E8590C'},
     quote_review_request:{icon:'👀',accent:'#1C7ED6'}, quote_approved:{icon:'✅',accent:'#2F9E44'},
     quote_rejected:{icon:'❌',accent:'#D92D20'}, bs_quote:{icon:'📄',accent:'#1C7ED6'},
+    quote_comment:{icon:'💬',accent:'#1C7ED6'},   // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §7.2: a comment on a quote's approval thread
     sales_order:{icon:'🛒',accent:'#1C7ED6'}, lead_handoff:{icon:'🤝',accent:'#1C7ED6'},
     // Sales flow (SALES-QUICK-FIXES-SPEC-2026-11-19 §7): payment confirmation round-trip + a lost quote
     payment_confirm:{icon:'💵',accent:'#F76707'}, payment_confirmed:{icon:'✅',accent:'#2F9E44'},
@@ -1100,7 +1109,7 @@ window.Notifs = (() => {
           const m = ev.data || {};
           if (m.type !== 'PUSH_NAV') return;
           try { _navigateFromNotif(m.notifType, m.taskId, m.chatId, m.link, m.month, m.meetingId); }
-          catch (e) { if (m.link && typeof navigateTo === 'function') navigateTo(m.link); }
+          catch (e) { if (m.link && typeof navigateTo === 'function') _navLink(m.link); }
         });
       }
 

@@ -1604,6 +1604,10 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
     ['an autocompleted #/dashboard with no hint shows the site', { hash: '#/dashboard' }, 'site', false, false],
     ['an app deep link with a hint boots (auth decides)', { hash: '#/tasks', hint: true }, 'boot', false, false],
     ['#login cold load shows the login screen', { hash: '#login' }, 'login', false, true],
+    // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §2.4: a quote approval link opened signed out is the sign-in screen (the hash is kept for after sign-in), not the website
+    ['a quote approval link with no session hint shows the LOGIN view and asks for it', { hash: '#/quote-approval/bk.Abc123XYZ' }, 'login', false, true],
+    ['a quote approval link with a hint boots (auth decides) and still asks for login', { hash: '#/quote-approval/bk.Abc123XYZ', hint: true }, 'boot', false, true],
+    ['an address that only looks like an approval link is an ordinary app deep link: the site', { hash: '#/quote-approvals/bk.Abc123XYZ' }, 'site', false, false],
     ['#login with a hint boots (auth decides) but still asks for login', { hash: '#login', hint: true }, 'boot', false, true],
     ['installed PWA: display-mode standalone', { modes: ['standalone'] }, 'boot', true, false],
     // Owner 2026-11-19: a browser tab in macOS full screen reports display-mode fullscreen too — it is NOT the installed app.

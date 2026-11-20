@@ -84,6 +84,8 @@
   "/public_quotes/{token} :: allow create #1",
   "/public_quotes/{token} :: allow delete #1",
   "/public_quotes/{token} :: allow update #1",
+  "/quote_comments/{id} :: allow create #1",
+  "/quote_comments/{id} :: allow read #1",
   "/quote_costs/{id} :: allow create #1",
   "/quote_costs/{id} :: allow delete,read #1",
   "/quote_costs/{id} :: allow update #1",

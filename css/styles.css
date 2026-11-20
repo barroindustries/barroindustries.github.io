@@ -8464,3 +8464,88 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 /* The sidebar drawer covers the screen on mobile; a button floating over it
    would tap through to the wrong thing. */
 body.sidebar-open .fab { display: none !important; }
+
+/* Quote review page (QUOTE-APPROVAL-LINK-SPEC-2026-11-20) — js/screens/quote-approval.js. Phone first, one column, 860px centred on a desktop. Colours, radii, spacing, type and z-index come from
+   css/tokens.css; the photo viewer rides the Overlay stack (its z-index is set inline by Overlay.push), the action bar sits on the shell's own z token. */
+.qa-page { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.qa-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: var(--space-4); min-width: 0; }
+.qa-h { margin: 0 0 8px; font-size: var(--fs-base); font-weight: 700; }
+.qa-sub-h { margin: 12px 0 2px; font-size: var(--fs-sm); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.qa-note { margin-top: 2px; font-size: var(--fs-sm); color: var(--text-muted); }
+.qa-preline { white-space: pre-line; }
+.qa-thread-note { font-size: var(--fs-md); color: var(--text-muted); padding: 4px 0; }
+.qa-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--surface); font-size: var(--fs-md); }
+.qa-banner-offline, .qa-banner-newer { border-color: var(--warning); }
+.qa-banner-readonly { color: var(--text-muted); }
+.qa-head-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.qa-title { font-size: var(--fs-xl); font-weight: 800; overflow-wrap: anywhere; min-width: 0; }
+.qa-company { margin-top: 2px; font-size: var(--fs-sm); color: var(--text-muted); }
+.qa-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.qa-chip { display: inline-block; padding: 2px 8px; border-radius: var(--pill); border: 1px solid var(--border); background: var(--s2); font-size: var(--fs-sm); line-height: 1.5; }
+.qa-chip-flag { border-color: var(--warning); }
+.qa-chip-role, .qa-chip-kind, .qa-chip-rev { font-size: var(--fs-xs); }
+.qa-kv { display: grid; grid-template-columns: minmax(84px, max-content) minmax(0, 1fr); gap: 4px 12px; margin: 10px 0 0; font-size: var(--fs-md); }
+.qa-kv dt { color: var(--text-muted); }
+.qa-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.qa-kv dt.qa-bad { color: var(--danger); font-weight: 700; grid-column: 1 / -1; }
+.qa-kv dt.qa-note { grid-column: 1 / -1; }
+.qa-kv-spec { margin-top: 6px; font-size: var(--fs-sm); }
+.qa-kv-spec dt:empty { display: none; }
+.qa-kv-spec dt:empty + dd { grid-column: 1 / -1; }
+.qa-head-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.qa-why ul { margin: 0; padding-left: 18px; font-size: var(--fs-md); }
+.qa-why-text { margin: 8px 0 0; font-size: var(--fs-md); color: var(--text-muted); }
+.qa-group-title { margin: 14px 0 6px; font-size: var(--fs-md); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.qa-line { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px; padding: 12px; margin-bottom: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.qa-thumb { position: relative; width: 72px; height: 72px; padding: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--s2); color: var(--text-muted); cursor: pointer; }
+.qa-thumb-empty, .qa-thumb-broken { cursor: default; }
+.qa-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.qa-thumb svg { width: 28px; height: 28px; }
+.qa-thumb-more { position: absolute; right: 3px; bottom: 3px; padding: 1px 6px; border-radius: var(--pill); background: rgba(0,0,0,.65); color: #fff; font-size: var(--fs-xs); font-weight: 700; }
+.qa-line-main { min-width: 0; }
+.qa-line-top { display: flex; align-items: baseline; gap: 8px; }
+.qa-no { font-weight: 700; color: var(--text-muted); }
+.qa-code { font-size: var(--fs-sm); color: var(--text-muted); }
+.qa-name { font-size: var(--fs-base); font-weight: 700; overflow-wrap: anywhere; }
+.qa-sub { font-size: var(--fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.qa-dims, .qa-specs, .qa-incl { margin-top: 4px; font-size: var(--fs-md); overflow-wrap: anywhere; }
+.qa-dims span { color: var(--text-muted); }
+.qa-calc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; margin-top: 8px; font-size: var(--fs-md); }
+.qa-cost-row { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: var(--r-xs); background: var(--s1); font-size: var(--fs-sm); }
+.qa-cost-none { color: var(--text-muted); }
+.qa-other { display: flex; flex-wrap: wrap; gap: 12px; }
+.qa-fig { margin: 0; width: 72px; }
+.qa-fig figcaption { margin-top: 4px; font-size: var(--fs-xs); color: var(--text-muted); overflow-wrap: anywhere; }
+.qa-opts { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+.qa-opts th, .qa-opts td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+.qa-opt-basis td { font-weight: 700; }
+.qa-grand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.qa-grand strong { font-size: 1.5rem; font-weight: 800; }
+.qa-entry { padding: 10px 0; border-top: 1px solid var(--border); }
+.qa-entry:first-child { border-top: 0; padding-top: 2px; }
+.qa-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.qa-entry-time { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); }
+.qa-entry-text { margin-top: 4px; font-size: var(--fs-md); white-space: pre-wrap; overflow-wrap: anywhere; }
+.qa-compose { margin-top: 12px; }
+.qa-compose textarea { display: block; width: 100%; padding: 9px 12px; border: 1.5px solid var(--border); border-radius: var(--r-xs); background: var(--surface); color: var(--text); font: inherit; font-size: 16px; resize: vertical; scroll-margin-bottom: calc(var(--bottom-nav-h) + 140px); }
+.qa-compose-meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; font-size: var(--fs-sm); }
+.qa-err { color: var(--danger); }
+.qa-count { margin-left: auto; color: var(--text-muted); }
+.qa-actionbar { position: sticky; bottom: 0; z-index: var(--z-shell); display: flex; gap: 8px; padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(var(--bottom-nav-bg), var(--bottom-nav-bg)), var(--bg); border-top: 1px solid var(--border); }
+.qa-actionbar .qa-btn { flex: 1 1 0; min-height: 44px; }
+/* the bottom nav owns the bottom of a phone / small tablet: the bar sits just above it */
+@media (max-width: 819px) { .qa-actionbar { bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: 10px; } }
+/* photo viewer (rides the Overlay stack: Back and Escape close it) */
+.qa-lightbox { position: fixed; inset: 0; display: flex; flex-direction: column; background: rgba(6,6,10,0.94); }
+.qa-lightbox-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-shrink: 0; padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px; }
+.qa-lightbox-close { width: 38px; height: 38px; border: none; border-radius: 50%; background: rgba(255,255,255,0.12); color: #fff; cursor: pointer; }
+.qa-lightbox-count { color: rgba(255,255,255,0.85); font-size: var(--fs-sm); font-weight: 600; }
+.qa-lightbox-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.qa-lightbox-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.qa-lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border: none; border-radius: 50%; background: rgba(255,255,255,0.12); color: #fff; font-size: 24px; line-height: 1; cursor: pointer; }
+.qa-lightbox-prev { left: 10px; }
+.qa-lightbox-next { right: 10px; }
+.qa-lightbox-single .qa-lightbox-nav { display: none; }
+.qa-lightbox-cap { flex-shrink: 0; min-height: 1em; padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px)); text-align: center; color: rgba(255,255,255,0.85); font-size: var(--fs-md); }
+/* the Quotes list: the President's note under a returned quote's title */
+.q-returned-note { margin-top: 4px; font-size: var(--fs-sm); color: var(--warning); overflow-wrap: anywhere; }

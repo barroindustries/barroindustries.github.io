@@ -554,6 +554,7 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-success btn-sm fdel-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.collection||'')}" data-doc="${escHtml(item.docId||'')}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${escHtml(item.requestedBy||'')}">${emojiIcon('✓',16)} Approve Deletion</button>
                 <button class="btn-danger btn-sm fdel-deny-btn" data-id="${item.id}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${escHtml(item.requestedBy||'')}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='quote-approval'?`
+                <button class="btn-secondary btn-sm qa-open-page-btn" data-quote="${escHtml(item.quoteId||'')}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}">Open quote</button>
                 <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId||'')}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
                 <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId||'')}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
                 <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId||'')}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
@@ -783,7 +784,11 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
 
-      // ── Quote approvals — open & edit, approve, or return ──
+      // ── Quote approvals — open the quote, open & edit, approve, or return ──
+      // "Open quote" (QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.3): the whole quote, its thread and the Approve / Return bar on the review page.
+      wrap.querySelectorAll('.qa-open-page-btn').forEach(btn => onClickSafe(btn, () => {
+        navigateTo('quote-approval', { subtab: window.quoteApprovalRefOf(btn.dataset.coll || 'bs_quotes', btn.dataset.quote) });
+      }));
       wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () => {
         openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno, clientName:btn.dataset.name, quoteColl:btn.dataset.coll }, ()=>loadApprovalsSub('all'));
       }));
@@ -1419,6 +1424,7 @@ window.renderApprovals = async function(currentUser) {
           </div>
           ${item.status!=='pending' ? '' : canActOn('quote-approval') ? (item.quoteId ? `
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn-secondary btn-sm qa-open-page-btn" data-quote="${escHtml(item.quoteId)}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}">Open quote</button>
             <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId)}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
             <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId)}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
             <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId)}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
@@ -1452,6 +1458,9 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.esc-btn').forEach(btn => onClickSafe(btn, async () => {
         btn.disabled = true;
         await requestPresidentApproval(btn.dataset.label || 'a quote approval');
+      }));
+      wrap.querySelectorAll('.qa-open-page-btn').forEach(btn => onClickSafe(btn, () => {
+        navigateTo('quote-approval', { subtab: window.quoteApprovalRefOf(btn.dataset.coll || 'bs_quotes', btn.dataset.quote) });
       }));
       wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () =>
         openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno,
@@ -1528,39 +1537,78 @@ window.syncQuoteStatusToRequest = async function (coll, quoteId, state) {
 };
 
 // ── Quote-approval helpers (shared by Approvals page) ──────────────────
-// Approve a submitted quote: file it + resolve its approval request + notify.
-async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
-  coll = coll || 'bs_quotes';
-  if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §4 — ONE decision function. Approve / Return used to live in three copies (the two wrappers below, the review panel's two inline handlers in
+// openQuoteApprovalReview, and the builder's review bar in js/app.js saveReviewedPartnerQuote); the copies had drifted (different notification wording, the builder bar never
+// synced the website request, nothing stopped a second approval). They are all callers of this now.
+//   o = { coll, quoteId, action: 'approve' | 'return', notes, edits, agentId, quoteNumber, clientName, toastOk }
+//   -> { ok: true } | { ok: false, reason: 'missing' | 'state' | 'busy' | 'offline' | 'error', state? }.  Never throws.
+// The guard is get-then-update (no transaction: there is one approver) plus an in-flight Set, and callers wrap the button in window.busy. A quote that is not waiting for approval
+// (already approved, already returned, never sent) is refused with no write at all. The thread entry (step 9) is best-effort: a refused write (rules not deployed yet, a manager
+// deciding here instead of on the review page) costs the thread entry only.
+const _qaInFlight = new Set();
+async function decideQuoteApproval(o){
+  o = o || {};
+  const coll = o.coll || 'bs_quotes';
+  const quoteId = o.quoteId;
+  const approve = o.action === 'approve';
+  const notes = o.notes ? String(o.notes) : '';
+  if(!quoteId){ Notifs.showToast('Quote not found','error'); return { ok:false, reason:'missing' }; }
+  if(typeof navigator !== 'undefined' && navigator.onLine === false){ Notifs.showToast('You are offline. Connect to approve or return a quote.','error'); return { ok:false, reason:'offline' }; }
+  const key = coll + '/' + quoteId;
+  if(_qaInFlight.has(key)) return { ok:false, reason:'busy' };
+  _qaInFlight.add(key);
   try{
+    const snap = await db.collection(coll).doc(quoteId).get();
+    if(!snap || !snap.exists){ Notifs.showToast('Quote not found','error'); return { ok:false, reason:'missing' }; }
+    const d = snap.data() || {};
+    if(!(d.approvalStatus === 'pending_review' || d.status === 'pending_approval')){
+      Notifs.showToast(d.approvalStatus === 'approved' ? 'This quote is already approved.'
+        : d.approvalStatus === 'needs_revision' ? 'This quote was already returned. Wait for the new submission.'
+        : 'This quote is not waiting for approval.', 'info');
+      return { ok:false, reason:'state', state: d.approvalStatus || d.status || '' };
+    }
+    const FV = firebase.firestore.FieldValue;
     await db.collection(coll).doc(quoteId).update({
-      ...window.quoteStateFields('approved'),
-      approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid });
-    await window.syncQuoteStatusToRequest(coll, quoteId, 'approved');   // best-effort: the website request this quote came from follows its status
-    await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
-    if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
-    window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
+      ...(o.edits || {}),
+      ...(approve ? window.quoteStateFields('approved') : window.quoteStateFields('needs_revision')),
+      ...(approve ? { approvedAt: FV.serverTimestamp(), approvedBy: currentUser.uid } : { returnedAt: FV.serverTimestamp(), returnedBy: currentUser.uid }),
+      ...(notes ? { presidentNotes: notes } : {}) });
+    await window.syncQuoteStatusToRequest(coll, quoteId, approve ? 'approved' : 'needs_revision');   // best-effort: the website request this quote came from follows its status
+    await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(x=>x.ref.update({status: approve ? 'approved' : 'returned'}))));
+    try{
+      await window.QuoteThread.add({ coll, quoteId, q: d, kind: approve ? 'approved' : 'returned', text: notes,
+        uid: currentUser.uid, name: (typeof userProfile !== 'undefined' && userProfile && userProfile.displayName) || currentUser.email || '', role: (typeof currentRole !== 'undefined') ? currentRole : '' });
+    }catch(thErr){ console.warn('[approvals] the thread entry was not written (non-blocking)', thErr); }
+    const to = o.agentId || d.createdBy;
+    if(to && to !== currentUser.uid){
+      const ref = window.quoteApprovalRefOf(coll, quoteId);
+      const link = ref ? 'quote-approval/' + ref : (coll === 'bk_quotes' ? 'bk-quotations' : 'bs-quotations');
+      const qno = o.quoteNumber || d.quoteNumber || '';
+      const name = (o.edits && o.edits.clientName) || o.clientName || d.clientName || '';
+      await Notifs.send(to, approve
+        ? { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`.slice(0,2000), icon:'✅', type:'quote_approved', link }
+        : { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`.slice(0,2000), icon:'✎', type:'quote_returned', link });
+    }
+    window.logAudit && window.logAudit('update','quote',quoteId, { ...(approve ? { approved:true } : { returned:true }), ...(o.edits ? { edited:true } : {}) });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
     if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
-    Notifs.success('Quote approved and filed!');
-  }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    if(o.toastOk !== false){ if(approve) Notifs.success('Quote approved and filed!'); else Notifs.error('Quote returned.'); }
+    return { ok:true };
+  }catch(ex){
+    Notifs.showToast('Failed: '+(ex.message||ex.code),'error');
+    return { ok:false, reason:'error' };
+  }finally{
+    _qaInFlight.delete(key);
+  }
+}
+window.decideQuoteApproval = decideQuoteApproval;
+// Approve a submitted quote: file it + resolve its approval request + notify.
+async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
+  return decideQuoteApproval({ coll, quoteId, action:'approve', agentId, quoteNumber:qno, clientName:name });
 }
 // Return a submitted quote for revision: mark needs_revision + notify the submitter.
 async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
-  coll = coll || 'bs_quotes';
-  if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
-  try{
-    const upd={ ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid };
-    if(notes) upd.presidentNotes=notes;
-    await db.collection(coll).doc(quoteId).update(upd);
-    await window.syncQuoteStatusToRequest(coll, quoteId, 'needs_revision');   // best-effort: the website request this quote came from follows its status
-    await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
-    if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
-    window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
-    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
-    if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
-    Notifs.error('Quote returned.');
-  }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+  return decideQuoteApproval({ coll, quoteId, action:'return', notes, agentId, quoteNumber:qno, clientName:name });
 }
 // Open the full review modal: open in builder, edit key fields, then approve/return.
 //
@@ -1685,33 +1733,28 @@ async function openQuoteApprovalReview(ctx, onDone){
   const returnBtn  = foot.querySelector('#qar-return');
   approveBtn.removeAttribute('disabled');
   returnBtn.removeAttribute('disabled');
+  // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §4.2 — both buttons are callers of decideQuoteApproval (the President's edits ride in `edits`, the notes field is the decision's text).
+  // window.busy keeps a second tap out while the write is in flight; the panel closes and the screen refreshes only when the decision was taken.
   approveBtn.addEventListener('click', async ()=>{
-    const e=getEdits();
-    try{
-      await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('approved'), approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
-      await window.syncQuoteStatusToRequest(QC, quoteId, 'approved');   // best-effort: the website request this quote came from follows its status
-      await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
-      if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
-      window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
-      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
-      if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
-      closeModal(); Notifs.success('Quote edited, approved and filed!'); onDone&&onDone();
-    }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    const e=getEdits(); const notes=e.presidentNotes; delete e.presidentNotes;
+    const r = await window.busy(approveBtn, ()=>decideQuoteApproval({ coll:QC, quoteId, action:'approve', notes, edits:e, agentId, quoteNumber, clientName, toastOk:false }));
+    if(r && r.ok){ closeModal(); Notifs.success('Quote edited, approved and filed!'); onDone&&onDone(); }
   });
   returnBtn.addEventListener('click', async ()=>{
-    const e=getEdits();
-    try{
-      await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid });
-      await window.syncQuoteStatusToRequest(QC, quoteId, 'needs_revision');   // best-effort: the website request this quote came from follows its status
-      await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
-      if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
-      window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
-      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
-      if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
-      closeModal(); Notifs.error('Quote updated and returned.'); onDone&&onDone();
-    }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    const e=getEdits(); const notes=e.presidentNotes; delete e.presidentNotes;
+    const r = await window.busy(returnBtn, ()=>decideQuoteApproval({ coll:QC, quoteId, action:'return', notes, edits:e, agentId, quoteNumber, clientName, toastOk:false }));
+    if(r && r.ok){ closeModal(); Notifs.error('Quote updated and returned.'); onDone&&onDone(); }
   });
 }
+
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §6.6 — the builder's REVIEW mode for a quote that waits for the President (the same context the review panel's "Open full quote in Builder" sets:
+// its bar shows "Save edits & Approve / Return", now routed through decideQuoteApproval). Used by the review page's "View the quotation document". Kept here, beside the panel that
+// owns the context key, so the key is set in one file.
+window.openQuoteInBuilderReview = function (coll, quoteId, q) {
+  q = q || {};
+  window._qbReviewContext = { quoteId, partnerUid: q.createdBy, quoteNumber: q.quoteNumber, clientName: q.clientName, quoteColl: coll };
+  return window.reopenQuoteFromDoc(coll, quoteId, window.quoteBuilderPageFor(q.company));
+};
 
 // Shared by the All Requests view and the Sign-ups tab: the generated password
 // is shown once, in a modal with the Firebase Console steps (a toast vanishes).
