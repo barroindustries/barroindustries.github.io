@@ -18,6 +18,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
+  // firebase-config.js declares `const db` at top level: a global binding every classic script can read, but NOT window.db (undefined in the real app).
+  const fsDb = function () { return (typeof db !== 'undefined' && db) || window.db; };
 
   const esc = function (s) { return window.escHtml ? window.escHtml(s) : String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   const toast = function (m, t) { try { window.Notifs.showToast(m, t || 'info'); } catch (_) {} };
@@ -37,7 +39,7 @@
     if (!window.FlowCore) throw new Error('The flow engine did not load.');
   }
   async function readProject(id) {
-    const s = await window.db.collection('job_projects').doc(id).get();
+    const s = await fsDb().collection('job_projects').doc(id).get();
     return s.exists ? Object.assign({ id: s.id }, s.data()) : null;
   }
   function invalidate() { try { if (typeof window.dbCacheInvalidate === 'function') window.dbCacheInvalidate('job_projects'); } catch (_) {} }
@@ -49,10 +51,10 @@
     try {
       if (!projectId) return false;
       await loadCore();
-      const ref = window.db.collection('job_projects').doc(projectId);
+      const ref = fsDb().collection('job_projects').doc(projectId);
       const nowIso = new Date().toISOString();
       let closed = null;
-      await window.db.runTransaction(async function (tx) {
+      await fsDb().runTransaction(async function (tx) {
         const snap = await tx.get(ref);
         if (!snap.exists) return;
         const pj = snap.data();
@@ -86,7 +88,7 @@
     if (p.stage === 'paid' || p.stage === 'cancelled') return { ok: false, code: 'closed', message: 'The job is closed.' };
     const who = whoName(), nowIso = new Date().toISOString();
     const acceptance = { url: url, name: String(a.name || '').trim() || null, signedBy: signedBy, date: date, by: myUid(), byName: who, at: nowIso };
-    await window.db.collection('job_projects').doc(projectId).update({
+    await fsDb().collection('job_projects').doc(projectId).update({
       acceptance: acceptance, updatedAt: FV().serverTimestamp(),
       timeline: FV().arrayUnion({ at: nowIso, event: 'Client acceptance attached — signed by ' + signedBy, by: who }),
     });
@@ -121,7 +123,7 @@
     if (opts.clear) rows = rows.map(function (r) { return Object.assign({}, r, { done: true, doneDate: r.doneDate || today }); });
     const punchList = { items: rows };
     if (opts.clear) { punchList.clearedAt = nowIso; punchList.clearedBy = who; }
-    await window.db.collection('job_projects').doc(projectId).update({
+    await fsDb().collection('job_projects').doc(projectId).update({
       punchList: punchList, updatedAt: FV().serverTimestamp(),
       timeline: FV().arrayUnion({ at: nowIso, event: opts.clear ? 'Punch list cleared' : 'Punch list updated', by: who }),
     });
