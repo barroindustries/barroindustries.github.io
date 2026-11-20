@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.30';
+window.APP_VERSION = '15.0.31';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1233,6 +1233,14 @@ window.bidWinStats = function(bids){       // Government — ALWAYS labeled "(Go
 window.payrollRatio = function(totalPayroll, revenue){
   return revenue > 0 ? Math.round(totalPayroll / revenue * 100) : null;
 };
+// ONE staff filter for dashboard head-counts and payroll figures (2026-11-20 system review). Team counts and
+// "Monthly Payroll" used to sum EVERY users doc, so an offboarded person stayed in both until someone deleted the
+// doc. isCurrentStaff = not removed (People → Remove). onMonthlyPayroll additionally drops production-class staff,
+// who are paid by the weekly worker payroll — the same two person-level skips as the payroll engine
+// (window.monthlyRunSkipReason, departments.js). Period exclusions and linked worker profiles need the run's own
+// data, so dashboard payroll stays an estimate of the monthly run.
+window.isCurrentStaff = function(u){ return !!u && u.removed !== true; };
+window.onMonthlyPayroll = function(u){ return window.isCurrentStaff(u) && u.payClass !== 'production'; };
 // ONE aging engine. Anchor = earliest invoices[].due, else project createdAt
 // (today's Finance-Dashboard proxy IS the fallback). projects = Projects.normalize shapes.
 window.arAging = function(projects, asOf){
