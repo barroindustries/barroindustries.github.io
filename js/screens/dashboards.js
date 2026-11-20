@@ -969,6 +969,7 @@ function liveDateTime(elId) {
 async function renderPresidentDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = window.skeletonHtml('cards');
+  const _nav = window.navToken ? window.navToken() : 0;
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
@@ -1087,6 +1088,7 @@ async function renderPresidentDashboard() {
       return uids.map(uid => escHtml(users.find(u=>u.id===uid)?.displayName || '?')).join(', ');
     };
 
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     c.innerHTML = `
       <div class="page-header">
         <h2>Command Center</h2>
@@ -1220,7 +1222,8 @@ async function renderPresidentDashboard() {
     // Contract changes waiting for a decision (SALES-FLOW-SPEC §7.3): lazy js/contract-ui.js; silent on any failure.
     try { window.ensureScript('js/contract-ui.js').then(() => window.ContractUI.renderBanner(document.getElementById('dash-contractchange'))).catch(()=>{}); } catch(_) {}
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
 
@@ -1229,6 +1232,7 @@ async function renderPresidentDashboard() {
 async function renderManagerDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = window.skeletonHtml('cards');
+  const _nav = window.navToken ? window.navToken() : 0;
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
@@ -1285,6 +1289,7 @@ async function renderManagerDashboard() {
     const nameOf = uid => escHtml(users.find(u=>u.id===uid)?.displayName || '?');
     const assignedNames = t => { const ids=Array.isArray(t.assignedTo)?t.assignedTo:(t.assignedTo?[t.assignedTo]:[]); return ids.length?ids.map(nameOf).join(', '):'Unassigned'; };
 
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     c.innerHTML = `
       <div class="page-header"><h2>Manager Dashboard</h2><span class="badge badge-purple">${escHtml(depts.join(' · ')||'Manager')}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
@@ -1319,6 +1324,7 @@ async function renderManagerDashboard() {
     liveDateTime('live-clock');
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
@@ -1332,6 +1338,7 @@ async function renderManagerDashboard() {
 async function renderSecretaryDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = window.skeletonHtml('cards');
+  const _nav = window.navToken ? window.navToken() : 0;
   try {
     // ⚠ 2026-08-09 — same silent-zero fix as the Approvals screen. safeGet()
     // swallowed a denied query into {size:0}, so a queue this role cannot read
@@ -1404,6 +1411,7 @@ async function renderSecretaryDashboard() {
       ['Deletion Requests', pendingDeletes, `${emojiIcon('🗑',16)}`],
     ].filter(r=>r[1]>0);
 
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('🗂',20)} Corporate Secretary</h2><span class="badge badge-gold">Oversight</span></div>
       <div id="live-clock" class="live-clock-line"></div>
@@ -1454,6 +1462,7 @@ async function renderSecretaryDashboard() {
     liveDateTime('live-clock');
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
@@ -1469,6 +1478,7 @@ async function renderSecretaryDashboard() {
 async function renderFinanceDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = window.skeletonHtml('cards');
+  const _nav = window.navToken ? window.navToken() : 0;
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
@@ -1531,6 +1541,7 @@ async function renderFinanceDashboard() {
     const jobs = jobSnap.docs.map(d=>d.data());
     const totalMargin = jobs.reduce((s,j)=>s+((j.revenue||0)-((j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0))),0);
 
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     c.innerHTML = `
       <div class="page-header"><h2>Finance Dashboard</h2><span class="badge badge-green">${ROLES[currentRole]?.label||'Finance'}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
@@ -1616,6 +1627,7 @@ async function renderFinanceDashboard() {
         {key:'client',label:'Client'},{key:'total',label:'Outstanding',get:g=>g.total},{key:'oldest',label:'Oldest (days)',get:g=>g.oldest},{key:'count',label:'Open Projects',get:g=>g.count}]));
     });
   } catch(err) {
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
@@ -1623,6 +1635,7 @@ async function renderFinanceDashboard() {
 async function renderEmployeeDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = window.skeletonHtml('rows');
+  const _nav = window.navToken ? window.navToken() : 0;
   try {
     const now      = new Date();
     const todayStr = bizDate();
@@ -1688,6 +1701,7 @@ async function renderEmployeeDashboard() {
 
     const taskOutcomeMet = myTasks.length > 0 && taskScore >= targetScore;
 
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
     c.innerHTML = `
       <div class="page-header">
         <h2>${emojiIcon('👋',20)} Hi, ${escHtml((u.displayName||'').split(' ')[0])}!</h2>
@@ -1798,7 +1812,8 @@ async function renderEmployeeDashboard() {
     if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
+    if (window.navStale && window.navStale(_nav)) return;   // the user moved on while the reads ran (2026-11-20)
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${escHtml(err.message||'Dashboard error')}</h4></div>`;
   }
 }
 
@@ -3481,7 +3496,7 @@ async function openEmpStandingsModal(uid, name, preloaded) {
     `;
     if (window.lucide) lucide.createIcons({ nodes: [body] });
   } catch(err) {
-    body.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><p>${err.message}</p></div>`;
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><p>${escHtml(err.message||'')}</p></div>`;
     if (window.lucide) lucide.createIcons({ nodes: [body] });
   }
 }
@@ -3738,7 +3753,7 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       if (window.lucide) lucide.createIcons({ nodes: [content] });
     }
   } catch(err) {
-    content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><p>${err.message}</p></div>`;
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><p>${escHtml(err.message||'')}</p></div>`;
     if (window.lucide) lucide.createIcons({ nodes: [content] });
   }
 }
@@ -3960,7 +3975,7 @@ async function renderProgressReports() {
       });
     });
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${escHtml(err.message||'Dashboard error')}</h4></div>`;
   }
 }
 

@@ -241,6 +241,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       _bootstrappedUid = null;
+      // Session boundary (2026-11-20 review): the in-memory read cache holds the old user's reads
+      // ('users' with payroll merged in, 'ca-pending', ledger, tasks…) for 30-60 s and Sign Out does not
+      // reload the page, so the next user of this tab was served them. Clear it, and void any render
+      // still waiting on a read (navStale) so it cannot paint the old user's data afterwards.
+      if (typeof window.dbCacheInvalidate === 'function') window.dbCacheInvalidate();
+      window._navSeq = (window._navSeq || 0) + 1;
       // The inbox + chat-badge listeners otherwise outlive the session (every
       // explicit sign-out path skipped this) and keep the old user's items in memory.
       Notifs.stopListener();
@@ -2856,6 +2862,14 @@ function pageWindowTitle(page) {
   return pretty || APP;
 }
 
+// Navigation token (2026-11-20 review). navigateTo() bumps _navSeq on every navigation (and the
+// sign-out branch of onAuthStateChanged bumps it too). A screen that awaits reads before painting takes
+// a token first and, after its awaits, returns without painting if navStale(token): otherwise a slow
+// dashboard (~30 reads on a cold open) painted over the page the user had already moved to.
+window._navSeq = window._navSeq || 0;
+window.navToken = function () { return window._navSeq; };
+window.navStale = function (tok) { return tok !== window._navSeq; };
+
 async function navigateTo(page, opts) {
   opts = opts || {};
   // PERF-WAVE1 WP1 §1f — same-page short-circuit. Only bottom-nav/drawer/
@@ -2907,6 +2921,7 @@ async function navigateTo(page, opts) {
   const _prevPage = currentPage;          // restored if the lazy-load fails below
   currentPage = page;
   window.currentPage = page;
+  window._navSeq++;                       // voids any screen still awaiting reads (navStale)
   window.currentSubtab = subtab;          // screens read this via initialSubtab()
   try { document.title = pageWindowTitle(page); } catch (e) {}
   // qb-desktop (edge-to-edge Quote Builder shell) is page-scoped — clear it on
