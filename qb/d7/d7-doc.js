@@ -768,6 +768,11 @@
       const tag = byId('phAgentTag'); if (tag) tag.style.display = 'none';
       if (typeof applyLetterheadHeader === 'function') applyLetterheadHeader();
       if (typeof updatePrintRunFooter === 'function') updatePrintRunFooter();
+      if (typeof filedChangedSinceFiling === 'function' && filedChangedSinceFiling()) {   // owner 2026-11-20: filed, then changed: file again first
+        D7.toast('You changed this quote after it was filed. File it again (Verify & File → update in place) before downloading the PDF.', 'error');
+        if (typeof doVerifyAndFile === 'function') doVerifyAndFile();
+        return 'changed';
+      }
       if (typeof quoteStatus !== 'undefined' && quoteStatus !== 'filed') {
         D7.toast('Please file this quote before downloading the PDF: tap "Verify & File" first.', 'error');
         if (typeof doVerifyAndFile === 'function') doVerifyAndFile();

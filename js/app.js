@@ -2421,6 +2421,17 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
     // base number is always frozen/correct, never builder-regenerated.
     const qNo = q.editableState.quoteNo || q.quoteNumber || '';
     window._qbReopenState = { ...q.editableState, quoteNo: qNo, sourceDocId: id, sourceCollection: collection, rootQuoteId: q.rootQuoteId || id };
+    // Owner 2026-11-20 ("make the approved quote PDF one tap"): the saved snapshot never carries the filing time (it is built before the quote is stamped filed),
+    // so a reopened filed / approved quote came back as a draft and Download PDF asked to file it again. A quote whose record is filed — and not waiting for or
+    // refused approval — reopens as filed. The builder still asks to re-file if anything is changed after the reopen (filedChangedSinceFiling in the builder).
+    try {
+      const appr = String(q.approvalStatus || '');
+      if (!window._qbReopenState.filedAt && q.status === 'filed' && !['pending_review', 'returned', 'rejected'].includes(appr)) {
+        const t = q.approvedAt || q.filedAt || q.createdAt;
+        const d = t && t.toDate ? t.toDate() : (t ? new Date(t) : null);
+        window._qbReopenState.filedAt = (d && !isNaN(d)) ? d.toISOString() : new Date().toISOString();
+      }
+    } catch (_) {}
     await graftQuoteCosts(collection, id, window._qbReopenState);   // QUOTE-COSTS
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
