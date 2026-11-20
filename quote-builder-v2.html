@@ -7834,6 +7834,9 @@ function paceFactor(){
 // suggestion; sales may pick any ladder tier, and the true-cost cap in
 // computeTotals() stays the hard wall either way.
 const DISC_LADDER = [5, 8, 10, 13, 15, 18, 20, 23, 25, 28, 30];
+// Owner 2026-11-20 ("Start at no discount"): a new quote no longer PRE-SELECTS the pace suggestion; it starts at no discount and the
+// suggestion stays a hint ("📉 Month pace: offer up to n%" in the calculator) that Sales applies by choosing the tier. Set true to restore 2026-09-01.
+const PACE_AUTO_DISCOUNT = false;
 function paceSuggestedDiscount(){
   const pf = paceFactor();
   if (!pf.live || !COSTING_PACE) return { tier: 0, live: false };
@@ -8886,7 +8889,7 @@ function applyPricingFields(o){
   try{
     const _sd=paceSuggestedDiscount();
     const _de=document.getElementById('discountPct');
-    if(_sd.live&&_sd.tier>0&&_de&&(_de.value==='0'||!_de.value)) _de.value=String(_sd.tier);
+    if(PACE_AUTO_DISCOUNT&&_sd.live&&_sd.tier>0&&_de&&(_de.value==='0'||!_de.value)) _de.value=String(_sd.tier);
   }catch(e){}
   if(document.getElementById('commissionMode')) onCommissionModeChange();
   if(document.getElementById('diFree')) onFreeDeliveryChange();
@@ -9087,7 +9090,7 @@ function clearForm(){
   // Owner ruling 2026-09-01: a weak month reflects as a DISCOUNT on new
   // quotes — default the ladder select to the live pace suggestion (sales
   // can change it to any tier, including none).
-  try{ const _sd=paceSuggestedDiscount(); if(_sd.live&&_sd.tier>0){ const el=document.getElementById('discountPct'); if(el) el.value=String(_sd.tier); } }catch(e){}
+  try{ const _sd=paceSuggestedDiscount(); if(PACE_AUTO_DISCOUNT&&_sd.live&&_sd.tier>0){ const el=document.getElementById('discountPct'); if(el) el.value=String(_sd.tier); } }catch(e){}
   _msStash=null;         // and drop the toggle-off stash so it can't resurrect on the next quote
   _commAuto=false;       // commission auto-rule starts fresh with the new quote
   document.getElementById('quoteDate').value=today;
