@@ -2483,10 +2483,20 @@ service cloud.firestore {
       // v12 WS36 — money keys need books access; stage/timeline/documents/tracking
       // edits stay open to internal staff exactly as before (affectedKeys diff, so
       // writes not touching money keys are unaffected).
+      // Owner 2026-11-20 "Yes, block it": a job becomes 'paid' only by Finance/the President, or once nothing is owed (stored balance, else contract - collected) and no client credit.
+      function jobSettled() {
+        return ( ('arBalance' in resource.data) && resource.data.arBalance <= 0.005 )
+          || ( !('arBalance' in resource.data) && resource.data.get('contractAmount', 0) - resource.data.get('amountCollected', 0) <= 0.005 );
+      }
+      function paidOk() {
+        return request.resource.data.get('stage', '') != 'paid' || resource.data.get('stage', '') == 'paid' || canFinance()
+          || ( jobSettled() && !(resource.data.get('clientCredit', 0) > 0) );
+      }
       allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || hasProfile())
         && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(
                ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule', 'contractAmount', 'clientCredit', 'refunds', 'joRev'])
-             || canFinance() );
+             || canFinance() )
+        && paidOk();
       allow delete: if isAuth() && isAdmin();
     }
 

@@ -161,14 +161,39 @@ describe('2. J8 guard — no "Completed" without the signed acceptance and a cle
     assert.equal(e.db.writes('job_projects/prj1').length, 0);
     assert.ok(e.toastMsgs().some((m) => /closes by itself/.test(m)));
   });
-  it('a LEGACY job is unchanged: Completed with no acceptance at all, no stageAt, and Paid by hand still works', async () => {
-    const e = env(PROD, { pj: { flowVersion: undefined, amountCollected: 65000, arBalance: 35000 } });
+  it('a LEGACY job: Completed with no acceptance at all, no stageAt; Paid by hand works once nothing is owed', async () => {
+    const e = env(PROD, { pj: { flowVersion: undefined, amountCollected: 100000, arBalance: 0 } });
     await advance(e, 'completed');
     assert.equal(e.pj().stage, 'completed');
     assert.ok(!Object.keys(e.pj()).some((k) => k.startsWith('stageAt')));
     await advance(e, 'paid');
     assert.equal(e.pj().stage, 'paid');
     assert.equal(e.pages.length, 0);
+  });
+  it('owner 2026-11-20 "Yes, block it": a Production login cannot close a LEGACY job that still has a balance (plain message, nothing written); Finance can', async () => {
+    const e = env(PROD, { pj: { flowVersion: undefined, stage: 'completed', amountCollected: 65000, arBalance: 35000 } });
+    const before = e.db.writes('job_projects/prj1').length;
+    await advance(e, 'paid');
+    assert.equal(e.pj().stage, 'completed');
+    assert.equal(e.db.writes('job_projects/prj1').length, before);
+    assert.ok(e.toastMsgs().some((m) => /Balance still due: only Finance can close it/.test(m)));
+    assert.ok(!e.toastMsgs().some((m) => /₱/.test(m)), 'no pesos to Production');
+    const c = env(PROD, { pj: { flowVersion: undefined, stage: 'completed', amountCollected: 100000, arBalance: 0, clientCredit: 5000 } });
+    await advance(c, 'paid');
+    assert.equal(c.pj().stage, 'completed', 'client credit still owed back: not closable by Production');
+    const f = env(FIN, { pj: { flowVersion: undefined, stage: 'completed', amountCollected: 65000, arBalance: 35000 } });
+    await advance(f, 'paid');
+    assert.equal(f.pj().stage, 'paid', 'Finance may still close an older job by hand');
+  });
+  it('the rule behind it (firestore.rules job_projects): paidOk() on update — Finance/President, or settled with no client credit', () => {
+    const R = read('firestore.rules');
+    const block = R.slice(R.indexOf('match /job_projects/{docId}'), R.indexOf('match /order_tracking/{token}'));
+    assert.match(block, /function jobSettled\(\) \{/);
+    assert.ok(block.includes("( ('arBalance' in resource.data) && resource.data.arBalance <= 0.005 )"));
+    assert.ok(block.includes("resource.data.get('contractAmount', 0) - resource.data.get('amountCollected', 0) <= 0.005"));
+    assert.ok(block.includes("request.resource.data.get('stage', '') != 'paid' || resource.data.get('stage', '') == 'paid' || canFinance()"));
+    assert.ok(block.includes("( jobSettled() && !(resource.data.get('clientCredit', 0) > 0) )"));
+    assert.match(block, /\|\| canFinance\(\) \)\n\s*&& paidOk\(\);/, 'ANDed onto update');
   });
 });
 

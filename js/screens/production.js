@@ -2168,6 +2168,18 @@ async function advanceProjectStage(p, nextId){
     const _key = window.FlowCore.keyForProjectStage(nextId);
     if (_key) _flowStamp = window.FlowCore.stageStamp(_key, new Date().toISOString());
   }
+  // Owner 2026-11-20 "Yes, block it" (firestore.rules job_projects paidOk): an older job moves to Paid / Closed only by Finance / the President,
+  // or once nothing is owed and there is no client credit. Same test here so a Production login gets a plain message, not a permission error.
+  if (nextId === 'paid' && !(Number(p.flowVersion) >= 2)) {
+    const role = window.currentRole || '';
+    const books = ['president','manager','finance'].includes(role) || (window.currentDepts || []).includes('Finance');
+    if (!books) {
+      let fresh = p;
+      try { const fs = await db.collection('job_projects').doc(p.id).get(); if (fs.exists) fresh = { id:p.id, ...fs.data() }; } catch(_){}
+      const owed = (fresh.arBalance != null) ? Number(fresh.arBalance) : (Number(fresh.contractAmount)||0) - (Number(fresh.amountCollected)||0);
+      if (!(owed <= 0.005) || Number(fresh.clientCredit) > 0) { Notifs.showToast('Balance still due: only Finance can close it.','error'); return; }
+    }
+  }
   try{
     await db.collection('job_projects').doc(p.id).update({
       stage:nextId, updatedAt:firebase.firestore.FieldValue.serverTimestamp(), ..._flowStamp,
