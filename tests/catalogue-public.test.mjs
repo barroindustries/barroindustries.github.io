@@ -1531,7 +1531,7 @@ describe('the public contact details (owner ruling: hello@ and ONE address and n
   it('shows ONLY 0927 683 6300 (tel: link, JSON-LD in international form) and never 0960', () => {
     for (const [label, text] of Object.entries(surfaces)) {
       const found = [...new Set(phoneDigits(text))];
-      assert.ok(found.every(n => n === '09276836300'), `${label}: another number ${found.join(', ')}`);
+      assert.ok(found.every(n => n === '09276836300' || n === '09208018475'), `${label}: another number ${found.join(', ')}`);
     }
     assert.ok(phoneDigits(homeSite).length >= 1 && phoneDigits(cat).length >= 1);
     assert.ok(homeSite.includes('<a href="tel:+639276836300">0927 683 6300</a>') && cat.includes('<a href="tel:+639276836300">0927 683 6300</a>'));

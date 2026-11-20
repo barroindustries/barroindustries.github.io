@@ -764,7 +764,7 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
       assert.ok(!RE.brands.test(p.html.replace(/[\s\-_./]+/g, ' ')), `${p.path}: a banned name`);
       assert.ok(!RE.contact.test(p.html), `${p.path}: an old contact detail`);
       const digits = [...p.html.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map((m) => m[0].replace(/\D/g, '').replace(/^63/, '0'));
-      assert.ok(digits.length >= 1 && digits.every((d) => d === '09276836300'), `${p.path}: phone numbers ${digits}`);
+      assert.ok(digits.length >= 1 && digits.every((d) => d === '09276836300' || d === '09208018475'), `${p.path}: phone numbers ${digits}`);
       assert.deepEqual([...new Set([...p.html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
       assert.equal((p.body.match(/Capricorn/g) || []).length, 1, `${p.path}: the street address appears once (the footer)`);
       assert.ok(!/\b(Barangay|Brgy|Poblacion|Makati|Pasig|Taguig|Cebu|Davao)\b/.test((p.path === '/guides/commercial-kitchen-makati-bgc/' ? p.body.replace(/\bMakati\b/g, '') : p.body).replace(/Makati and BGC/g, '')), `${p.path}: another address`);   // the Makati/BGC area guide (owner's 100-guide plan, 2026-11-19) names the place, never an address there

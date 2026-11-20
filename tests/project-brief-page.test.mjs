@@ -388,11 +388,11 @@ describe('the page copy: the same wording as the form definition, general, and i
     assert.ok(!/best|leading|certified|accredited|licensed|guarantee/i.test(visible(hero) + ' ' + JSON.stringify(def)), 'a superlative or credential claim');
   });
 
-  it('shows ONE phone, ONE e-mail and the Quezon City address — never Gmail, the 0960 number or an old address', () => {
+  it('shows the office and sales phones, ONE e-mail and the Quezon City address — never Gmail, the 0960 number or an old address', () => {
     const text = visible(html) + ' ' + js + ' ' + JSON.stringify(def);
     assert.ok(!/gmail|0960|san\s*fernando|valenzuela|purok|carlatan|la union/i.test(text), 'a disallowed contact detail');
     const phones = new Set([...text.matchAll(/(?:\+63|0)\s?9\d{2}\s?\d{3}\s?\d{4}/g)].map((m) => m[0].replace(/\s/g, '').replace(/^\+63/, '0')));
-    assert.deepEqual([...phones], ['09276836300']);
+    assert.deepEqual([...phones].sort(), ['09208018475', '09276836300']);   // office + sales line (owner, 2026-11-20)
     const emails = new Set([...text.matchAll(/[\w.+-]+@[\w-]+\.[\w.]+/g)].map((m) => m[0]));
     assert.deepEqual([...emails], ['hello@barroindustries.com']);
     assert.ok(visible(footer(html)).includes('21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila'));
