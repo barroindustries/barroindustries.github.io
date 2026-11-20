@@ -1,8 +1,8 @@
 /* ==============================================================================================================
-   qb/d7/d7-flow.js: window.D7.flow.   Review, approval, the approval link, and the two screens of the configurators in the LIVE quote builder
+   qb/d7/d7-flow.js: window.D7.flow.   Review, approval, and the two screens of the configurators in the LIVE quote builder
    (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md sections 1.3, 3.4, 5 packet C).   REWRITTEN SMALL from the D7 prototype's d7/d7-flow.js: the prototype's "local parent" (the stub, the token approval page, Filed & drafts,
    the prototype bar, the role switcher, the sample quote) is gone. The live flow is kept: QUOTE_APPROVAL_REQUESTED -> the bridge in js/app.js writes the quote as pending_approval, an approval_requests doc and a push to the
-   President -> he opens Approvals in the ops app -> Review / Approve / Return. This file only decides WHEN approval is required, and shows the link to send.
+   President -> he opens the quote's review page in the ops app -> Approve / Return / Comment. This file only decides WHEN approval is required; the link to send is the app shell's window (QUOTE-APPROVAL-LINK-SPEC-2026-11-20).
 
    HOOKS (D7.h('flow.<name>'), called by quote-builder-v2.html)
      approvalReason()            '' when the quote can be filed by this person, else why it must go to the President (spec 1.3 item 1: a line needs review / the quote sells below its standard total /
@@ -11,7 +11,6 @@
      reviewReason()              '' or "N line(s) need review: #3 Title (reason)."   (the review part of the sentence above)
      markAllReviewed()           President / Operations (KC.can('review')): mark every line that needs review as reviewed
      approvalCovers()            true while the approval the quote carries still covers it: KCRules.approvalCovers({ carry, net, standardTotal, costKnown })
-     showApprovalLink(payload?)  the panel with the link to Approvals, a Copy link button and a ready-to-paste message; also reachable from the "Pending Approval" badge (no payload: it is rebuilt from the page)
      renderScreen()              redraw the open screen (Materials price list / Pricing settings) after a price, a setting or a role change
      boot()  syncButtons()       D7.boot(): the two top-bar buttons "Materials price list" and "Pricing settings" (drawn only while D7.live, and only for the President and Purchasing: Fable review F8, the bar was crowded);
                                  everyone else reads the materials price list from a small text link beside "Add custom item" on a KC quote, and has a way back ("Quote builder") while a screen is open
@@ -159,37 +158,6 @@
     try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(function () { done(true); }, legacy); return; } } catch (e) { /* fall through */ }
     legacy();
   }
-  /* the link every approval goes through: the Approvals page of the ops app.  The hash router of js/app.js (parseHash) deep-links #/approvals; no token, no new page (spec 1.3 item 2) */
-  function approvalsLink() {
-    var origin = '';
-    try { origin = location.origin; } catch (e) { origin = ''; }
-    if (!origin || origin === 'null') { try { origin = location.protocol + '//' + location.host; } catch (e) { origin = ''; } }
-    return origin + '/#/approvals';
-  }
-  F.approvalsLink = approvalsLink;
-  var lastSent = null;                                               // what the panel shows when it is reopened from the badge: { no, client, total, why }
-  function sentFrom(payload) {
-    var p = payload || {};
-    var no = p.quoteNumber || val('quoteNo'), client = p.clientCompany || p.clientName || val('clientCompany') || val('clientName');
-    var total = p.grandTotal != null ? p.grandTotal : (p.total != null ? p.total : null);
-    if (total == null) { try { total = (typeof basisTotals === 'function' ? basisTotals() : computeTotals()).grand; } catch (e) { total = 0; } }
-    return { no: no, client: client, total: total };
-  }
-  F.showApprovalLink = function (payload) {
-    var s = payload ? sentFrom(payload) : (lastSent || sentFrom(null));
-    if (payload) { s.why = F.approvalReason(); lastSent = s; }
-    var link = approvalsLink();
-    var msg = 'Quote ' + s.no + ' for ' + (s.client || 'the client') + ', ' + peso(s.total) + '. It needs your approval: ' + link;
-    var body = '<div class="d7-row" style="margin-bottom:10px;align-items:center;justify-content:space-between"><span class="d7-big">' + esc(peso(s.total)) + '</span><span class="d7-status pending">⏳ Waiting for the President</span></div>'
-      + '<dl class="d7-kv"><dt>Quote</dt><dd>' + esc(s.no) + '</dd><dt>Client</dt><dd>' + esc(s.client || '—') + '</dd>' + (s.why ? '<dt>Why</dt><dd>' + esc(s.why) + '</dd>' : '') + '</dl>'
-      + '<label class="d7-lbl" for="d7LinkIn">Approval link</label><div class="d7-row"><input id="d7LinkIn" class="d7-link-in" readonly value="' + esc(link) + '" onfocus="this.select()">'
-      + '<button type="button" class="d7-btn primary" data-d7="copy" data-target="d7LinkIn" id="d7CopyLink">Copy link</button></div>'
-      + '<div class="d7-note">Send this link to the President by Messenger or Viber.</div>'
-      + '<label class="d7-lbl" for="d7MsgIn">Ready to paste</label><div class="d7-row"><textarea id="d7MsgIn" class="d7-msg-in" readonly>' + esc(msg) + '</textarea></div>'
-      + '<div class="d7-row" style="margin-top:6px"><button type="button" class="d7-btn" data-d7="copy" data-target="d7MsgIn">Copy message</button></div>';
-    openModal('Approval link', body, '<button type="button" class="d7-btn" data-d7="close">Close</button>');
-  };
-
   /* ============================== the two screens (Materials price list, Pricing settings) ============================== */
   var SCREENS = { builder: null, prices: 'scrPrices', settings: 'scrSettings' };
   var LABELS = { prices: '🧱 Materials price list', settings: '⚙ Pricing settings' };

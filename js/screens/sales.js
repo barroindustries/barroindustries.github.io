@@ -798,6 +798,29 @@ window.quoteApprovalBadge = function (q) {
     rejected:       { cls: 'badge-red',    label: 'Rejected' },
   })[q.approvalStatus] || null;
 };
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.2 — the approval buttons of the Quotes list (Barro Kitchens cards and the Brilliant Steel rows). A quote "went through approval" when it
+// carries `reviewRequestedAt`. While it waits (approvalStatus 'pending_review') the card offers the approval link (the shell's window, js/app.js showQuoteApprovalLink); once it went
+// through approval it offers the review page with the thread's size. A RETURNED quote also shows the President's note under the card title (his note, else his last thread text).
+// Pure markup builders (every attribute and text through escHtml) + ONE binder, called by both lists. `coll` is the collection the list reads.
+window.quoteApprovalButtonsHtml = function (q, coll) {
+  if (!q || !q.id) return '';
+  const a = ' data-coll="' + escHtml(coll) + '" data-id="' + escHtml(q.id) + '"';
+  const count = Number(q.approvalThread && q.approvalThread.count) || 0;
+  return (q.approvalStatus === 'pending_review'
+      ? '<button type="button" class="btn-secondary btn-sm q-approval-link-btn"' + a + ' data-qno="' + escHtml(q.fileName || q.quoteNumber || '') + '" data-client="' + escHtml(q.clientName || '') + '">Approval link</button>' : '')
+    + (q.reviewRequestedAt
+      ? '<button type="button" class="btn-secondary btn-sm q-approval-open-btn"' + a + '>Review &amp; comments' + (count ? ' (' + count + ')' : '') + '</button>' : '');
+};
+window.quoteReturnedNoteHtml = function (q) {
+  if (!q || q.approvalStatus !== 'needs_revision') return '';
+  const t = q.approvalThread;
+  const note = String(q.presidentNotes || (t && t.lastByRole === 'president' && t.lastText) || '').slice(0, 160);
+  return '<div class="q-returned-note">Returned by the President' + (note ? ': ' + escHtml(note) : '') + '</div>';
+};
+window.bindQuoteApprovalButtons = function (container) {
+  container.querySelectorAll('.q-approval-link-btn').forEach(b => b.addEventListener('click', e => { const d = e.currentTarget.dataset; window.showQuoteApprovalLink({ coll: d.coll, id: d.id, quoteNumber: d.qno, clientName: d.client }); }));
+  container.querySelectorAll('.q-approval-open-btn').forEach(b => b.addEventListener('click', e => { const d = e.currentTarget.dataset; navigateTo('quote-approval', { subtab: window.quoteApprovalRefOf(d.coll, d.id) }); }));
+};
 const DEFAULT_SALES_SOP = {
   // Version 3 = the process of 2026-11-20: the Barro Kitchens configurators in the quote builder, the President approves every quote,
   // Record payment -> the President confirms -> Sales generates the SO & JO, and the Won / Projects tab. (Version 2 was the 2026-11-19 flow,
@@ -1485,6 +1508,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap${superseded?';opacity:.6':(q.status==='lost'?';opacity:.7':'')}">
         <div style="flex:1;min-width:160px">
           <div class="item-title" style="font-size:13px">${escHtml(window.quoteDisplayNo(q))} — ${escHtml(q.clientName||'Unnamed')}${coTag}${superseded?' <span class="badge badge-gray" style="font-size:9px">superseded</span>':''}</div>
+          ${window.quoteReturnedNoteHtml(q)}
           <div class="item-meta" style="margin-top:4px">
             <span>${escHtml(q.scope||'Custom')}</span>
             <span>${escHtml(q.agentName||'—')}</span>
@@ -1503,6 +1527,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           ${window.quoteShareChipHtml(q)}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end;align-items:center">
+          ${window.quoteApprovalButtonsHtml(q, 'bk_quotes')}
           ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
           ${!q.editableState?`<span style="font-size:10px;color:var(--text-muted)" title="This quote was filed before edit history was captured (or the snapshot write failed) — there's nothing here to reopen or revise.">No editable snapshot</span>`:''}
@@ -1535,6 +1560,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   const bindCardActions = () => {
+    window.bindQuoteApprovalButtons(container);   // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.2: "Approval link" and "Review & comments"
     container.querySelectorAll('.bk-so-btn').forEach(b=>b.addEventListener('click', e=>openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container)));
     // Re-audit fix (HIGH) — this used to set window._qbReopenState directly and
     // navigate, bypassing window.reopenQuoteFromDoc (app.js). That function is
@@ -2332,7 +2358,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
               : '';
             return `<tr class="bsq-row">
               <td class="tc-avatar"><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code>${chainToggle}</td>
-              <td class="tc-name"><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+              <td class="tc-name"><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div>${window.quoteReturnedNoteHtml(q)}</td>
               <td class="tc-net">₱${fmt(q.total||q.grandTotal||0)}</td>
               <td class="tc-detail" data-label="Agent">${escHtml(q.agentName||q.createdByName||'—')}</td>
               <td class="tc-detail" data-label="Status">
@@ -2343,6 +2369,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
               </td>
               <td class="tc-actions" style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
+                ${window.quoteApprovalButtonsHtml(q, 'bs_quotes')}
                 ${isPrivileged&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
                   <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✅',16)} Approve</button>
                   <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('❌',16)} Reject</button>
@@ -2441,6 +2468,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   }
 }
 function bindQuoteActions(el, currentUser, currentRole, container) {
+  window.bindQuoteApprovalButtons(el);   // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.2: "Approval link" and "Review & comments"
   // Wave 7 Pass 2 — "v N · history" toggle for a chain's primary row. Reveals
   // the sibling <tr class="bsq-hist-row" data-chain="…" hidden> rows
   // quoteChainTableRowsHtml() rendered right after this row.

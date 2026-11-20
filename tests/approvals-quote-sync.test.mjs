@@ -13,6 +13,13 @@
 // request collection for a brief; a sync that throws into the approval (no try/catch) or that is awaited before the quote itself is saved; a missing call on any of the
 // four write sites; approve mapped to anything but the quote doc's own status ('filed'); no cache invalidation; each must fail here.
 //
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §4: the four write sites above are now callers of ONE function, decideQuoteApproval (js/screens/approvals.js), lifted here with the wrappers, the
+// review panel and — for the builder's review bar — saveReviewedPartnerQuote (js/app.js). Its guards (a fresh read, the pending-state check, the in-flight Set, offline), the
+// best-effort thread entry and the notification link are pinned below; every older assertion keeps its meaning (the write order is quote update -> request sync -> approval request
+// -> notify; the only new step is the fresh read of the quote that opens the call).
+// Mutation-tested in scratch copies (see the commit message): the state guard dropped or widened, no in-flight Set, no offline check, the thread entry awaited outside its try, the
+// notification link back to the list page, a self-notification, notes written when empty, the sync moved before the quote update, a caller that keeps its own copy of the write.
+//
 // Run with: node --test tests/*.test.mjs
 
 import { describe, it } from 'node:test';
@@ -28,11 +35,15 @@ const plain = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)
 const SRC = read('js/screens/approvals.js');
 const piece = (src, re, what) => { const m = src.match(re); assert.ok(m, `${what} not found`); return m[0]; };
 const SYNC = piece(SRC, /^window\.syncQuoteStatusToRequest = async function[\s\S]*?\n\};/m, 'window.syncQuoteStatusToRequest in js/screens/approvals.js');
+const IN_FLIGHT = piece(SRC, /^const _qaInFlight = new Set\(\);$/m, 'the in-flight Set');
+const DECIDE = piece(SRC, /^async function decideQuoteApproval\([\s\S]*?\n\}/m, 'decideQuoteApproval');
 const APPROVE = piece(SRC, /^async function approveQuoteApproval\([\s\S]*?\n\}/m, 'approveQuoteApproval');
 const RETURN = piece(SRC, /^async function returnQuoteToPartner\([\s\S]*?\n\}/m, 'returnQuoteToPartner');
 const REVIEW = piece(SRC, /^async function openQuoteApprovalReview\([\s\S]*?\n\}/m, 'openQuoteApprovalReview');
 const STATE_FIELDS = piece(read('js/config.js'), /^window\.quoteStateFields = function \(state\) \{[\s\S]*?\n\};/m, 'window.quoteStateFields in js/config.js');
 const ESC_HTML = piece(read('js/modules.js'), /function escHtml\(str\) \{[\s\S]*?\n\}/, 'escHtml in js/modules.js');
+const REF_OF = piece(read('js/config.js'), /^window\.quoteApprovalRefOf = function[\s\S]*?\n\};/m, 'window.quoteApprovalRefOf in js/config.js');
+const BAR = piece(read('js/app.js'), /^async function saveReviewedPartnerQuote\([\s\S]*?\n\}/m, 'saveReviewedPartnerQuote in js/app.js');
 
 const QR = 'QR-261021-K7M2PX', CIR = 'CIR-261022-ABCDEF';
 const RAW_QR = `quote_requests/${QR}`, RAW_CIR = `client_info_requests/${CIR}`;
@@ -46,7 +57,7 @@ const requestDoc = (over) => Object.assign({ status: 'quoted', quoteDocId: Q1, q
 function makeApp(opts) {
   opts = opts || {};
   const store = new Map(Object.entries(opts.docs || {}).map(([k, v]) => [k, plain(v)]));
-  const ops = [], updates = [], toasts = [], warns = [], invalidated = [], notes = [], audits = [], closed = [];
+  const ops = [], updates = [], toasts = [], warns = [], invalidated = [], notes = [], audits = [], closed = [], threads = [], navs = [];
   const stamp = { __serverTimestamp: true };
   const isRequest = (key) => /^(quote_requests|client_info_requests)\//.test(key);
   const docRef = (coll, id) => {
@@ -77,6 +88,10 @@ function makeApp(opts) {
     QUOTE_COLLECTIONS: ['bk_quotes', 'bs_quotes'],
     logAudit: (...a) => audits.push(a), invalidateBsQuotesCache: () => {},
     skeletonHtml: () => '', renderEmptyState: () => '', quoteBuilderPageFor: () => 'bk-quote-builder', reopenQuoteFromDoc: () => {},
+    busy: (btn, fn) => fn(),                       // js/config.js's window.busy (the double-click guard) stands in as a pass-through here
+    // the approval thread (js/svc-approvals.js QuoteThread, pinned by tests/quote-approval-link.test.mjs): recorded here; 'reject' answers { ok:false }, 'throw' throws
+    QuoteThread: { add: async (o) => { ops.push('thread ' + o.kind); threads.push(o); if (opts.thread === 'throw') throw new Error('permission-denied'); return opts.thread === 'reject' ? { ok: false, error: 'permission-denied' } : { ok: true, id: 'tc1' }; } },
+    ensureScript: async () => {},
   };
   // the review panel: openPage hands back a panel whose body / foot find their controls by selector (one stand-in each, so a handler wired by the code can be fired)
   const controls = {};
@@ -86,7 +101,9 @@ function makeApp(opts) {
   const ctx = vm.createContext({
     window: win, db, console: { log() {}, error() {}, warn: (...a) => warns.push(a) },
     firebase: { firestore: { FieldValue: { serverTimestamp: () => stamp } } },
-    currentUser: { uid: 'u-pres' },
+    currentUser: { uid: opts.me || 'u-pres' }, currentRole: 'president', userProfile: { displayName: 'The President' },
+    navigator: { onLine: !opts.offline }, navigateTo: (page, o) => navs.push([page, o]), document: { getElementById: () => ({}) },
+    requestBuilderState: async () => opts.builderState || {}, promptDialog: async () => opts.returnNotes || '',
     Notifs: {
       showToast: (m, t) => toasts.push({ m, t }), success: (m) => toasts.push({ m, t: 'success' }), error: (m) => toasts.push({ m, t: 'error' }),
       send: async (uid, n) => { ops.push('notify'); notes.push({ uid, n }); },
@@ -94,10 +111,12 @@ function makeApp(opts) {
     dbCacheInvalidate: (k) => invalidated.push(k),
     openPage: () => panel, closeModal: () => closed.push(true), emojiIcon: () => '',
   });
-  vm.runInContext([STATE_FIELDS, ESC_HTML, SYNC, APPROVE, RETURN, REVIEW].join('\n'), ctx);
+  vm.runInContext([STATE_FIELDS, ESC_HTML, REF_OF, SYNC, IN_FLIGHT, DECIDE, 'window.decideQuoteApproval = decideQuoteApproval;', APPROVE, RETURN, REVIEW, BAR].join('\n'), ctx);
   const call = (code, ...args) => { ctx.__a = args; return vm.runInContext(code, ctx); };
-  return { ctx, win, store, ops, updates, toasts, warns, invalidated, notes, audits, closed, panel, controls,
+  return { ctx, win, store, ops, updates, toasts, warns, invalidated, notes, audits, closed, panel, controls, threads, navs,
     sync: (coll, id, state) => call('window.syncQuoteStatusToRequest(...__a)', coll, id, state),
+    decide: (o) => call('decideQuoteApproval(...__a)', o),
+    bar: (ctxArg, action) => call('saveReviewedPartnerQuote(...__a)', ctxArg, action),
     approve: (id, coll) => call('approveQuoteApproval(...__a)', id, 'u-agent', 'BK-ML-WB-261028-001', 'Juan Dela Cruz', coll),
     ret: (id, coll, notes) => call('returnQuoteToPartner(...__a)', id, 'u-agent', 'BK-ML-WB-261028-001', 'Juan Dela Cruz', notes || 'make it 2 sinks', coll),
     review: (id, coll) => call('openQuoteApprovalReview(...__a)', { quoteId: id, agentId: 'u-agent', quoteNumber: 'BK-ML-WB-261028-001', clientName: 'Juan Dela Cruz', quoteColl: coll }, () => ops.push('onDone')),
@@ -271,10 +290,10 @@ describe('the four places the President acts on a quote all sync — and a faili
   const docs = () => ({ [RAW_Q1]: quoteDoc(), [RAW_QR]: requestDoc(), 'approval_requests/ar1': { type: 'bs_quote', quoteId: Q1, status: 'pending' } });
   const seq = (S) => S.ops.filter((o) => !/^onDone$/.test(o));
 
-  it('Approve (list / registry): quote saved as filed + approved, THEN the request entry -> filed, THEN the approval request resolved and the agent told', async () => {
+  it('Approve (list / registry): a fresh read of the quote, THEN it is saved as filed + approved, THEN the request entry -> filed, THEN the approval request resolved, the thread entry, and the agent told', async () => {
     const S = makeApp({ docs: docs() });
     await S.approve(Q1, 'bk_quotes');
-    assert.deepEqual(seq(S), [`update ${RAW_Q1}`, `get ${RAW_Q1}`, `get ${RAW_QR}`, `update ${RAW_QR}`, `where approval_requests.quoteId == ${Q1}`, 'update approval_requests/ar1', 'notify']);
+    assert.deepEqual(seq(S), [`get ${RAW_Q1}`, `update ${RAW_Q1}`, `get ${RAW_Q1}`, `get ${RAW_QR}`, `update ${RAW_QR}`, `where approval_requests.quoteId == ${Q1}`, 'update approval_requests/ar1', 'thread approved', 'notify']);
     assert.deepEqual([S.store.get(RAW_Q1).status, S.store.get(RAW_Q1).approvalStatus], ['filed', 'approved']);
     assert.equal(entryOf(S, RAW_QR, Q1).status, 'filed');
     assert.equal(S.store.get('approval_requests/ar1').status, 'approved');
@@ -282,10 +301,10 @@ describe('the four places the President acts on a quote all sync — and a faili
     assert.ok(S.toasts.some((t) => t.t === 'success' && /approved and filed/.test(t.m)));
   });
 
-  it('Return (list / registry): quote saved as needs_revision, then the request entry -> needs_revision, then the approval request returned and the agent told', async () => {
+  it('Return (list / registry): a fresh read of the quote, THEN it is saved as needs_revision, then the request entry -> needs_revision, then the approval request returned, the thread entry, and the agent told', async () => {
     const S = makeApp({ docs: docs() });
     await S.ret(Q1, 'bk_quotes');
-    assert.deepEqual(seq(S), [`update ${RAW_Q1}`, `get ${RAW_Q1}`, `get ${RAW_QR}`, `update ${RAW_QR}`, `where approval_requests.quoteId == ${Q1}`, 'update approval_requests/ar1', 'notify']);
+    assert.deepEqual(seq(S), [`get ${RAW_Q1}`, `update ${RAW_Q1}`, `get ${RAW_Q1}`, `get ${RAW_QR}`, `update ${RAW_QR}`, `where approval_requests.quoteId == ${Q1}`, 'update approval_requests/ar1', 'thread returned', 'notify']);
     assert.deepEqual([S.store.get(RAW_Q1).status, S.store.get(RAW_Q1).approvalStatus], ['needs_revision', 'needs_revision']);
     assert.equal(entryOf(S, RAW_QR, Q1).status, 'needs_revision');
     assert.equal(S.store.get('approval_requests/ar1').status, 'returned');
@@ -349,26 +368,220 @@ describe('the four places the President acts on a quote all sync — and a faili
     }
   });
 
-  it('a Brilliant Steel quote (bs_quotes, no sourceRef) approves exactly as before — one extra read of the quote, no request touched', async () => {
+  it('a Brilliant Steel quote (bs_quotes, no sourceRef) approves exactly as before — the decision\'s own read plus the sync\'s read of the quote, no request touched', async () => {
     const S = makeApp({ docs: { 'bs_quotes/pq1': quoteDoc({ sourceRef: null }), 'approval_requests/ar1': { type: 'bs_quote', quoteId: 'pq1', status: 'pending' } } });
     await S.approve('pq1', 'bs_quotes');
-    assert.deepEqual(seq(S), ['update bs_quotes/pq1', 'get bs_quotes/pq1', 'where approval_requests.quoteId == pq1', 'update approval_requests/ar1', 'notify']);
+    assert.deepEqual(seq(S), ['get bs_quotes/pq1', 'update bs_quotes/pq1', 'get bs_quotes/pq1', 'where approval_requests.quoteId == pq1', 'update approval_requests/ar1', 'thread approved', 'notify']);
     assert.equal(S.store.get('bs_quotes/pq1').status, 'filed');
   });
 
-  it('every one of the four write sites in the source calls the sync, right after the quote write and before the approval request is resolved', () => {
-    const sites = [
-      [APPROVE, "window.syncQuoteStatusToRequest(coll, quoteId, 'approved')"],
-      [RETURN, "window.syncQuoteStatusToRequest(coll, quoteId, 'needs_revision')"],
-      [REVIEW, "window.syncQuoteStatusToRequest(QC, quoteId, 'approved')"],
-      [REVIEW, "window.syncQuoteStatusToRequest(QC, quoteId, 'needs_revision')"],
-    ];
-    for (const [src, call] of sites) {
-      const at = src.indexOf(call);
-      assert.ok(at > 0, `${call} is missing`);
-      const before = src.lastIndexOf('.update(', at), after = src.indexOf("collection('approval_requests')", at);
-      assert.ok(before > 0 && before < at, `${call} must follow the quote's own write`);
-      assert.ok(after > at, `${call} must come before the approval request is resolved`);
+  it('the sync is called in ONE place — decideQuoteApproval, right after the quote write and before the approval request is resolved — and every write site is a caller of it', () => {
+    const at = DECIDE.indexOf("window.syncQuoteStatusToRequest(coll, quoteId, approve ? 'approved' : 'needs_revision')");
+    assert.ok(at > 0, 'the sync call is missing from decideQuoteApproval');
+    const before = DECIDE.lastIndexOf('.update(', at), after = DECIDE.indexOf("collection('approval_requests')", at);
+    assert.ok(before > 0 && before < at, 'the sync must follow the quote\'s own write');
+    assert.ok(after > at, 'the sync must come before the approval request is resolved');
+    // the three former copies are callers now: the two wrappers, the review panel's two handlers, the builder's review bar
+    assert.match(APPROVE, /return decideQuoteApproval\(\{ coll, quoteId, action:'approve'/);
+    assert.match(RETURN, /return decideQuoteApproval\(\{ coll, quoteId, action:'return', notes/);
+    assert.equal((REVIEW.match(/decideQuoteApproval\(\{ coll:QC, quoteId, action:'(approve|return)'/g) || []).length, 2, 'both review-panel handlers call the decision');
+    assert.match(BAR, /window\.decideQuoteApproval\(\{ coll, quoteId: ctx\.quoteId, action, notes, edits/);
+    // and nothing else writes the approved / returned state any more
+    for (const [name, src] of [['approveQuoteApproval', APPROVE], ['returnQuoteToPartner', RETURN], ['openQuoteApprovalReview', REVIEW], ['saveReviewedPartnerQuote', BAR]]) {
+      assert.equal(/quoteStateFields\(/.test(src), false, `${name} still writes a quote state by itself`);
+      assert.equal(/syncQuoteStatusToRequest\(/.test(src), false, `${name} still syncs by itself`);
     }
+    // the spec's grep: `grep -n "quoteStateFields('approved')" js` shows exactly one hit outside the tests, inside decideQuoteApproval (the ternary), and none in the builder bar or the review panel
+    const hits = [];
+    for (const f of ['js/app.js', 'js/config.js', 'js/departments.js', 'js/modules.js', 'js/svc-approvals.js', 'js/screens/approvals.js', 'js/screens/quote-approval.js', 'js/screens/sales.js']) {
+      read(f).split('\n').forEach((l, i) => { if (l.includes("quoteStateFields('approved')")) hits.push(`${f}:${i + 1}`); });
+    }
+    assert.equal(hits.length, 1, hits.join(', '));
+    assert.match(hits[0], /^js\/screens\/approvals\.js:/);
+    assert.equal((DECIDE.match(/quoteStateFields\('approved'\)/g) || []).length, 1, 'and that hit is inside decideQuoteApproval');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §4 — decideQuoteApproval: the one decision, its guards, the thread entry and the notification
+describe('decideQuoteApproval — ONE function behind every Approve / Return, guarded against a second decision', () => {
+  const AGENT = 'u-agent';
+  const base = (over) => ({ [RAW_Q1]: quoteDoc(Object.assign({ createdBy: AGENT, rootQuoteId: Q1 }, over || {})), [RAW_QR]: requestDoc(), 'approval_requests/ar1': { type: 'bs_quote', quoteId: Q1, status: 'pending' } });
+  const D = (S, over) => S.decide(Object.assign({ coll: 'bk_quotes', quoteId: Q1, action: 'approve', agentId: AGENT, quoteNumber: 'BK-ML-WB-261028-001', clientName: 'Juan Dela Cruz' }, over || {}));
+  const quoteWrites = (S) => S.updates.filter((u) => u.key === RAW_Q1);
+  const STATE_KEYS = ['status', 'approvalStatus', 'approvedAt', 'approvedBy', 'returnedAt', 'returnedBy', 'presidentNotes'];
+  const statePart = (patch) => Object.fromEntries(STATE_KEYS.filter((k) => k in patch).map((k) => [k, plain(patch[k])]));
+
+  it('the three former copies write the identical decision for the same input: the two wrappers, the review panel and the builder\'s review bar — approve and return', async () => {
+    const BUILDER = { clientName: 'Juan Dela Cruz', clientCompany: 'Cruz Foods', items: [{ name: 'Sink' }], total: 91000, grandTotal: 91000, editableState: { n: 1 } };
+    for (const action of ['approve', 'return']) {
+      const notes = action === 'return' ? 'make it 2 sinks' : '';
+      const W = makeApp({ docs: base() });   // the wrapper (Approvals list)
+      await (action === 'approve' ? W.approve(Q1, 'bk_quotes') : W.ret(Q1, 'bk_quotes', notes));
+      const P = makeApp({ docs: base() });   // the review panel
+      P.store.set(RAW_Q1, Object.assign({}, P.store.get(RAW_Q1), { scope: 'Supply of 2 sinks', total: 88739 }));
+      await P.review(Q1, 'bk_quotes');
+      P.panel.body.querySelector('#qar-client').value = 'Juan Dela Cruz'; P.panel.body.querySelector('#qar-scope').value = 'x'; P.panel.body.querySelector('#qar-total').value = '91000'; P.panel.body.querySelector('#qar-notes').value = notes;
+      await P.fire(action === 'approve' ? '#qar-approve' : '#qar-return');
+      const B = makeApp({ docs: base(), builderState: BUILDER, returnNotes: notes });   // the builder's review bar
+      await B.bar({ quoteId: Q1, partnerUid: AGENT, quoteNumber: 'BK-ML-WB-261028-001', clientName: 'Juan Dela Cruz', quoteColl: 'bk_quotes' }, action);
+      const [w, p, b] = [W, P, B].map((S) => lastPatch(S, RAW_Q1));
+      assert.deepEqual(statePart(w), statePart(p), action + ': panel == wrapper');
+      assert.deepEqual(statePart(w), statePart(b), action + ': builder bar == wrapper');
+      assert.deepEqual(plain(w.status === undefined ? null : [w.status, w.approvalStatus]), action === 'approve' ? ['filed', 'approved'] : ['needs_revision', 'needs_revision']);
+      assert.equal('presidentNotes' in w, action === 'return', 'notes are written only when there are some (a return); an approval with no note writes none');
+      for (const S of [W, P, B]) {
+        assert.equal(S.notes.length, 1, 'the submitter is told once');
+        assert.equal(S.notes[0].n.type, action === 'approve' ? 'quote_approved' : 'quote_returned');
+        assert.equal(S.store.get('approval_requests/ar1').status, action === 'approve' ? 'approved' : 'returned', 'the approval request is resolved by every site');
+        assert.equal(entryOf(S, RAW_QR, Q1).status, action === 'approve' ? 'filed' : 'needs_revision', 'and the website request follows (the builder bar never synced it before)');
+      }
+      // what each caller adds is ONLY its own edits
+      assert.deepEqual(Object.keys(w).sort(), Object.keys(statePart(w)).sort(), 'the wrapper writes nothing but the decision');
+      assert.ok(['clientName', 'scope', 'total', 'editedByPresident'].every((k) => k in p), 'the panel\'s edits ride along');
+      assert.ok(['items', 'editableState', 'editedByPresident', 'clientCompany'].every((k) => k in b), 'the bar\'s edits ride along');
+    }
+  });
+
+  it('a quote that is not waiting for approval is refused with NO write at all: approved, returned, filed directly — and a missing doc / id is "missing"', async () => {
+    for (const [over, state, msg] of [
+      [{ status: 'filed', approvalStatus: 'approved' }, 'approved', /already approved/],
+      [{ status: 'needs_revision', approvalStatus: 'needs_revision' }, 'needs_revision', /already returned.*Wait for the new submission/],
+      [{ status: 'filed', approvalStatus: 'filed' }, 'filed', /not waiting for approval/],
+      [{ status: 'draft', approvalStatus: undefined }, 'draft', /not waiting for approval/],
+    ]) {
+      for (const action of ['approve', 'return']) {
+        const S = makeApp({ docs: base(over) });
+        const r = await D(S, { action });
+        assert.deepEqual(plain(r), { ok: false, reason: 'state', state }, JSON.stringify(over) + ' ' + action);
+        assert.deepEqual(S.ops, [`get ${RAW_Q1}`], 'only the guard\'s read: no quote, request, approval or thread write, no notification');
+        assert.equal(S.updates.length, 0); assert.equal(S.notes.length, 0); assert.equal(S.threads.length, 0);
+        assert.ok(S.toasts.some((t) => msg.test(t.m)), 'the reason is said in a toast');
+      }
+    }
+    const M = makeApp({ docs: {} });
+    assert.deepEqual(plain(await D(M)), { ok: false, reason: 'missing' }); assert.deepEqual(M.ops, [`get ${RAW_Q1}`]);
+    assert.deepEqual(plain(await D(M, { quoteId: '' })), { ok: false, reason: 'missing' }); assert.deepEqual(M.ops, [`get ${RAW_Q1}`], 'no id: not even a read');
+    assert.ok(M.toasts.every((t) => /Quote not found/.test(t.m)));
+  });
+
+  it('the guard accepts the two spellings of "waiting": approvalStatus pending_review OR status pending_approval', async () => {
+    for (const over of [{ status: 'x', approvalStatus: 'pending_review' }, { status: 'pending_approval', approvalStatus: undefined }]) {
+      const S = makeApp({ docs: base(over) });
+      assert.deepEqual(plain(await D(S)), { ok: true }, JSON.stringify(over));
+      assert.equal(quoteWrites(S).length, 1);
+    }
+  });
+
+  it('two decisions started together (a double tap, two devices on one tab) write exactly ONE quote update; the second is "busy" and says nothing; the guard is released afterwards', async () => {
+    const S = makeApp({ docs: base() });
+    const [a, b] = await Promise.all([D(S), D(S, { action: 'return', notes: 'late' })]);
+    assert.deepEqual([plain(a), plain(b)], [{ ok: true }, { ok: false, reason: 'busy' }]);
+    assert.equal(quoteWrites(S).length, 1); assert.equal(S.notes.length, 1);
+    assert.deepEqual(S.store.get(RAW_Q1).approvalStatus, 'approved');
+    assert.ok(!S.toasts.some((t) => /busy/i.test(t.m)), 'busy is silent');
+    // after the first finished the quote is no longer pending: a third call is refused by the STATE guard, not by a stuck in-flight entry
+    assert.equal(plain(await D(S)).reason, 'state');
+    // the guard is released even when the decision fails: the retry after a failed write is possible
+    const F = makeApp({ docs: base() });
+    F.ctx.db = { collection: () => ({ doc: () => ({ get: async () => { throw new Error('network down'); } }) }) };
+    assert.equal(plain(await D(F)).reason, 'error');
+    const F2 = makeApp({ docs: base() }); await D(F2); assert.equal(plain(await D(F2)).reason, 'state');
+  });
+
+  it('offline: no read and no write, a toast, reason "offline"', async () => {
+    const S = makeApp({ docs: base(), offline: true });
+    assert.deepEqual(plain(await D(S)), { ok: false, reason: 'offline' });
+    assert.deepEqual(S.ops, []); assert.equal(S.updates.length, 0);
+    assert.ok(S.toasts.some((t) => t.t === 'error' && /You are offline\. Connect to approve or return a quote\./.test(t.m)));
+  });
+
+  it('the thread entry: kind "approved" / "returned", the notes as its text, on this quote; a rejected or throwing thread write never stops the notification, the audit or the success toast', async () => {
+    const S = makeApp({ docs: base() });
+    await D(S, { action: 'return', notes: 'make it 2 sinks' });
+    assert.equal(S.threads.length, 1);
+    const t = S.threads[0];
+    assert.deepEqual([t.coll, t.quoteId, t.kind, t.text, t.uid, t.role, t.name], ['bk_quotes', Q1, 'returned', 'make it 2 sinks', 'u-pres', 'president', 'The President']);
+    assert.equal(t.q.createdBy, AGENT, 'the entry is keyed to the quote doc as it was read (its creator, its root)');
+    const A = makeApp({ docs: base() }); await D(A, { notes: 'looks fine' });
+    assert.deepEqual([A.threads[0].kind, A.threads[0].text], ['approved', 'looks fine']);
+    const E = makeApp({ docs: base() }); await D(E); assert.equal(E.threads[0].text, '', 'no note: an empty entry (the rules allow it for returned / approved)');
+    for (const thread of ['reject', 'throw']) {
+      const X = makeApp({ docs: base(), thread });
+      assert.deepEqual(plain(await D(X)), { ok: true }, thread);
+      assert.equal(X.notes.length, 1, thread + ': the agent is still told');
+      assert.equal(X.audits.length, 1); assert.ok(X.toasts.some((x) => x.t === 'success' && /approved and filed/.test(x.m)));
+      assert.ok(X.ops.indexOf('thread approved') < X.ops.indexOf('notify'), 'the thread entry comes before the notification');
+    }
+  });
+
+  it('the notification: to the agent (agentId, else the quote\'s creator), never to oneself, with the review-page link; its text is the wording the three copies shared', async () => {
+    const S = makeApp({ docs: base() });
+    await D(S);
+    assert.equal(S.notes.length, 1);
+    const n = S.notes[0];
+    assert.equal(n.uid, AGENT);
+    assert.deepEqual([n.n.title, n.n.icon, n.n.type, n.n.link], ['✅ Quote Approved!', '✅', 'quote_approved', 'quote-approval/bk.' + Q1]);
+    assert.equal(n.n.body, 'Quotation "BK-ML-WB-261028-001" for Juan Dela Cruz was approved and filed.');
+    const R = makeApp({ docs: base() }); await D(R, { action: 'return', notes: 'make it 2 sinks' });
+    assert.deepEqual([R.notes[0].n.title, R.notes[0].n.icon, R.notes[0].n.type, R.notes[0].n.link], ['↩ Quote Returned for Revision', '✎', 'quote_returned', 'quote-approval/bk.' + Q1]);
+    assert.equal(R.notes[0].n.body, '"BK-ML-WB-261028-001" for Juan Dela Cruz was reviewed and returned. Notes: make it 2 sinks Please revise and re-submit.');
+    // no agentId given: the quote's own creator; the President's own quote: nobody is notified
+    const C = makeApp({ docs: base() }); await D(C, { agentId: undefined }); assert.equal(C.notes[0].uid, AGENT);
+    const M = makeApp({ docs: base({ createdBy: 'u-pres' }) }); assert.deepEqual(plain(await D(M, { agentId: undefined })), { ok: true }); assert.equal(M.notes.length, 0, 'the signed-in user is never notified of his own decision');
+    const M2 = makeApp({ docs: base() }); await D(M2, { agentId: 'u-pres' }); assert.equal(M2.notes.length, 0);
+    const N = makeApp({ docs: base({ createdBy: '' }) }); await D(N, { agentId: '' }); assert.equal(N.notes.length, 0, 'nobody to tell');
+    // a Brilliant Steel quote links to its own prefix; the old list link is only the fallback for a ref that cannot be built
+    const B = makeApp({ docs: { 'bs_quotes/pq123456': quoteDoc({ createdBy: AGENT, sourceRef: null }), 'approval_requests/ar1': { type: 'bs_quote', quoteId: 'pq123456', status: 'pending' } } });
+    await D(B, { coll: 'bs_quotes', quoteId: 'pq123456' }); assert.equal(B.notes[0].n.link, 'quote-approval/bs.pq123456');
+    const Z = makeApp({ docs: { 'bs_quotes/ab': quoteDoc({ createdBy: AGENT, sourceRef: null }) } });
+    await D(Z, { coll: 'bs_quotes', quoteId: 'ab' }); assert.equal(Z.notes[0].n.link, 'bs-quotations', 'an id the link pattern refuses falls back to the list page');
+    // the notification body stays inside the 2000 characters firestore.rules allows, whatever the notes are
+    const L = makeApp({ docs: base() }); await D(L, { action: 'return', notes: 'x'.repeat(5000) }); assert.ok(L.notes[0].n.body.length <= 2000);
+  });
+
+  it('the decision, audit and caches: edits ride in the one update (never overriding the state), the audit says edited, both caches drop, the success toast is the one each caller had', async () => {
+    const S = makeApp({ docs: base() });
+    await D(S, { edits: { clientName: 'J. Dela Cruz', total: 91000, status: 'hacked', approvalStatus: 'hacked' }, notes: 'ok' });
+    const p = lastPatch(S, RAW_Q1);
+    assert.deepEqual([p.status, p.approvalStatus, p.total, p.clientName, p.presidentNotes], ['filed', 'approved', 91000, 'J. Dela Cruz', 'ok'], 'the state fields win over anything in edits');
+    assert.deepEqual(plain(p.approvedAt), { __serverTimestamp: true }); assert.equal(p.approvedBy, 'u-pres');
+    assert.equal(S.updates.filter((u) => u.key === RAW_Q1).length, 1, 'one update call');
+    assert.deepEqual(plain(S.audits.map((a) => a.slice(0, 4))), [['update', 'quote', Q1, { approved: true, edited: true }]]);
+    assert.deepEqual(S.invalidated.filter((k) => /all-quotes|approvals-pending/.test(k)).sort(), ['all-quotes', 'approvals-pending:approval_requests-pending']);
+    assert.match(S.notes[0].n.body, /for J\. Dela Cruz/, 'the edited client name is the one the agent reads');
+    assert.ok(S.toasts.some((t) => t.t === 'success' && t.m === 'Quote approved and filed!'));
+    const Q = makeApp({ docs: base() }); await D(Q, { action: 'return', notes: 'redo' });
+    assert.ok(Q.toasts.some((t) => t.t === 'error' && t.m === 'Quote returned.'), 'the return keeps its (error-toned) toast');
+    const T = makeApp({ docs: base() }); await D(T, { toastOk: false }); assert.ok(!T.toasts.some((t) => t.t === 'success'), 'toastOk:false: the caller says it itself');
+    const BS = makeApp({ docs: { 'bs_quotes/pq123456': quoteDoc({ createdBy: AGENT, sourceRef: null }) } });
+    let bsDropped = 0; BS.win.invalidateBsQuotesCache = () => { bsDropped++; };
+    await D(BS, { coll: 'bs_quotes', quoteId: 'pq123456' }); assert.equal(bsDropped, 1, 'a Brilliant Steel decision drops its quote cache');
+  });
+
+  it('a failure after the guard (a refused write) is a toast "Failed: …" and reason "error" — never a throw — and a failing thread write is NOT one of them', async () => {
+    const S = makeApp({ docs: base() });
+    S.ctx.db = { collection: (c) => ({ doc: (id) => ({ get: async () => ({ exists: true, data: () => plain(quoteDoc({ createdBy: AGENT })) }), update: async () => { throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }); } }) }) };
+    const r = plain(await D(S));
+    assert.deepEqual(r, { ok: false, reason: 'error' });
+    assert.ok(S.toasts.some((t) => t.t === 'error' && /^Failed: Missing or insufficient permissions\./.test(t.m)));
+    assert.equal(S.notes.length, 0, 'nobody is told of a decision that was not saved');
+  });
+
+  it('the builder\'s review bar: a decision that is taken ends on the review page of that quote; one that is refused (already decided, offline) keeps the President in the builder', async () => {
+    const ctxArg = { quoteId: Q1, partnerUid: AGENT, quoteNumber: 'BK-ML-WB-261028-001', clientName: 'Juan Dela Cruz', quoteColl: 'bk_quotes' };
+    const ok = makeApp({ docs: base(), builderState: { clientName: 'Juan Dela Cruz', items: [], editableState: {} } });
+    await ok.bar(ctxArg, 'approve');
+    assert.deepEqual(plain(ok.navs), [['quote-approval', { subtab: 'bk.' + Q1 }]]);
+    assert.ok(ok.toasts.some((t) => t.t === 'success' && t.m === 'Approved with edits + submitter notified'));
+    const ret = makeApp({ docs: base(), builderState: {}, returnNotes: 'redo' }); await ret.bar(ctxArg, 'return');
+    assert.ok(ret.toasts.some((t) => t.t === 'success' && t.m === 'Edited & returned')); assert.deepEqual(plain(ret.navs), [['quote-approval', { subtab: 'bk.' + Q1 }]]);
+    assert.equal(lastPatch(ret, RAW_Q1).presidentNotes, 'redo');
+    const done = makeApp({ docs: base({ status: 'filed', approvalStatus: 'approved' }), builderState: {} }); await done.bar(ctxArg, 'approve');
+    assert.deepEqual(done.navs, [], 'already decided: stay in the builder'); assert.equal(done.updates.length, 0);
+    assert.ok(done.toasts.some((t) => /already approved/.test(t.m)));
+    const off = makeApp({ docs: base(), builderState: {}, offline: true }); await off.bar(ctxArg, 'approve'); assert.deepEqual(off.navs, []); assert.equal(off.updates.length, 0);
+    const empty = makeApp({ docs: base(), builderState: {} }); await empty.bar(ctxArg, 'approve');
+    assert.equal(lastPatch(empty, RAW_Q1).clientName, 'Juan Dela Cruz', 'the context\'s client name stands in when the builder has none');
   });
 });

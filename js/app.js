@@ -2238,6 +2238,10 @@ function renderQuoteBuilderIframe() {
   // President-review mode: editing a submitted quote to hand it back. The edits
   // are saved to the SAME (submitter-owned) quote doc, not a new president copy.
   const reviewCtx = window._qbReviewContext; window._qbReviewContext = null;
+  // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 — read-once, like reviewCtx: the note of a returned quote (reopenQuoteFromDoc), and a fresh page forgets the quote the previous
+  // builder page sent for approval (the bridge sets _qbLastApproval; the builder's Pending Approval badge asks for it again).
+  const returnNote = window._qbReturnNote; window._qbReturnNote = null;
+  window._qbLastApproval = null;
   const reviewBanner = reviewCtx ? `
     <div id="qb-review-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,159,10,.12),transparent);border:1.5px solid var(--warning,#ff9f0a);border-radius:12px;padding:10px 14px;margin-bottom:10px">
       <div style="flex:1;min-width:180px;font-size:12px"><strong>Reviewing ${escHtml(reviewCtx.quoteNumber||'this quote')}</strong> for ${escHtml(reviewCtx.clientName||'')} — edit the line items, then save it back.</div>
@@ -2260,11 +2264,22 @@ function renderQuoteBuilderIframe() {
   const reopenStrip = (!reviewCtx && reopenState)
     ? `<div style="font-size:12px;font-weight:600;color:var(--text-muted);padding:6px 12px">${emojiIcon('🧮',14)} Quote Builder — ${reopenStripLabel}</div>` : '';
   document.body.classList.toggle('qb-desktop', !isMobile);
+  // §8.2 — "Returned by the President: <note>" with a link to the whole thread. Not while the President is reviewing (reviewCtx has its own bar); on a phone a toast instead.
+  const showReturnNote = !!(returnNote && !reviewCtx);
+  const returnText = showReturnNote ? String(returnNote.text || '') : '';
+  const returnStrip = (showReturnNote && !isMobile) ? `
+    <div id="qb-return-note" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,159,10,.12),transparent);border:1.5px solid var(--warning,#ff9f0a);border-radius:12px;padding:10px 14px;margin-bottom:10px">
+      <div style="flex:1;min-width:180px;font-size:12px"><strong>Returned by the President</strong>${returnText ? ': ' + escHtml(returnText) : ''}</div>
+      ${returnNote.ref ? '<button type="button" class="btn-secondary btn-sm" id="qb-return-note-open">See all comments</button>' : ''}
+    </div>` : '';
   c.innerHTML = `
     ${reviewBanner}
+    ${returnStrip}
     ${isMobile ? '' : reopenStrip}
     <iframe id="qb-frame" src="${qbSrc}" allow="print"></iframe>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+  document.getElementById('qb-return-note-open')?.addEventListener('click', () => navigateTo('quote-approval', { subtab: returnNote.ref }));
+  if (showReturnNote && isMobile) Notifs.showToast('Returned by the President' + (returnText ? ': ' + returnText : ''), 'info');
   // Enter/exit fullscreen fresh on every render — navigateTo() always tears
   // down any previous Overlay entry (Overlay.clearAll()) before this runs, so
   // there's never a stale 'qb-fullscreen' entry left on the stack to double up.
@@ -2314,6 +2329,10 @@ function requestBuilderState(frame, timeoutMs = 4000) {
 
 // Save the president's edits back onto the submitter's OWN quote doc (not a new copy),
 // then approve it or return it for revision, and notify the submitter.
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §4.2 — the decision itself is decideQuoteApproval (js/screens/approvals.js: the state guard, the single quote update, the website request
+// sync, the approval request, the thread entry, the notification with the review-page link). This function only reads the builder's edited state, asks for the notes of a
+// return, and hands the edits over as `edits` (the same field set it always wrote, minus the state / stamp / presidentNotes fields the decision writes itself). A refused
+// decision (already decided, offline, a failed write) keeps the President in the builder; a taken one ends on the review page of the quote.
 async function saveReviewedPartnerQuote(ctx, action) {
   const frame = document.getElementById('qb-frame');
   let payload;
@@ -2322,7 +2341,7 @@ async function saveReviewedPartnerQuote(ctx, action) {
   const notes = action === 'return'
     ? ((await promptDialog({message:'Notes for the submitter (what changed / what to confirm)?', multiline:true})) || '')
     : '';
-  const update = {
+  const edits = {
     clientName:    payload.clientName || ctx.clientName || '',
     clientCompany: payload.clientCompany || '',
     clientAddress: payload.clientAddress || '',
@@ -2336,31 +2355,14 @@ async function saveReviewedPartnerQuote(ctx, action) {
     editedAt: firebase.firestore.FieldValue.serverTimestamp(),
     editedBy: currentUser.uid,
   };
-  if (action === 'approve') {
-    Object.assign(update, window.quoteStateFields('approved'));
-    update.approvedAt = firebase.firestore.FieldValue.serverTimestamp(); update.approvedBy = currentUser.uid;
-  } else {
-    Object.assign(update, window.quoteStateFields('needs_revision'));
-    update.presidentNotes = notes;
-    update.returnedAt = firebase.firestore.FieldValue.serverTimestamp(); update.returnedBy = currentUser.uid;
-  }
-  try {
-    await db.collection(ctx.quoteColl || 'bs_quotes').doc(ctx.quoteId).update(update);
-    await db.collection('approval_requests').where('quoteId','==',ctx.quoteId).get()
-      .then(s => Promise.all(s.docs.map(d => d.ref.update({ status: action === 'approve' ? 'approved' : 'returned' }))))
-      .catch(()=>{});
-    dbCacheInvalidate && dbCacheInvalidate('all-quotes');
-    dbCacheInvalidate && dbCacheInvalidate('approvals-pending');
-    if (ctx.partnerUid) {
-      const quoteLink = (ctx.quoteColl === 'bk_quotes') ? 'bk-quotations' : 'bs-quotations';
-      await Notifs.send(ctx.partnerUid, action === 'approve'
-        ? { title:'✅ Quote Approved!', body:`The president edited and approved "${ctx.quoteNumber}" for ${update.clientName}. It is now filed.`, icon:'✅', type:'quote_approved', link: quoteLink }
-        : { title:'↩ Quote Revised & Returned', body:`The president edited "${ctx.quoteNumber}" for ${update.clientName} and returned it.${notes?' Notes: '+notes:''} Open it to review the changes.`, icon:'✎', type:'quote_returned', link: quoteLink }).catch(()=>{});
-    }
-    window.logAudit && window.logAudit('update','quote',ctx.quoteId,{ presidentEdited:true, action });
-    Notifs.success(action === 'approve' ? 'Approved with edits + submitter notified' : 'Edited & returned');
-    navigateTo('approvals');
-  } catch (ex) { Notifs.showToast('Save failed: '+(ex.message||ex.code), 'error'); }
+  const coll = ctx.quoteColl || 'bs_quotes';
+  try { await window.ensureScript('js/screens/approvals.js'); }
+  catch (e) { Notifs.showToast('Could not load the approval tools — try again', 'error'); return; }
+  const r = await window.decideQuoteApproval({ coll, quoteId: ctx.quoteId, action, notes, edits,
+    agentId: ctx.partnerUid, quoteNumber: ctx.quoteNumber, clientName: edits.clientName, toastOk: false });
+  if (!r || !r.ok) return;
+  Notifs.success(action === 'approve' ? 'Approved with edits + submitter notified' : 'Edited & returned');
+  navigateTo('quote-approval', { subtab: window.quoteApprovalRefOf(coll, ctx.quoteId) });
 }
 
 // QUOTE-COSTS (owner ruling 2026-09-21) — re-attach the privately-stored
@@ -2440,6 +2442,10 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
     } catch (_) {}
     await graftQuoteCosts(collection, id, window._qbReopenState);   // QUOTE-COSTS
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
+    // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §8.2 — a quote the President RETURNED reopens with his note in view: renderQuoteBuilderIframe reads this once (a strip above the
+    // builder on a desktop, a toast on a phone, where the builder is full screen and hides shell strips). Any other quote clears it, so a note never follows a different quote.
+    window._qbReturnNote = (q.approvalStatus === 'needs_revision')
+      ? { text: String(q.presidentNotes || '').slice(0, 300), ref: window.quoteApprovalRefOf(collection, id) } : null;
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) {
     // QUOTE-BUILDER-CONFIGURATOR-SPEC §8.3: the Quotes card on a request / brief offers Open on every quote filed from it, but a filed quote
@@ -3043,6 +3049,7 @@ async function navigateTo(page, opts) {
     case 'departments':      renderDepartments(); break;
     case 'analytics':        renderAnalytics(); break;
     case 'approvals':        renderApprovals(currentUser); break;
+    case 'quote-approval':   window.renderQuoteApproval(subtab); break;   // QUOTE-APPROVAL-LINK-SPEC-2026-11-20: the per-quote review page (js/screens/quote-approval.js, lazy)
     case 'team':             renderTeam(); break;
     case 'progress':         renderProgressReports(); break;
     case 'bs-quote-builder': renderQuoteBuilderIframe(); break;
@@ -5117,6 +5124,16 @@ function _qbCleanEstimateCheck(v) {
   return { low, high, comparable, inRange: v.inRange === true, pctOff: num(v.pctOff) || 0, reason: typeof v.reason === 'string' ? v.reason.slice(0, 500) : '' };
 }
 
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §3.1 — why a quote was sent for approval, as the builder worded it (envelope `approvalWhy`, NOT part of the payload).
+// Pure and total: only the three known reason codes survive, in a fixed order and once each; the sentence is plain text cut at 600; `ticked` is a strict boolean.
+// Anything that is not a plain object is null (a builder page still cached from before this feature sends nothing).
+function _qbCleanApprovalWhy(w) {
+  if (!w || typeof w !== 'object' || Array.isArray(w)) return null;
+  const ORDER = ['review', 'below-standard', 'approve-all'];
+  const got = Array.isArray(w.reasons) ? w.reasons : [];
+  return { reasons: ORDER.filter(c => got.indexOf(c) >= 0), text: String(w.text == null ? '' : w.text).slice(0, 600), ticked: w.ticked === true };
+}
+
 // §8.1 — record a filed / sent-for-approval / updated quote on the request or brief it came from, and move that request to 'quoted'.
 //   sourceRef  the (untrusted) link the builder posted        info  { docId, coll, quoteNumber, version, total, status, byName }
 //   -> true when the request was updated; false for anything else. NEVER throws and never blocks a filing: a request that is gone
@@ -5211,6 +5228,17 @@ window.addEventListener('message', async (e) => {
   if (type === 'QB_OPEN_SOURCE') {
     try { await window.openQuoteSource(payload.sourceRef); }
     catch (err) { console.warn('[QB bridge] QB_OPEN_SOURCE failed', err); }
+    return;
+  }
+
+  // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.1 — the "Pending Approval" badge of the builder asks for the approval link again. No write. The bridge remembers the quote it
+  // just sent for approval on THIS builder page (_qbLastApproval); a page that did not send one (a reopened pending quote) may name its own doc, which showQuoteApprovalLink
+  // validates like any other (collection allowlist, id pattern). Anything else is told where to find the link.
+  if (type === 'QB_SHOW_APPROVAL_LINK') {
+    const last = window._qbLastApproval;
+    const fromPayload = (payload.docId && window.QUOTE_COLLECTIONS.includes(payload.collection)) ? { coll: payload.collection, id: String(payload.docId), quoteNumber: String(payload.quoteNumber || ''), clientName: String(payload.clientName || '') } : null;
+    const info = last || fromPayload;
+    if (info) window.showQuoteApprovalLink(info); else Notifs.showToast('Open this quote from the Quotes list to copy its approval link.', 'info');
     return;
   }
 
@@ -5612,6 +5640,8 @@ window.addEventListener('message', async (e) => {
       // handlers update the right doc.
       Object.assign(data, window.quoteStateFields('pending_approval'));
       data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
+      // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §3.1 — why it went for approval (this branch only: QUOTE_FILED and QUOTE_UPDATE never write the field).
+      data.approvalWhy = _qbCleanApprovalWhy(e.data.approvalWhy);
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
@@ -5632,12 +5662,23 @@ window.addEventListener('message', async (e) => {
         status: 'pending',
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
+      // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.1 — the first entry of this quote's approval thread (the builder's own sentence says why it was sent), written
+      // best-effort: a refused write (rules not deployed yet) is logged and never fails the request for approval.
+      const approvalRef = window.quoteApprovalRefOf(coll, docRef.id);
+      try {
+        const sent = await window.QuoteThread.add({ coll, quoteId: docRef.id, q: { ...data, rootQuoteId: data.rootQuoteId || docRef.id }, kind: 'submitted',
+          text: (data.approvalWhy && data.approvalWhy.text) || '', uid: currentUser.uid, name: agentName, role: currentRole });
+        if (sent && sent.ok === false) console.warn('[QB bridge] approval thread entry was not saved (non-blocking)', sent.error);
+      } catch (thErr) { console.warn('[QB bridge] approval thread entry failed (non-blocking)', thErr); }
       await Notifs.sendToOwner({
         title: '📤 Quote Awaiting Approval',
         body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.`,
-        icon: '📤', type: 'quote_review_request', link: 'approvals'
+        icon: '📤', type: 'quote_review_request', link: approvalRef ? 'quote-approval/' + approvalRef : 'approvals'
       });
+      // The shell owns the link (D5): the doc id exists only here. Remembered for the builder's "Pending Approval" badge (QB_SHOW_APPROVAL_LINK).
+      window._qbLastApproval = { coll, id: docRef.id, quoteNumber: data.fileName, clientName: data.clientName };
       if (typeof Notifs?.success === 'function') Notifs.success('Sent for approval!');
+      try { window.showQuoteApprovalLink(window._qbLastApproval); } catch (linkErr) { console.warn('[QB bridge] approval link modal failed (non-blocking)', linkErr); }
     }
   } catch(err) {
     console.error('[QB bridge]', err);
@@ -5645,6 +5686,50 @@ window.addEventListener('message', async (e) => {
     try { Notifs.showToast('The quote was NOT saved: ' + ((err && (err.message || err.code)) || 'unknown error') + '. Try again, or tell Neil.', 'error'); } catch (_) {}
   }
 });
+
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §5.1 — the "Approval link" window: shown right after Send for approval (the bridge above), from the builder's Pending Approval
+// badge (QB_SHOW_APPROVAL_LINK) and from the Quotes list cards (window.bindQuoteApprovalButtons, js/screens/sales.js). info = { coll, id, quoteNumber, clientName }.
+// The link comes from window.quoteApprovalUrl (js/config.js: collection allowlist + id pattern, '' for anything else) and the ready-to-paste message carries NO amount
+// (D11: the page shows it, and a chat preview stays free of prices). The shell owns this window, not the builder iframe (D5): only the shell knows the new doc id,
+// one window serves both companies and both builder modes, and navigator.share runs in the top window. Every id is looked up inside the modal's own node.
+// "Open review page" does NOT call closeModal() first: closeModal() is history.back(), which would land after navigateTo's own history write and take the user back
+// to the builder; navigateTo tears the open overlays down itself (Overlay.clearAll).
+window.showQuoteApprovalLink = function (info) {
+  info = info || {};
+  const url = window.quoteApprovalUrl(info.coll, info.id);
+  if (!url) { Notifs.showToast('This quote has no approval link.', 'error'); return; }
+  const ref = window.quoteApprovalRefOf(info.coll, info.id);
+  const no = String(info.quoteNumber || '').trim(), client = String(info.clientName || '').trim();
+  const msg = 'Quote ' + no + ' for ' + (client || 'the client') + ' needs your approval: ' + url;
+  const canShare = !!(window.navigator && typeof navigator.share === 'function');
+  const fld = 'width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px';
+  openModal('Approval link', `
+    <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Sent to the President for approval. <strong>${escHtml(no || 'This quote')}</strong>${client ? ' for <strong>' + escHtml(client) + '</strong>' : ''}.</p>
+    <label for="qal-url" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Approval link</label>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="qal-url" readonly value="${escHtml(url)}" style="flex:1;min-width:0;${fld}" onclick="this.select()"/>
+      <button type="button" class="btn-primary btn-sm" id="qal-copy" style="white-space:nowrap">Copy link</button>
+    </div>
+    ${canShare ? '<div style="margin-top:10px"><button type="button" class="btn-secondary btn-sm" id="qal-share">Share…</button></div>' : ''}
+    <label for="qal-msg" style="font-size:12px;font-weight:600;display:block;margin:14px 0 4px">Ready to paste</label>
+    <textarea id="qal-msg" readonly rows="3" style="${fld};resize:vertical" onclick="this.select()">${escHtml(msg)}</textarea>
+    <div style="margin-top:8px"><button type="button" class="btn-secondary btn-sm" id="qal-copy-msg">Copy message</button></div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:14px">Send this link to the President by Messenger or Viber. He opens it, sees the whole quote, and can approve, return or comment.</p>
+  `, `<button type="button" class="btn-primary" id="qal-open">Open review page</button><button type="button" class="btn-secondary" id="qal-done">Done</button>`);
+  const root = document.getElementById('modal-box') || document;
+  const copy = async (inp, btn, label) => {
+    try { await navigator.clipboard.writeText(inp.value); } catch (_) { try { inp.select(); document.execCommand('copy'); } catch (__) {} }
+    const old = btn.textContent; btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = old; }, 1600);
+    Notifs.showToast(label, 'success');
+  };
+  root.querySelector('#qal-copy')?.addEventListener('click', () => copy(root.querySelector('#qal-url'), root.querySelector('#qal-copy'), 'Approval link copied'));
+  root.querySelector('#qal-copy-msg')?.addEventListener('click', () => copy(root.querySelector('#qal-msg'), root.querySelector('#qal-copy-msg'), 'Message copied'));
+  root.querySelector('#qal-share')?.addEventListener('click', async () => {
+    try { await navigator.share({ title: 'Quote ' + no + ' for approval', text: msg, url }); } catch (_) { /* cancelled — ignore */ }
+  });
+  root.querySelector('#qal-open')?.addEventListener('click', () => { navigateTo('quote-approval', { subtab: ref }); });
+  root.querySelector('#qal-done')?.addEventListener('click', () => { closeModal(); });
+};
 
 // QUOTE-TEMPLATES-SPEC.md — native picker for the Sales quote-template
 // library (quote_templates collection). Opened from the QUOTE_REQUEST_TEMPLATES

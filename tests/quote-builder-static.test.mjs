@@ -252,12 +252,20 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 51: the newest What\'s New entry is version 51 (the Barro Kitchens configurators in the live builder, dated the day they open), then 50 (Preview\'s Back to the form stays on screen, owner Q70); entry 49 (the timeline rule, quotations "as issued", the printed page tail), 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
+  it('TUTORIAL_VERSION is 52: the newest What\'s New entry is version 52 (the approval link to the quote itself, QUOTE-APPROVAL-LINK-SPEC-2026-11-20), then 51 (the Barro Kitchens configurators in the live builder, dated the day they open), then 50 (Preview\'s Back to the form stays on screen, owner Q70); entry 49 (the timeline rule, quotations "as issued", the printed page tail), 48 (the selling document) and 47 (the 316 percentage), 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 52);
-    const wn = b.plain('WHATS_NEW');
-    // 52 — owner 2026-11-20: the standard warranty is 12 months (shown with the configurators); the rest of this test reads from 51 down
-    assert.equal(wn[0].ver, 52); assert.ok(/12-month service warranty/.test(wn[0].items.join(' '))); assert.equal(/₱\s*\d|\bpesos?\b/i.test(wn[0].items.join(' ')), false); wn.shift();
+    assert.equal(b.run('TUTORIAL_VERSION'), 53);
+    const wn52 = b.plain('WHATS_NEW');
+    assert.equal(wn52[0].ver, 53, 'owner 2026-11-20: the 12-month warranty note is the newest entry'); assert.equal(wn52[0].kc, true); wn52.shift();
+    // 52 — QUOTE-APPROVAL-LINK-SPEC-2026-11-20: Send for approval gives a link to the quote itself. One bullet, plain user language, no figure; held like 51 until the configurators are on (kc:true: Addendum 2 B5).
+    assert.equal(wn52[0].ver, 52);
+    assert.equal(wn52[0].date, '2026-11-20');
+    assert.equal(wn52[0].kc, true);
+    assert.equal(wn52[0].items.length, 1);
+    for (const must of ['Send for approval now gives you a link to the quote itself', 'the President opens it, sees every line', 'approve it, return it with a note, or leave a comment', 'Approval link button on the Quotes list']) assert.ok(wn52[0].items[0].includes(must), `What's New 52 does not say: ${must}`);
+    assert.equal(/prototype/i.test(wn52[0].items[0]), false);
+    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(wn52[0].items[0]), false, 'What\'s New 52 states no peso figure');
+    const wn = wn52.slice(1);   // everything below 52 is what this test has always pinned, at the indexes it has always used
     // 51 — the configurators (specs/BK-LIVE-INTEGRATION-SPEC-2026-11-19.md): one bullet per change, in plain user language, no figure, no word "prototype"; the date is the day they open
     assert.equal(wn[0].ver, 51);
     assert.equal(wn[0].date, '2026-11-20');

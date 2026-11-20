@@ -123,7 +123,7 @@ describe('1 · the app kit: an inert <template> holding exactly what the app nee
     for (const s of kitScripts) if (!/^https:/.test(s.attrs.src)) assert.equal(s.attrs.src.split('?v=')[1], sheets[0].split('v=')[1], `${s.attrs.src}: every local kit script carries the stylesheets' ?v= (the hook rewrites all of them)`);
     const hints = kitLinks.filter((l) => l.attrs.rel !== 'stylesheet').map((l) => `${l.attrs.rel} ${l.attrs.href}`);
     assert.deepEqual(hints, ['preconnect https://www.gstatic.com', 'preconnect https://firestore.googleapis.com', 'preconnect https://firebasestorage.googleapis.com',
-      'preconnect https://cdn.jsdelivr.net', 'dns-prefetch https://unpkg.com', 'preload icons/barro-kitchens.png']);
+      'preconnect https://cdn.jsdelivr.net', 'dns-prefetch https://unpkg.com', 'preload icons/barro-industries-horizontal.png']);   // 2026-11-20: the logo every app screen now shows (was the 675 KB round BK logo)
     for (const l of kitLinks.filter((x) => x.attrs.rel === 'preconnect')) assert.ok('crossorigin' in l.attrs, `${l.attrs.href}: the app's own preconnects were crossorigin`);
     const pre = kitLinks.find((l) => l.attrs.rel === 'preload');
     assert.equal(pre.attrs.as, 'image');
@@ -206,7 +206,7 @@ describe('2 · the head script that writes the kit: every view except "site", an
       if (!env.noMatchMedia) { sandbox.matchMedia = mm; sandbox.window.matchMedia = mm; }
       vm.runInNewContext(decisionSrc, sandbox);
       vm.runInNewContext(writerSrc, sandbox);
-      return { view: attrs['data-view'], wrote: writes.length };
+      return { view: attrs['data-view'], wrote: writes.length, wantLogin: sandbox.window._wantLogin === true };
     }
     const CASES = [
       [{}, 'site', 0], [{ hash: '#services' }, 'site', 0], [{ hash: '#/tasks' }, 'site', 0], [{ hash: '#/dashboard' }, 'site', 0],
@@ -214,8 +214,13 @@ describe('2 · the head script that writes the kit: every view except "site", an
       [{ modes: ['standalone'] }, 'boot', 1], [{ modes: ['fullscreen'] }, 'site', 0], [{ modes: ['fullscreen'], hint: true }, 'site', 0], [{ modes: ['fullscreen'], seenApp: true }, 'boot', 1], [{ modes: ['minimal-ui'] }, 'boot', 1], [{ modes: ['window-controls-overlay'] }, 'boot', 1],
       [{ navStandalone: true }, 'boot', 1], [{ modes: ['standalone'], hash: '#login' }, 'boot', 1],
       [{ lsThrows: true }, 'boot', 1], [{ mmThrows: true }, 'boot', 1], [{ noMatchMedia: true }, 'boot', 1],
+      // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §2.4: a quote approval link opened signed out is the SIGN-IN view (the kit is written, the hash is kept), not the website; with a session hint the app boots
+      [{ hash: '#/quote-approval/bk.Abc123XYZ' }, 'login', 1], [{ hash: '#/quote-approval/bk.Abc123XYZ', hint: true }, 'boot', 1],
     ];
-    for (const [env, view, wrote] of CASES) assert.deepEqual(both(env), { view, wrote }, JSON.stringify(env));
+    for (const [env, view, wrote] of CASES) { const r = both(env); assert.deepEqual({ view: r.view, wrote: r.wrote }, { view, wrote }, JSON.stringify(env)); }
+    assert.equal(both({ hash: '#/quote-approval/bk.Abc123XYZ' }).wantLogin, true, 'the approval link asks for the sign-in screen (window._wantLogin), so the hash survives until the user has signed in');
+    assert.equal(both({ hash: '#/quote-approval/bk.Abc123XYZ', hint: true }).wantLogin, true);
+    for (const hash of ['#/tasks', '#/quote-approvals/bk.Abc123XYZ', '#/quote-approval', '#quote-approval/bk.Abc123XYZ']) assert.deepEqual(both({ hash }), { view: 'site', wrote: 0, wantLogin: false }, `${hash} is not an approval link: signed out it is the website`);
   });
 });
 
@@ -257,15 +262,14 @@ describe('3 · what the website view fetches: site.js, fonts and images — no a
     assert.ok(!/serviceWorker/.test(outside), 'an inline script in the website view touches the service worker');
   });
 
-  it('keeps the three hidden logo images (splash, sign-in, top bar) lazy, so the 848 KB PNG is not fetched for a visitor who never sees them — and the app views preload it', () => {
-    const logos = [...html.matchAll(/<img src="icons\/barro-kitchens\.png"[^>]*>/g)].map((m) => m[0]);
-    assert.equal(logos.length, 1);   // owner 2026-11-20: the top bar and the splash now show the horizontal Barro Industries logo (below)
-    for (const t of logos) assert.ok(/\sloading="lazy"/.test(t), `not lazy: ${t.slice(0, 70)}`);
-    assert.deepEqual(logos.map((t) => t.match(/class="([^"]+)"/)[1]), ['login-logo-img']);
-    assert.ok(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="topbar-hlogo" loading="lazy"/.test(html), 'the top bar: the horizontal Barro Industries logo, lazy');
-    assert.ok(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="splash-hlogo" loading="lazy"/.test(html), 'the splash: the horizontal Barro Industries logo, lazy');
-    assert.ok(kitLinks.some((l) => l.attrs.rel === 'preload' && l.attrs.href === 'icons/barro-kitchens.png'));
-    assert.ok(!/barro-kitchens\.png/.test(outside.replace(/<img src="icons\/barro-kitchens\.png"[^>]*>/g, '')), 'another reference to the large logo in the website view');
+  it('keeps the three hidden logo images (splash, sign-in, top bar) lazy, so a website visitor never fetches them — and the app views preload the one file they share', () => {
+    // owner 2026-11-20: all three show the horizontal Barro Industries logo; the round BK logo is on no app screen any more
+    assert.equal([...html.matchAll(/<img src="icons\/barro-kitchens\.png"[^>]*>/g)].length, 0, 'the round BK logo is back on an app screen');
+    const logos = [...html.matchAll(/<img src="icons\/barro-industries-horizontal\.png"[^>]*>/g)].map((m) => m[0]);
+    assert.deepEqual(logos.map((t) => t.match(/class="([^"]+)"/)[1]), ['splash-hlogo', 'login-hlogo', 'topbar-hlogo']);
+    for (const t of logos) assert.ok(/\sloading="lazy"/.test(t), `not lazy: ${t.slice(0, 90)}`);
+    assert.ok(kitLinks.some((l) => l.attrs.rel === 'preload' && l.attrs.href === 'icons/barro-industries-horizontal.png'));
+    assert.ok(!/barro-industries-horizontal\.png/.test(outside.replace(/<img src="icons\/barro-industries-horizontal\.png"[^>]*>/g, '')), 'another reference to the app logo in the website view');
   });
 
   it('hides every static app container in the website view in CSS and in the no-script case — otherwise, without the app stylesheet, the modal / drawer / overlays render as stray text under the footer', () => {

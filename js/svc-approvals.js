@@ -308,3 +308,75 @@
     _REGISTRY: REGISTRY // exposed for tests / introspection only
   };
 })();
+
+// ── Quote approval thread (QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §3) ──────────────────────────────────────────────
+// One document per entry in the TOP-LEVEL collection `quote_comments` (firestore.rules block of the same name), keyed by the revision chain:
+// threadKey = <coll>_<rootQuoteId>. A resubmission after a return creates a NEW quote doc (the builder bridge always `add`s on QUOTE_APPROVAL_REQUESTED),
+// so a subcollection of the quote would strand the thread on the old revision; the chain's root id is the same on every revision. Entries are
+// written by the review page (kind 'comment'), by decideQuoteApproval (js/screens/approvals.js: 'approved' / 'returned') and by the builder bridge
+// (js/app.js: 'submitted'). Reads are get()s, sorted here (no composite index: D8). Nothing here ever throws into a caller.
+window.QuoteThread = {
+  keyOf(coll, q, id) { return coll + '_' + ((q && q.rootQuoteId) || id); },
+  // PURE. o = { coll, quoteId, q, kind, text, uid, name, role } -> the eleven data keys of a thread entry (createdAt is the writer's server timestamp).
+  entry(o) {
+    o = (o && typeof o === 'object') ? o : {};
+    const q = (o.q && typeof o.q === 'object') ? o.q : {};
+    const quoteId = String(o.quoteId == null ? '' : o.quoteId);
+    const KINDS = ['comment', 'returned', 'approved', 'submitted'];
+    return {
+      threadKey: window.QuoteThread.keyOf(o.coll, q, quoteId),
+      coll: String(o.coll == null ? '' : o.coll),
+      quoteId,
+      rootQuoteId: String(q.rootQuoteId || quoteId),
+      quoteNumber: String(q.quoteNumber || (quoteId ? quoteId.slice(-6).toUpperCase() : '')).slice(0, 80),
+      kind: KINDS.indexOf(o.kind) >= 0 ? o.kind : 'comment',
+      text: String(o.text == null ? '' : o.text).trim().slice(0, 2000),
+      authorUid: String(o.uid == null ? '' : o.uid),
+      authorName: String(o.name == null ? '' : o.name).slice(0, 120),
+      authorRole: o.role === 'president' ? 'president' : 'sales',
+      submitterUid: String(q.createdBy || ''),
+    };
+  },
+  // entry + createdAt, then the quote's own preview (approvalThread: what the Quotes list card shows), best-effort. -> { ok, id } | { ok: false, error }
+  async add(o) {
+    try {
+      const e = window.QuoteThread.entry(o);
+      const FV = firebase.firestore.FieldValue;
+      const ref = await db.collection('quote_comments').add({ ...e, createdAt: FV.serverTimestamp() });
+      try {
+        await db.collection(e.coll).doc(e.quoteId).update({
+          'approvalThread.count': FV.increment(1),
+          'approvalThread.lastText': e.text.slice(0, 200),
+          'approvalThread.lastByName': e.authorName,
+          'approvalThread.lastByRole': e.authorRole,
+          'approvalThread.lastAt': FV.serverTimestamp(),
+        });
+      } catch (previewErr) { console.warn('[QuoteThread] the quote\'s thread preview was not updated (non-blocking)', previewErr); }
+      return { ok: true, id: ref.id };
+    } catch (err) {
+      return { ok: false, error: (err && (err.code || err.message)) || String(err) };
+    }
+  },
+  // The entries of the chain, oldest first (an entry whose createdAt is still null, i.e. a pending local write, last). The President, a manager and the secretary read
+  // the whole chain; anyone else only the entries of quotes he submitted (the rule is provable only with the submitterUid filter in the query).
+  async list(coll, q, id) {
+    let ref = db.collection('quote_comments').where('threadKey', '==', window.QuoteThread.keyOf(coll, q, id));
+    if (['president', 'manager', 'secretary'].indexOf(currentRole) < 0) ref = ref.where('submitterUid', '==', currentUser.uid);
+    const snap = await ref.get();
+    const ms = (t) => {
+      if (t == null) return null;
+      if (typeof t === 'number') return t;
+      if (typeof t.toMillis === 'function') return t.toMillis();
+      if (typeof t.seconds === 'number') return t.seconds * 1000 + Math.floor((t.nanoseconds || 0) / 1e6);
+      if (t instanceof Date) return t.getTime();
+      return null;
+    };
+    return snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => {
+      const x = ms(a.createdAt), y = ms(b.createdAt);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return x - y;
+    });
+  },
+};

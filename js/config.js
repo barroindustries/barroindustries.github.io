@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.29';
+window.APP_VERSION = '15.0.30';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1587,6 +1587,11 @@ window.PAGE_SCRIPTS = {
   // unguarded for the 'leave' and 'po-approval' types. ──
   'approvals': ['js/screens/approvals.js', 'js/screens/people.js', 'js/screens/production.js'],
 
+  // ── Quote review page (QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §2.3) — reached by link, notification and card buttons only (no nav entry).
+  // approvals.js carries decideQuoteApproval (the one Approve / Return function), forms-core.js the section headings and item codes the page
+  // prints, qb-spec-sheet.js the spec rows of a legacy line. ──
+  'quote-approval': ['js/screens/quote-approval.js', 'js/screens/approvals.js', 'js/forms-core.js', 'js/qb-spec-sheet.js'],
+
   'notes': ['js/screens/notes.js'],
   'personal-todo': ['js/screens/todo.js'],
   'client-portals': ['js/screens/client-portals.js'],
@@ -2860,6 +2865,22 @@ window.QUOTE_COMPANIES = {
 // Every collection a quote may legitimately live in — the allowlist the
 // QUOTE_UPDATE bridge (js/app.js) validates an incoming collection against.
 window.QUOTE_COLLECTIONS = ['bk_quotes', 'bs_quotes'];
+// QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §2.2 — the per-quote deep link `<origin>/#/quote-approval/<co>.<docId>` ('bk' = bk_quotes, 'bs' = bs_quotes).
+// Pure helpers: the router sees page 'quote-approval' with subtab '<co>.<docId>' (js/app.js parseHash), the bridge and the notifications build the link
+// here, and every reader of a ref goes through parseQuoteApprovalRef so a hand-typed hash never reaches Firestore as anything but a plain doc id.
+window.quoteApprovalRefOf = function (coll, id) {            // 'bk.<id>' | 'bs.<id>' | ''
+  if (!window.QUOTE_COLLECTIONS.includes(coll) || !/^[A-Za-z0-9_-]{6,64}$/.test(String(id || '')) || String(id).indexOf('draft_') === 0) return '';
+  return (coll === 'bk_quotes' ? 'bk' : 'bs') + '.' + id;
+};
+window.parseQuoteApprovalRef = function (ref) {              // -> { coll, id } | null
+  const m = /^(bk|bs)\.([A-Za-z0-9_-]{6,64})$/.exec(String(ref || ''));
+  if (!m || m[2].indexOf('draft_') === 0) return null;
+  return { coll: m[1] === 'bk' ? 'bk_quotes' : 'bs_quotes', id: m[2] };
+};
+window.quoteApprovalUrl = function (coll, id) {              // absolute link, '' when the pair is not valid
+  const ref = window.quoteApprovalRefOf(coll, id);
+  return ref ? (location.origin + '/#/quote-approval/' + ref) : '';
+};
 // UNKNOWN CODES (a retired 'PT' on an old doc included) fall through to the
 // Brilliant Steel entry — byte-identical to what the
 // `=== 'BK' ? bk : bs` ternaries these helpers replaced already did.
