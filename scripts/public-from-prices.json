@@ -4,7 +4,7 @@
   "vat": "ex-VAT",
   "prices": {
     "prep_table":   { "from": 23500, "note": "Preparation table, 2 tier, 900 mm: the lowest row of the list" },
-    "sink":         { "from": 20500, "note": "Single sink table. The hand sink is not part of the Sink family; larger sink tables are higher" },
+    "sink":         { "from": 27000, "note": "Single sink table. The hand sink is not part of the Sink family; larger sink tables are higher" },
     "dish_table":   { "perProject": true, "note": "No dish table row in the list" },
     "hood":         { "from": 32000, "note": "Rear-pitch hood, 0.9 mm body, baffle filters, 1.2 m: the lowest size" },
     "stove":        { "from": 37000, "note": "Low-pressure stove. The stock pot burner is absorbed by this family but is a different, lower item on the list: owner to confirm which figure the card shows" },
