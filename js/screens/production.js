@@ -1495,6 +1495,17 @@ async function createJobProject(d){
     createdAt:firebase.firestore.FieldValue.serverTimestamp(), updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
   });
   window.logAudit && window.logAudit('create','project',ref.id,{ client:d.client, contract });
+  // CRM: every won job marks its client card Won, whichever screen created the job (owner 2026-11-20:
+  // won jobs kept showing their client as Lead because only the Record Payment path did this).
+  // Best-effort: never blocks the job. clientId first, then the client's name.
+  try {
+    let cid = d.clientId || null;
+    if (!cid && d.client && window.Clients && window.Clients.findByName) { const c0 = await window.Clients.findByName(d.client); cid = c0 && c0.id; }
+    if (cid) {
+      await db.collection('clients').doc(cid).update({ stage:'won', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+    }
+  } catch(_) { /* best-effort */ }
   return { id:ref.id, projectNo };
 }
 
