@@ -174,7 +174,7 @@ describe('the product pages show the same starting price as the catalogue', () =
     for (const rel of ['catalogue/index.html', 'products/index.html', 'products/gas-deck-ovens/index.html', 'products/pugon-pandesal-oven/index.html', 'products/teppanyaki-grill/index.html', 'products/inasal-charcoal-grill/index.html', 'products/rear-pitch-range-hood/index.html', 'scripts/public-from-prices.json', ...ORDER.map((o) => `products/${o[1]}/index.html`)]) copy(rel);
     assert.equal(run(root).stdout, '');
     const edit = (rel, fn) => { const p = path.join(root, rel); const before = fs.readFileSync(p, 'utf8'); fs.writeFileSync(p, fn(before)); return () => fs.writeFileSync(p, before); };
-    let undo = edit('products/stainless-steel-sinks/index.html', (t) => t.replace('<data value="20500">₱20,500</data>', '<data value="20600">₱20,600</data>'));
+    let undo = edit('products/stainless-steel-sinks/index.html', (t) => t.replace('<data value="27000">₱27,000</data>', '<data value="27100">₱27,100</data>'));
     let out = run(root).stdout;
     assert.ok(/stainless-steel-sinks\/index\.html: its price line/.test(out) && !/20,?[56]00/.test(out), out);
     undo();
