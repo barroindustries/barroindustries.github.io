@@ -109,12 +109,13 @@
   --sh-gold:0 4px 24px rgba(255,214,10,0.25);
 
   /* ── Radius ── */
-  --r-xs:  6px;
-  --r-sm:  12px;
-  --r:     16px;
-  --r-lg:  20px;
-  --r-xl:  26px;
-  --r-2xl: 32px;
+  /* owner 2026-11-21 "lessen the bubbles", then "squarer", then "squarer still": was 6/12/16/20/26/32 */
+  --r-xs:  1px;
+  --r-sm:  2px;
+  --r:     3px;
+  --r-lg:  4px;
+  --r-xl:  4px;
+  --r-2xl: 6px;
   --pill:  999px;
 
   /* ── Spacing (WS43 phone-breathability pass — used inside ≤640/768px

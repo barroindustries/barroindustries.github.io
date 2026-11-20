@@ -186,7 +186,7 @@ body::after { content: none; }
 /* ── Badges ── */
 .badge {
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 3px 9px; border-radius: var(--pill);
+  padding: 3px 9px; border-radius: var(--r-sm);
   font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.2px;
   white-space: nowrap; border: 1px solid transparent;
 }
@@ -813,11 +813,11 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   padding: 14px 16px;
   background: rgba(10,132,255,0.06);
   border: 1px solid rgba(10,132,255,0.15);
-  border-radius: 14px;
+  border-radius: var(--r);
 }
 .co-credit-icon {
   width: 38px; height: 38px; flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: var(--r);
   background: rgba(10,132,255,0.12);
   display: flex; align-items: center; justify-content: center;
 }
@@ -834,7 +834,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   border: 1px solid var(--border); margin-bottom: 20px;
 }
 .help-hero-icon {
-  width: 56px; height: 56px; border-radius: 14px; flex-shrink: 0;
+  width: 56px; height: 56px; border-radius: var(--r); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
 }
 .help-hero h2 { font-size: var(--fs-xl); font-weight: 800; margin-bottom: 4px; }
@@ -928,7 +928,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .login-back-btn:hover { background: var(--s2); color: var(--text); }
 .login-back-btn svg { width: 16px; height: 16px; stroke: currentColor; }
 .login-type-pill {
-  flex: 1; padding: 5px 14px; border-radius: var(--pill);
+  flex: 1; padding: 5px 14px; border-radius: var(--r-sm);
   background: var(--s2); border: 1px solid var(--border);
   font-size: var(--fs-sm); font-weight: 700; color: var(--text-2);
   letter-spacing: 0.3px; text-align: center;
@@ -987,7 +987,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   width: 34px; height: 34px; flex-shrink: 0;
   background: linear-gradient(140deg, #0A0A1A 0%, #131330 60%, #1A0A2E 100%);
   border: 1px solid rgba(255,214,10,0.35);
-  border-radius: 9px;
+  border-radius: var(--r);
   box-shadow: 0 0 10px rgba(255,214,10,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
   display: flex; align-items: center; justify-content: center;
   padding: 3px;
@@ -1796,7 +1796,7 @@ html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
 }
 .id-card-logo {
   width: 38px; height: 38px; object-fit: contain;
-  border-radius: 9px;
+  border-radius: var(--r);
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,214,10,0.25);
   padding: 4px;
@@ -1849,7 +1849,7 @@ html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
 }
 .id-card-status {
   font-size: 0.5625rem; letter-spacing: 1px; text-transform: uppercase;
-  font-weight: 700; padding: 3px 10px; border-radius: var(--pill);
+  font-weight: 700; padding: 3px 10px; border-radius: var(--r-sm);
   background: rgba(48,209,88,0.15); color: #4DE87A;
   border: 1px solid rgba(48,209,88,0.25);
   box-shadow: 0 0 8px rgba(48,209,88,0.20);
@@ -2089,7 +2089,7 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
   display: flex; gap: 3px; margin-bottom: 18px;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--r);
   padding: 4px;
   overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
   flex-wrap: nowrap;
@@ -2127,7 +2127,7 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
 }
 .chip-tab {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 13px; border-radius: var(--pill);
+  padding: 7px 13px; border-radius: var(--r-sm);
   border: 1px solid var(--border); background: var(--surface-2);
   font-size: var(--fs-md); font-weight: 500; color: var(--text-muted);
   cursor: pointer; white-space: nowrap; min-height: 34px;
@@ -2450,7 +2450,7 @@ html.theme-astral .chip-tab.active {
 .upload-area.drag-over { transform: scale(1.01); }
 .upload-area-inner { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .upload-icon-wrap {
-  width: 44px; height: 44px; border-radius: 12px;
+  width: 44px; height: 44px; border-radius: var(--r);
   background: var(--s2); display: flex; align-items: center; justify-content: center;
   margin-bottom: 4px;
 }
@@ -2469,7 +2469,7 @@ html.theme-astral .chip-tab.active {
 .uploaded-files-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .file-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 12px; border-radius: var(--pill);
+  padding: 6px 12px; border-radius: var(--r-sm);
   background: var(--s2); border: 1px solid var(--border);
   font-size: var(--fs-sm); font-weight: 500; color: var(--text-2);
   text-decoration: none; cursor: pointer;
@@ -2480,7 +2480,7 @@ html.theme-astral .chip-tab.active {
 .file-chip:hover { background: var(--s3); color: var(--text); }
 .file-chip-src {
   font-size: var(--fs-2xs); color: var(--text-muted); flex-shrink: 0;
-  padding: 2px 5px; border-radius: var(--pill); background: var(--s1);
+  padding: 2px 5px; border-radius: var(--r-sm); background: var(--s1);
 }
 
 /* Storage status card */
@@ -2491,7 +2491,7 @@ html.theme-astral .chip-tab.active {
 .storage-status-card.drive-on  { border-color: rgba(255,214,10,0.20); }
 .storage-status-card.drive-off { border-color: rgba(10,132,255,0.18); }
 .storage-icon-wrap {
-  width: 40px; height: 40px; border-radius: 10px; background: var(--s2);
+  width: 40px; height: 40px; border-radius: var(--r); background: var(--s2);
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 
@@ -3567,10 +3567,10 @@ html.light {
   --sh-sm:           0 1px 2px rgba(16,24,40,0.06);
   --sh:              0 2px 8px rgba(16,24,40,0.08);
   --sh-lg:           0 12px 32px rgba(16,24,40,0.14);
-  --r-sm:            10px;
-  --r:               14px;
-  --r-lg:            18px;
-  --r-xl:            24px;
+  --r-sm:            2px;
+  --r:               3px;
+  --r-lg:            4px;
+  --r-xl:            4px;
   --pill:            999px;
   --topbar-bg:       #FFFFFF;
   --sidebar-bg:      #F7F8FA;
@@ -3637,10 +3637,10 @@ html.theme-dark {
   --sh-sm:           0 1px 3px rgba(0,0,0,0.30);
   --sh:              0 2px 10px rgba(0,0,0,0.36);
   --sh-lg:           0 12px 32px rgba(0,0,0,0.48);
-  --r-sm:            10px;
-  --r:               14px;
-  --r-lg:            18px;
-  --r-xl:            24px;
+  --r-sm:            2px;
+  --r:               3px;
+  --r-lg:            4px;
+  --r-xl:            4px;
   --pill:            999px;
   --topbar-bg:       #16181B;
   --sidebar-bg:      #121417;
@@ -3939,7 +3939,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 /* ── Posts ─────────────────────────────────── */
 .post-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 14px; padding: 16px; margin-bottom: 14px;
+  border-radius: var(--r); padding: 16px; margin-bottom: 14px;
   transition: box-shadow var(--t1);
 }
 /* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
@@ -3960,13 +3960,13 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .post-time { font-size:var(--fs-xs); color:var(--text-muted); }
 .post-title { font-size:var(--fs-lg); font-weight:700; color:var(--text); margin-bottom:8px; }
 .post-body { font-size:var(--fs-base); color:var(--text); line-height:1.6; white-space:pre-wrap; margin-bottom:10px; }
-.post-image { width:100%; max-height:320px; object-fit:cover; border-radius:10px; cursor:pointer; margin-bottom:10px; }
+.post-image { width:100%; max-height:320px; object-fit:cover; border-radius: var(--r); cursor:pointer; margin-bottom:10px; }
 .post-attachment { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; background:var(--s1); border:1px solid var(--border); border-radius:8px; font-size:var(--fs-md); color:var(--primary-light); text-decoration:none; margin-bottom:10px; }
 .post-actions { display:flex; gap:8px; padding-top:10px; border-top:1px solid var(--border); flex-wrap:wrap; align-items:center; }
 .post-heart-btn {
   display: inline-flex; align-items: center; gap: 5px;
   background: none; border: 1.5px solid rgba(255,107,43,0.20);
-  border-radius: 20px; padding: 5px 10px; cursor: pointer;
+  border-radius: var(--r-sm); padding: 5px 10px; cursor: pointer;
   color: var(--text-muted); transition: background var(--t1), border-color var(--t1), transform 0.1s;
 }
 .post-heart-btn svg { width: 15px; height: 15px; transition: transform 0.15s, fill 0.15s, stroke 0.15s; }
@@ -3983,7 +3983,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .post-heart-btn.heart-pop svg { animation: heartPop 0.36s var(--ios-spring-out, cubic-bezier(0.34,1.28,0.64,1)) both; }
 
 /* ── Team Cards (legacy) ──────────────────── */
-.team-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px; text-align:center; }
+.team-card { background:var(--surface); border:1px solid var(--border); border-radius: var(--r); padding:16px; text-align:center; }
 .team-card-avatar { width:64px; height:64px; border-radius:50%; background:var(--primary-light); margin:0 auto 10px; display:flex; align-items:center; justify-content:center; font-size:var(--fs-3xl); font-weight:700; color:#fff; overflow:hidden; }
 .team-card-avatar img { width:100%; height:100%; object-fit:cover; }
 .team-card-name { font-size:var(--fs-base); font-weight:700; color:var(--text); margin-bottom:4px; }
@@ -4000,7 +4000,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
   position: relative;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--r-sm);
   padding: 20px 14px 14px;
   text-align: center;
   cursor: pointer;
@@ -4050,7 +4050,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .team-vacant-card .vacant-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.55; margin-top: 4px; }
 .team-vacant-card .vacant-pill {
   margin-top: auto;
-  padding: 4px 12px; border-radius: 20px;
+  padding: 4px 12px; border-radius: var(--r-sm);
   font-size: 10.5px; font-weight: 600; letter-spacing: .02em; line-height: 1.4;
   background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
   max-width: 100%; white-space: normal;   /* wrap INSIDE the card, never bleed past it */
@@ -4059,7 +4059,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .team-section-count {
   font-size: 11px; font-weight: 600; color: var(--text-muted);
   background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: 20px; padding: 1px 9px;
+  border-radius: var(--r-sm); padding: 1px 9px;
 }
 .team-note-bubble {
   position: absolute;
@@ -4069,7 +4069,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
   font-size: var(--fs-2xs);
   font-weight: 600;
   padding: 4px 10px;
-  border-radius: 20px;
+  border-radius: var(--r-sm);
   white-space: nowrap;
   max-width: 130px;
   overflow: hidden;
@@ -4123,7 +4123,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 }
 .team-status-pill {
   font-size: 0.5625rem; font-weight: 700; padding: 2px 8px;
-  border-radius: 20px; margin-top: 2px;
+  border-radius: var(--r-sm); margin-top: 2px;
   background: var(--surface2); color: var(--text-muted);
   letter-spacing: .04em;
 }
@@ -4277,7 +4277,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 /* ── Cash Advance Cards ─────────────────────── */
 .ca-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 14px; padding: 16px; margin-bottom: 14px;
+  border-radius: var(--r); padding: 16px; margin-bottom: 14px;
 }
 .ca-card-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
 .ca-card-name { flex:1; font-weight:600; font-size:var(--fs-base); }
@@ -4288,7 +4288,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .ca-card-actions { display:flex; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
 .ca-calc-box {
   background:var(--s2); border:1.5px solid var(--border);
-  border-radius:10px; padding:12px 14px; margin-bottom:8px;
+  border-radius: var(--r); padding:12px 14px; margin-bottom:8px;
   display:flex; flex-direction:column; gap:6px;
 }
 
@@ -4296,7 +4296,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .company-hero {
   text-align:center; padding:28px 20px 20px;
   background:var(--surface); border:1px solid var(--border);
-  border-radius:16px; margin-bottom:16px;
+  border-radius: var(--r); margin-bottom:16px;
 }
 .company-hero-logo { width:80px; height:80px; border-radius:50%; object-fit:cover; margin-bottom:12px; }
 .company-hero-name { font-size:1.375rem; font-weight:800; color:var(--text); margin:0 0 4px; }
@@ -4316,7 +4316,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 /* ── Stat cards (quotations summary) ──────────────── */
 .stat-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 12px; padding: 14px 16px; text-align: center;
+  border-radius: var(--r); padding: 14px 16px; text-align: center;
 }
 .stat-num  { font-size: 1.375rem; font-weight: 800; color: var(--text); }
 .stat-label{ font-size: var(--fs-xs); color: var(--text-muted); margin-top: 3px; }
@@ -4373,7 +4373,7 @@ html.theme-astral .bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !im
 /* Dept quick-tab buttons on employee dashboard */
 .dept-quick-tab {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px; border-radius: 10px;
+  padding: 10px 14px; border-radius: var(--r);
   background: var(--s2); border: 1.5px solid var(--border);
   color: var(--text); font-size: var(--fs-md); font-weight: 600;
   /* v14.0.68: was `transition: all var(--t1)`. `all` silently animates layout
@@ -5085,7 +5085,7 @@ body.qb-desktop #qb-frame {
 .ms-name { font-size: var(--fs-2xs); color: var(--text-muted); font-weight: 600; padding: 0 4px; }
 
 .ms-bubble {
-  padding: 8px 12px; border-radius: 18px;
+  padding: 8px 12px; border-radius: 4px;
   max-width: 100%; word-break: break-word; overflow-wrap: anywhere;
   cursor: pointer;
   /* Messenger restyle Fix 3 — positioned ancestor for .ms-heart-burst
@@ -5098,14 +5098,14 @@ body.qb-desktop #qb-frame {
   border: 1px solid var(--border);
 }
 /* Grouping corner-radius (mirrored mine/theirs — shared side is the aligned edge) */
-.ms-bubble-mine.ms-grp-single  { border-radius: 18px; }
-.ms-bubble-mine.ms-grp-first   { border-radius: 18px 18px 4px 18px; }
-.ms-bubble-mine.ms-grp-mid     { border-radius: 18px 4px 4px 18px; }
-.ms-bubble-mine.ms-grp-last    { border-radius: 18px 4px 18px 18px; }
-.ms-bubble-theirs.ms-grp-single { border-radius: 18px; }
-.ms-bubble-theirs.ms-grp-first  { border-radius: 18px 18px 18px 4px; }
-.ms-bubble-theirs.ms-grp-mid    { border-radius: 4px 18px 18px 4px; }
-.ms-bubble-theirs.ms-grp-last   { border-radius: 4px 18px 18px 18px; }
+.ms-bubble-mine.ms-grp-single  { border-radius: 4px; }
+.ms-bubble-mine.ms-grp-first   { border-radius: 4px 4px 1px 4px; }
+.ms-bubble-mine.ms-grp-mid     { border-radius: 4px 1px 1px 4px; }
+.ms-bubble-mine.ms-grp-last    { border-radius: 4px 1px 4px 4px; }
+.ms-bubble-theirs.ms-grp-single { border-radius: 4px; }
+.ms-bubble-theirs.ms-grp-first  { border-radius: 4px 4px 4px 1px; }
+.ms-bubble-theirs.ms-grp-mid    { border-radius: 1px 4px 4px 1px; }
+.ms-bubble-theirs.ms-grp-last   { border-radius: 1px 4px 4px 4px; }
 
 /* ── LONG-PRESS-TO-REACT: stop iOS's own long press from competing ─────────
    Owner report (2026-08): "long press is not working well". Two causes; this
@@ -5658,7 +5658,7 @@ body.qb-desktop #qb-frame {
 .ms-attach-toggle-icon { transition: transform .18s ease; }
 .ms-attach-toggle.ms-attach-toggle-open .ms-attach-toggle-icon { transform: rotate(45deg); }
 .ms-input {
-  flex: 1; min-width: 0; border: none; border-radius: var(--pill);
+  flex: 1; min-width: 0; border: none; border-radius: var(--r-sm);
   padding: 9px 16px; background: var(--surface-2); color: var(--text);
   font-size: var(--fs-base); line-height: var(--lh-snug); outline: none;
   resize: none; max-height: 120px; overflow-y: auto;
@@ -5962,7 +5962,7 @@ body.qb-desktop #qb-frame {
 .ms-compose-btn { color: var(--primary); }
 .ms-search-wrap { margin: 10px 0; }
 .ms-search-input {
-  width: 100%; border: 1px solid var(--border); border-radius: var(--pill);
+  width: 100%; border: 1px solid var(--border); border-radius: var(--r-sm);
   padding: 9px 16px; background: var(--surface-2); color: var(--text);
   font-size: var(--fs-base); outline: none; transition: box-shadow .15s;
 }
@@ -6104,7 +6104,7 @@ body.qb-desktop #qb-frame {
 .chat-about-member-name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-about-admin-tag {
   font-size: var(--fs-2xs); font-weight: 700; color: var(--primary);
-  background: var(--primary-soft); padding: 2px 8px; border-radius: var(--pill); flex-shrink: 0;
+  background: var(--primary-soft); padding: 2px 8px; border-radius: var(--r-sm); flex-shrink: 0;
 }
 .chat-about-divider { height: 1px; background: var(--border); margin: 4px 0 10px; }
 #chat-about-addmember-btn { margin-top: 10px; }
@@ -6229,7 +6229,7 @@ body.qb-desktop #qb-frame {
 }
 .ms-thread-search-bar.hidden { display: none; }
 .ms-thread-search-input {
-  flex: 1; min-width: 0; border: none; border-radius: var(--pill);
+  flex: 1; min-width: 0; border: none; border-radius: var(--r-sm);
   padding: 6px 12px; background: var(--surface-2); color: var(--text);
   font-size: var(--fs-sm); outline: none;
 }
@@ -6406,7 +6406,7 @@ body.qb-desktop #qb-frame {
    tint). */
 .top-nav-item {
   padding: 6px 11px;
-  border-radius: 10px;
+  border-radius: var(--r);
   gap: 3px;
   min-height: 44px;
   transition: color 160ms var(--ios-spring), background 160ms var(--ios-spring);
@@ -6660,7 +6660,7 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
 /* ── Sidebar nav items — iOS Settings style ── */
 .nav-item {
   padding: 11px 14px;
-  border-radius: 10px;
+  border-radius: var(--r);
   margin: 1px 8px;
   width: calc(100% - 16px);
   font-size: var(--fs-base);
@@ -6674,7 +6674,7 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
   background: var(--primary-soft);
   color: var(--primary);
   font-weight: 600;
-  border-radius: var(--pill);
+  border-radius: var(--r-sm);
 }
 @media (hover:hover) {
   .nav-item:hover { background: var(--surface-2); }
@@ -6925,7 +6925,7 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
    it's automatically visible in light/dark AND tints to --primary on .active,
    matching .bn-icon's pattern instead. */
 .more-nav-row-icon {
-  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: var(--r); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   background: var(--s1);
 }
@@ -6948,7 +6948,7 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
 
 /* ── Subtab bar — iOS segmented control (token-driven) ── */
 .subtab-bar {
-  border-radius: 12px;
+  border-radius: var(--r);
   padding: 3px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -6958,7 +6958,7 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
   color: var(--text-muted);
   cursor: pointer; white-space: nowrap; flex-shrink: 0;
   min-height: 36px; display: flex; align-items: center;
-  border-radius: 9px;
+  border-radius: var(--r);
   font-size: var(--fs-md);
   font-weight: 600;
   padding: 7px 14px;
@@ -7022,9 +7022,9 @@ html.theme-astral .subtab-btn.active {
    ~10px-radius language — see the SURFACES section in the mobile density
    block near the end of this file. */
 @media (min-width: 641px) and (max-width: 768px) {
-  .item-card { border-radius: 14px; }
-  .kpi-card  { border-radius: 16px; padding: 16px 14px; }
-  .card      { border-radius: 18px; }
+  .item-card { border-radius: var(--r); }
+  .kpi-card  { border-radius: var(--r); padding: 16px 14px; }
+  .card      { border-radius: var(--r); }
 }
 
 /* PTR arc ring styles are in the PULL-TO-REFRESH block */
@@ -7204,7 +7204,7 @@ html:not(.light) .splash-hlogo { filter: brightness(0) invert(1); }
 }
 .topbar-logo-card {
   width: 32px; height: 32px;
-  border-radius: 9px;
+  border-radius: var(--r);
   overflow: hidden;
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -7327,7 +7327,7 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   display: flex;
   align-items: center;
   gap: 5px;
-  border-radius: 20px;
+  border-radius: var(--r-sm);
   padding: 5px 14px;
   height: auto;
   width: auto;
@@ -7398,7 +7398,7 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   font-family: monospace;
   background: var(--s1);
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: var(--r-sm);
   margin-top: 4px;
   letter-spacing: 0.05em;
 }
@@ -7416,7 +7416,7 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
 .profile-inset-card {
   margin: 0 16px 4px;
   background: var(--s1);
-  border-radius: 14px;
+  border-radius: var(--r);
   border: 1px solid var(--border);
   overflow: hidden;
 }
@@ -7473,7 +7473,7 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   padding: 14px;
   font-size: 0.9375rem;
   font-weight: 600;
-  border-radius: 14px;
+  border-radius: var(--r);
 }
 
 /* ── Notification toggle switch ── */
@@ -7567,7 +7567,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
    ring corner poking out past their own rounded edge at the r-xs default —
    match the ring's radius to the control's for these. */
 .chip-tab:focus-visible, .badge:focus-visible {
-  border-radius: var(--pill);
+  border-radius: var(--r-sm);
 }
 /* Programmatically-focused scroll/containers must not show a ring */
 [tabindex="-1"]:focus-visible { outline: none; }
@@ -8082,7 +8082,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
      block, now scoped to 641–768px only) down to ~10px. Priority/accent
      left-bars thin from 3px to 2px so they read as a color hint, not a
      colored sidebar. */
-  .card, .kpi-card, .item-card { border-radius: 10px; box-shadow: none; }
+  .card, .kpi-card, .item-card { border-radius: var(--r); box-shadow: none; }
   .item-card { border-left-width: 2px; }
   .kpi-card.accent, .kpi-card.green, .kpi-card.warn, .kpi-card.red { border-left-width: 2px; }
 
@@ -8495,7 +8495,7 @@ body.sidebar-open .fab { display: none !important; }
 .qa-title { font-size: var(--fs-xl); font-weight: 800; overflow-wrap: anywhere; min-width: 0; }
 .qa-company { margin-top: 2px; font-size: var(--fs-sm); color: var(--text-muted); }
 .qa-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.qa-chip { display: inline-block; padding: 2px 8px; border-radius: var(--pill); border: 1px solid var(--border); background: var(--s2); font-size: var(--fs-sm); line-height: 1.5; }
+.qa-chip { display: inline-block; padding: 2px 8px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--s2); font-size: var(--fs-sm); line-height: 1.5; }
 .qa-chip-flag { border-color: var(--warning); }
 .qa-chip-role, .qa-chip-kind, .qa-chip-rev { font-size: var(--fs-xs); }
 .qa-kv { display: grid; grid-template-columns: minmax(84px, max-content) minmax(0, 1fr); gap: 4px 12px; margin: 10px 0 0; font-size: var(--fs-md); }
