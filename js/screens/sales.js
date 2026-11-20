@@ -107,13 +107,14 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   // drawer it should also be in sales department page") embeds the same
   // sales-scoped view renderSalesAnalytics() serves on the Analytics page —
   // quota to meet, OH to cover, floor, pace and the discount signal.
-  const salesTabs = ['Clients','Briefs','Quote requests','Quotes','Analytics','Brilliant Steel','Files','SOP','Budgeting','Tasks'];
+  const salesTabs = ['Clients','Briefs','Quote requests','Quotes','Won','Analytics','Brilliant Steel','Files','SOP','Budgeting','Tasks'];
   // Legacy deep-link keys → new consolidated tab.
   const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
                   'Partner':'Brilliant Steel', 'Partner Quotes':'Brilliant Steel', 'Partner Files':'Brilliant Steel',
                   'Work Plans':'Files', 'Proposals':'Files',
                   'Client Briefs':'Briefs', 'Client Information Requests':'Briefs', 'Info Requests':'Briefs',
-                  'Quote Requests':'Quote requests', 'QuoteRequests':'Quote requests' };
+                  'Quote Requests':'Quote requests', 'QuoteRequests':'Quote requests',
+                  'Projects':'Won', 'Won / Projects':'Won', 'Won jobs':'Won' };
   subtab = alias[subtab] || (salesTabs.includes(subtab) ? subtab : 'Clients');
   c.innerHTML = `
     <div class="page-header">
@@ -128,10 +129,11 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
       'Quote requests holds every "Get a quote" request sent from barroindustries.com/catalogue/ — review the items and the estimate the client saw, then Open in Quote Builder to price it properly.',
       'Quotes has ＋New Quotation and Quick Estimate; everything filed lands in Records. On each quote: Mark sent when it goes out, Lost (with a reason) when the client says no, Record payment when the client pays.',
       'After Record payment the President confirms it in the app (Finance may confirm when he cannot be reached). Then open Sales Orders and tap Generate SO & JO to hand the job to Production.',
+      'Won / Projects lists every won job (the same records as the Projects page): client, quote number, amount, stage and payments. Tap Open for the full project folder.',
       'Brilliant Steel is a read-only window into the department\'s quotes and files for coordination.',
       'Files holds Work Plans and Proposals; Tasks is the department board.'
     ])}
-    ${window.chipTabs(salesTabs.map(s=>({key:s,label:s})), subtab)}
+    ${window.chipTabs(salesTabs.map(s=>({key:s,label: s==='Won' ? 'Won / Projects' : s})), subtab)}
     <div id="sales-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
@@ -179,6 +181,10 @@ async function loadSalesContent(currentUser, currentRole, sub) {
     case 'Quote requests':
       if (window.renderQuoteRequests) await window.renderQuoteRequests(content, currentUser, currentRole);
       else content.innerHTML = window.renderEmptyState({ icon: '⚠️', title: 'Quote requests screen not loaded', hint: 'Reload the app and try again.' });
+      break;
+
+    case 'Won':
+      await renderSalesWonProjects(content, currentUser, currentRole);
       break;
 
     case 'Analytics':
@@ -234,6 +240,134 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       await renderDeptTasks(content, 'Sales', currentUser, currentRole);
       break;
   }
+}
+
+// ══════════════════════════════════════════════════
+//  SALES — WON / PROJECTS (owner, 2026-11-20: "we have a lot of clients won
+//  right now, theyre in the projects tab. i want it to be shown in sales
+//  department too")
+//  A read-only Sales window onto the SAME job_projects records the Projects
+//  page (renderProjectLifecycle, js/screens/production.js) shows — nothing is
+//  copied or written here. The linked sales_orders are read only to show the
+//  order's payment state (SalesFlow.orderState). Rules: job_projects and
+//  sales_orders are readable by any staff with a profile, so no rules change.
+//  Money follows the Projects page: a Production-only viewer never sees it
+//  (isProductionOnlyViewer, production.js — in the dept:Sales bundle; if it is
+//  somehow missing, money stays hidden).
+// ══════════════════════════════════════════════════
+const WON_FILTERS = [
+  { key:'active',    label:'Active',         test:p=>!['paid','cancelled'].includes(p.stage) },
+  { key:'won',       label:'Won',            test:p=>p.stage==='won' },
+  { key:'in_design', label:'In Design',      test:p=>p.stage==='in_design' },
+  { key:'in_production', label:'In Production', test:p=>p.stage==='in_production' },
+  { key:'delivery',  label:'For Delivery / Delivered', test:p=>p.stage==='for_delivery'||p.stage==='delivered' },
+  { key:'completed', label:'Completed',      test:p=>p.stage==='completed' },
+  { key:'paid',      label:'Paid / Closed',  test:p=>p.stage==='paid' },
+  { key:'cancelled', label:'Cancelled',      test:p=>p.stage==='cancelled' },
+  { key:'all',       label:'All',            test:()=>true },
+];
+
+async function renderSalesWonProjects(content, currentUser, currentRole) {
+  content.innerHTML = window.skeletonHtml('rows');
+  const showMoney = typeof isProductionOnlyViewer === 'function' && !isProductionOnlyViewer();
+  let projects;
+  try {
+    const snap = await db.collection('job_projects').orderBy('createdAt','desc').get();
+    projects = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+  } catch (err) {
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load the won jobs</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm won-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    content.querySelector('.won-retry-btn')?.addEventListener('click', ()=>renderSalesWonProjects(content, currentUser, currentRole));
+    return;
+  }
+  if ((typeof isBrilliantOnly==='function') && isBrilliantOnly()) projects = projects.filter(p=>p.createdBy===currentUser.uid);
+  // The order behind each job (one sales order per quote chain) — soft-fail: the list still shows without it.
+  const soByProject = new Map();
+  try {
+    const sos = await db.collection('sales_orders').get();
+    sos.docs.forEach(d=>{ const o={ id:d.id, ...d.data() }; if (o.projectId && !soByProject.has(o.projectId)) soByProject.set(o.projectId, o); });
+  } catch(_) {}
+
+  const stageOf = id => (window.JOB_STAGES||[]).find(s=>s.id===id) || { id, label:id||'—', icon:'', color:'#78909c' };
+  const balOf = p => Math.max(0, (Number(p.contractAmount)||0) - (Number(p.amountCollected)||0));
+  const dateOf = v => { const d = v?.toDate ? v.toDate() : (v ? new Date(v) : null); return d && !isNaN(d) ? d.toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : ''; };
+  const live = projects.filter(p=>p.stage!=='cancelled');
+  const kContract = live.reduce((s,p)=>s+(Number(p.contractAmount)||0),0);
+  const kCollected = live.reduce((s,p)=>s+(Number(p.amountCollected)||0),0);
+  const kBalance = live.reduce((s,p)=>s+balOf(p),0);
+  const activeCount = projects.filter(WON_FILTERS[0].test).length;
+
+  let filter = 'active', q = '';
+  content.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
+      <span style="font-size:12px;color:var(--text-muted)">Every won job: the same records as the Projects page. Tap a job for the full project folder.</span>
+      <button type="button" class="btn-secondary btn-sm" onclick="navigateTo('projects-lifecycle')">Open the Projects board →</button>
+    </div>
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card"><div class="kpi-label">Won jobs</div><div class="kpi-value">${live.length}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Active</div><div class="kpi-value">${activeCount}</div></div>
+      ${showMoney ? `
+      <div class="kpi-card"><div class="kpi-label">Contract value</div><div class="kpi-value" style="font-size:15px">₱${fmt(kContract)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Collected</div><div class="kpi-value" style="font-size:15px">₱${fmt(kCollected)}</div></div>
+      <div class="kpi-card ${kBalance>0?'warn':''}"><div class="kpi-label">Balance due</div><div class="kpi-value" style="font-size:15px">₱${fmt(kBalance)}</div></div>` : ''}
+    </div>
+    <div style="margin-bottom:10px"><input type="text" class="ms-input won-search" placeholder="Search client, quote no. or project no." style="width:100%;max-width:420px"/></div>
+    <div class="chip-tabs won-filters" style="margin-bottom:12px">${WON_FILTERS.map(f=>{
+      const n = projects.filter(f.test).length;
+      return `<button type="button" class="chip-tab${f.key===filter?' active':''}" data-won="${f.key}">${escHtml(f.label)} <span class="chip-count${n?' on':''}">${n}</span></button>`;
+    }).join('')}</div>
+    <div class="won-list"></div>`;
+
+  const list = content.querySelector('.won-list');
+  const row = p => {
+    const st = stageOf(p.stage);
+    const so = soByProject.get(p.id);
+    const SF = window.SalesFlow;
+    const osKey = so && SF ? SF.orderState(so) : null;
+    const os = osKey ? SF.ORDER_STATE_META[osKey] : null;
+    const pays = Array.isArray(p.payments) ? p.payments : [];
+    const last = pays.length ? pays[pays.length-1] : null;
+    const bal = balOf(p);
+    return `<tr class="won-row" data-id="${escHtml(p.id)}">
+      <td class="tc-avatar"><code>${escHtml(p.quoteNumber||'—')}</code><div style="font-size:10px;color:var(--text-muted);font-family:monospace">${escHtml(p.projectNo||'')}</div></td>
+      <td class="tc-name"><strong>${escHtml(p.clientName||p.name||'—')}</strong> ${p.company?`<span class="badge ${window.isInternalQuoteCompany?.(p.company)?'badge-orange':'badge-gray'}" style="font-size:9px">${escHtml(p.company)}</span>`:''}<div style="font-size:11px;color:var(--text-muted)">${escHtml(dateOf(p.createdAt))} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+      ${showMoney ? `<td class="tc-net">₱${fmt(p.contractAmount||0)}</td>` : ''}
+      <td class="tc-detail" data-label="Stage"><span class="badge" style="background:${st.color};color:var(--on-primary)">${st.icon} ${escHtml(st.label)}</span></td>
+      ${showMoney ? `
+      <td class="tc-detail" data-label="Collected">₱${fmt(p.amountCollected||0)}</td>
+      <td class="tc-detail" data-label="Balance"><span style="color:${bal>0?'var(--warning)':'var(--success)'};font-weight:600">₱${fmt(bal)}</span></td>
+      <td class="tc-detail" data-label="Payments">${pays.length ? `${pays.length} · last ₱${fmt(last.amount||0)}${last.date?` <span style="color:var(--text-muted);font-size:11px">${escHtml(last.date)}</span>`:''}` : '<span style="color:var(--text-muted)">None yet</span>'}</td>` : ''}
+      <td class="tc-detail" data-label="Order">${os ? `<span class="badge ${os.cls}" style="font-size:10px">${escHtml(os.label)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="tc-actions"><button type="button" class="btn-secondary btn-sm won-open" data-id="${escHtml(p.id)}">Open</button></td>
+    </tr>`;
+  };
+  const draw = () => {
+    const f = WON_FILTERS.find(x=>x.key===filter) || WON_FILTERS[0];
+    const needle = q.trim().toLowerCase();
+    const rows = projects.filter(f.test).filter(p => !needle ||
+      [p.clientName, p.name, p.quoteNumber, p.oldQuoteNumber, p.projectNo].some(v => String(v||'').toLowerCase().includes(needle)));
+    list.innerHTML = !rows.length
+      ? window.renderEmptyState({ icon:'🤝', title: projects.length ? 'No won jobs match' : 'No won jobs yet', hint: projects.length ? 'Try another filter or search.' : 'A job appears here when a quote is converted to a Sales Order.' })
+      : `<div class="card"><div class="table-wrap"><table class="data-table table-cards">
+          <thead><tr><th>Quote # / Project</th><th>Client</th>${showMoney?'<th>Contract</th>':''}<th>Stage</th>${showMoney?'<th>Collected</th><th>Balance</th><th>Payments</th>':''}<th>Order</th><th></th></tr></thead>
+          <tbody>${rows.map(row).join('')}</tbody></table></div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes:[list] });
+    list.querySelectorAll('tr.won-row').forEach(tr => tr.addEventListener('click', e => {
+      if (e.target.closest('.won-open')) return;
+      tr.classList.toggle('tc-expanded');
+    }));
+    list.querySelectorAll('.won-open').forEach(b => b.addEventListener('click', () => {
+      const p = projects.find(x=>x.id===b.dataset.id);
+      if (p && typeof openJobProjectDetail === 'function') openJobProjectDetail(p);
+      else navigateTo('projects-lifecycle');
+    }));
+  };
+  const bar = content.querySelector('.won-filters');
+  bar.querySelectorAll('.chip-tab').forEach(btn => btn.addEventListener('click', () => {
+    bar.querySelectorAll('.chip-tab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active'); filter = btn.dataset.won; draw();
+  }));
+  content.querySelector('.won-search').addEventListener('input', e => { q = e.target.value; draw(); });
+  draw();
 }
 
 // ══════════════════════════════════════════════════
