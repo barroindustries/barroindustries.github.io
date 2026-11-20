@@ -62,7 +62,7 @@ describe('WP0 sales_orders create', () => {
 
 describe('WP0 sales_orders update arms', () => {
   it('soSalesUpdate exists and is OR-ed into the update rule', () => {
-    assert.match(norm(UPDATE), /\|\| soSalesUpdate\(\) \)$/);
+    assert.match(norm(UPDATE), /\|\| soSalesUpdate\(\) (\|\| soRevisionRequest\(\) )?\)$/); // F3 (flow spec §11.2) OR-s its revision-request arm after it
   });
   it('the decision and self-confirm guards are AND-ed in front of all three arms', () => {
     assert.ok(norm(UPDATE).startsWith('if isAuth() && soDecisionOk() && soSelfConfirmOk() && ('), 'pin text: soDecisionOk() && soSelfConfirmOk() && (');

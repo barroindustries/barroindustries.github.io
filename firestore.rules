@@ -2318,6 +2318,16 @@ service cloud.firestore {
           && ( !soDiff().hasAny(['paymentConfirm']) || request.resource.data.paymentConfirm.get('decision', null) == null )
           && ( !soDiff().hasAny(soHandoffKeys()) || resource.data.get('status','') == 'recorded' );
       }
+      // F3: Sales files/resends/withdraws a revision request only (getRole() needs a profile); the apply stays books-tier.
+      function soRevisionRequest() {
+        return !isSecretary()
+          && (resource.data.createdBy == request.auth.uid || inDept('Sales'))
+          && soDiff().hasOnly(['pendingRevision','updatedAt'])
+          && resource.data.get('status','') == 'recorded'
+          && ( !('pendingRevision' in request.resource.data)
+               || ( request.resource.data.pendingRevision.get('decision', null) == null
+                    && request.resource.data.pendingRevision.get('status', '') in ['pending_approval','pending_confirm'] ) );
+      }
       // F2: a decision carries the decider's own uid.
       function soDecisionOk() {
         return !soDiff().hasAny(['paymentConfirm'])
@@ -2342,6 +2352,7 @@ service cloud.firestore {
                    'targetDate', 'priority', 'notes',
                    'designDoneAt', 'designDoneBy', 'noDrawingsNeeded', 'updatedAt']) )
         || soSalesUpdate()
+        || soRevisionRequest()
       );
       allow delete: if isAuth() && isPresident();
     }
@@ -2356,7 +2367,7 @@ service cloud.firestore {
       // writes not touching money keys are unaffected).
       allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || hasProfile())
         && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(
-               ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule', 'contractAmount'])
+               ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule', 'contractAmount', 'clientCredit', 'refunds', 'joRev'])
              || canFinance() );
       allow delete: if isAuth() && isAdmin();
     }
