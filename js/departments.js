@@ -4922,6 +4922,12 @@ const CRM_STAGES = [
   { key:'won',      label:'Won',      color:'var(--success,#30D158)', icon:'✅' },
   { key:'lost',     label:'Lost',     color:'var(--danger,#e5484d)',  icon:'✖️' },
 ];
+// Client contact placeholders (2026-11-20): about 120 clients carry "N/A" (or "N/a", "000") typed into company / email /
+// phone / address. The cards showed them as if they were real contact details; a placeholder now reads as blank.
+window.realContact = function (v) {
+  const t = String(v == null ? '' : v).trim();
+  return (!t || /^(n\/?a|none|nil|-+|\.+|0+)$/i.test(t)) ? '' : t;
+};
 function crmStageOf(cl){ return ['lead','prospect','won','lost'].includes(cl && cl.stage) ? cl.stage : 'lead'; }
 function crmStageMeta(k){ return CRM_STAGES.find(s=>s.key===k) || CRM_STAGES[0]; }
 window.CRM_STAGES = CRM_STAGES; window.crmStageOf = crmStageOf; window.crmStageMeta = crmStageMeta;
@@ -4970,9 +4976,9 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       <div style="flex:1;min-width:0">
         <div class="item-title">${escHtml(cl.name)} <span class="badge" style="font-size:9px;background:${st.color};color:var(--on-primary)">${st.icon} ${st.label}</span>${cl.deleteRequested?` <span class="badge badge-red" style="font-size:9px">${emojiIcon('🗑',9)} del req</span>`:''}</div>
         <div class="item-meta">
-          ${cl.company?`<span>${emojiIcon('🏢',16)} ${escHtml(cl.company)}</span>`:''}
-          ${cl.email?`<span>${emojiIcon('✉️',16)} ${escHtml(cl.email)}</span>`:''}
-          ${cl.phone?`<span>${emojiIcon('📞',16)} ${escHtml(cl.phone)}</span>`:''}
+          ${window.realContact(cl.company)?`<span>${emojiIcon('🏢',16)} ${escHtml(window.realContact(cl.company))}</span>`:''}
+          ${window.realContact(cl.email)?`<span>${emojiIcon('✉️',16)} ${escHtml(window.realContact(cl.email))}</span>`:''}
+          ${window.realContact(cl.phone)?`<span>${emojiIcon('📞',16)} ${escHtml(window.realContact(cl.phone))}</span>`:''}
           ${cl.lastQuoteNumber?`<span>${emojiIcon('📄',16)} ${escHtml(cl.lastQuoteNumber)}</span>`:''}
           ${fu?`<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">${emojiIcon('⏰',16)} ${escHtml(fu)}${fuOverdue?' · due':''}</span>`:''}
         </div>
@@ -5161,13 +5167,13 @@ async function openClientHub(cl, opts) {
           ? `<select id="ch-stage" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
               ${CRM_STAGES.map(s=>`<option value="${s.key}" ${crmStageOf(cl)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select>`
           : `<span class="badge" style="font-size:10px;background:${st.color};color:var(--on-primary)">${st.icon} ${st.label}</span>`}
-        ${cl.company?`<span style="font-size:12px;color:var(--text-muted)">${emojiIcon('🏢',12)} ${escHtml(cl.company)}</span>`:''}
+        ${window.realContact(cl.company)?`<span style="font-size:12px;color:var(--text-muted)">${emojiIcon('🏢',12)} ${escHtml(window.realContact(cl.company))}</span>`:''}
         ${(cl.brands||[]).map(b=>`<span class="badge badge-gray" style="font-size:9px">${b==='sales'?'Sales':b==='design'?'Design':'Brilliant Steel'}</span>`).join('')}
       </div>
       <div class="item-meta">
-        ${cl.email?`<span>${emojiIcon('✉️',16)} ${escHtml(cl.email)}</span>`:''}
-        ${cl.phone?`<span>${emojiIcon('📞',16)} ${escHtml(cl.phone)}</span>`:''}
-        ${cl.address?`<span>${emojiIcon('📍',16)} ${escHtml(cl.address)}</span>`:''}
+        ${window.realContact(cl.email)?`<span>${emojiIcon('✉️',16)} ${escHtml(window.realContact(cl.email))}</span>`:''}
+        ${window.realContact(cl.phone)?`<span>${emojiIcon('📞',16)} ${escHtml(window.realContact(cl.phone))}</span>`:''}
+        ${window.realContact(cl.address)?`<span>${emojiIcon('📍',16)} ${escHtml(window.realContact(cl.address))}</span>`:''}
       </div>
       <div style="font-size:12px;margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${cl.followUpDate
