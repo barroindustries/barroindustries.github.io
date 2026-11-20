@@ -120,6 +120,8 @@
     await step(async function () { await N.sendToDept('Finance', { title: '💵 Contract revised', body: client + ' ' + so + ' ' + rLabel(n) + ' — ' + money(result.from) + ' → ' + money(result.to) + '. No action needed.', icon: '💵', type: 'contract_applied', link: 'sales-orders', dedupKey: 'ccfin-' + order.id + '-' + n }); });
     await step(async function () { if (!vNow.isPresident) await N.sendToOwner({ title: '✅ Contract change confirmed by ' + who, body: client + ' ' + so + ' — ' + money(result.from) + ' → ' + money(result.to) + '.', icon: '✅', type: 'contract_applied', link: 'sales-orders', dedupKey: 'ccown-' + order.id + '-' + n }); });
     await step(async function () { if (window.logAudit) window.logAudit('update', 'contract', order.id, { rev: n, from: result.from, to: result.to }); });
+    // J9 (spec §7.6 item 6): a decrease can settle a completed job, which then closes by itself. Last, best-effort, never undoes the apply.
+    await step(async function () { if (order.projectId) { await window.ensureScript('js/screens/flow-docs.js'); await window.FlowDocs.closeIfSettled(order.projectId, who); } });
     invalidate();
   }
 
@@ -491,6 +493,8 @@
         try { await window.Ledger.post(plan.ledgerEntry); }
         catch (ex) { fail('Failed: ' + (ex.message || ex.code)); return; }
         try { if (window.logAudit) window.logAudit('create', 'ledger', window.Ledger._sanitize(plan.ref), { source: 'contract_refund', amount: plan.amount }); } catch (_) {}
+        // J9: refunding the client's credit can make a completed, fully paid job closable. Best-effort.
+        try { if (project && project.id) { await window.ensureScript('js/screens/flow-docs.js'); await window.FlowDocs.closeIfSettled(project.id, who); } } catch (_) {}
         invalidate();
         window.closeModal();
         toast('Refund recorded', 'success');

@@ -1742,7 +1742,8 @@ function openJobProjectDetail(p, opts){
   // corrupted/legacy value) used to fall through Math.min(idx+1,...) to index 0
   // ('won'), silently offering "Advance → Won" instead of surfacing the problem.
   const stageUnknown = idx === -1;
-  const next = (stageUnknown || p.stage==='paid'||p.stage==='cancelled') ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
+  // J9: a flow-2 job is never advanced from Completed to Paid / Closed by hand — it closes by itself (FlowCore.shouldClose).
+  const next = (stageUnknown || p.stage==='paid'||p.stage==='cancelled'||(Number(p.flowVersion)>=2 && p.stage==='completed')) ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
   const stepper = JOB_STAGES.filter(s=>s.id!=='cancelled').map(s=>{const i=JOB_STAGES.findIndex(x=>x.id===s.id);const dn=i<idx,cur=s.id===p.stage;return `<span style="font-size:10px;padding:3px 7px;border-radius:10px;white-space:nowrap;${cur?`background:${s.color};color:var(--on-primary);font-weight:700`:dn?'background:var(--success);color:var(--on-primary)':'background:var(--surface2);color:var(--text-muted)'}">${s.icon} ${s.label}</span>`;}).join('<span style="color:var(--text-muted)">›</span>');
   // Sales→Production handoff (beta sweep) — the Document Register and Timeline
   // are NOT behind showMoney, yet both carry ₱ figures for Production-only
@@ -1867,6 +1868,8 @@ function openJobProjectDetail(p, opts){
     ${/* PAYMENT-CLAIM-HOOK (P5): the job's payment lines + Record payment, lazy (js/payment-claims-ui.js). Money viewers of a flow-2 job only. */''}
     ${(showMoney && !isBsOnlyU && Number(p.flowVersion)>=2 && p.salesOrderId)?'<div id="jpd-payments"></div>':''}
     ${/* FLOW-FORM-HOOK (P4): the Operations forms (QC checklist, installation checklist, punch list, client acceptance), drawn by js/forms.js when it loads. */''}
+    ${/* FLOW-DOCS-HOOK (J8): client acceptance + punch list, lazy (js/screens/flow-docs.js). Flow-2 jobs only. */''}
+    ${Number(p.flowVersion)>=2 && !isBsOnlyU?'<div id="jpd-flowdocs"></div>':''}
     <div id="jpd-forms"></div>
     ${(showMoney && (p.invoices||[]).length)?`
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🧾',16)} Billing Invoices</div>
@@ -2006,6 +2009,11 @@ function openJobProjectDetail(p, opts){
       const _paint = async ()=>{ let pj = p; try { const fr = await db.collection('job_projects').doc(p.id).get(); if (fr.exists) pj = { id:p.id, ...fr.data() }; } catch (_) {} if (panelLive(jpdPanel)) await window.PaymentClaimsUI.renderJobPayments(_payHost, pj, _paint); };
       return _paint();
     }).catch(()=>{});
+    const _docsHost = jpdPanel.querySelector('#jpd-flowdocs');
+    if (_docsHost) window.ensureScript('js/screens/flow-docs.js').then(()=>{
+      const _paintDocs = async ()=>{ let pj = p; try { const fr = await db.collection('job_projects').doc(p.id).get(); if (fr.exists) pj = { id:p.id, ...fr.data() }; } catch (_) {} if (panelLive(jpdPanel)) await window.FlowDocs.renderJobDocs(_docsHost, pj, _paintDocs); };
+      return _paintDocs();
+    }).catch(()=>{});
     const _formHost = jpdPanel.querySelector('#jpd-forms');
     if (_formHost) window.flowForms().then((F)=>{
       if (!panelLive(jpdPanel)) return;
@@ -2080,6 +2088,9 @@ async function closePrepaidJobIfDelivered(projectId, who){
     const ps = await ref.get();
     if (!ps.exists) return false;
     const pj = ps.data();
+    // J9 (spec §5.4): a flow-2 job does NOT close at delivery — it closes when the client has accepted the work AND the balance is zero
+    // (js/flow-core.js FlowCore.shouldClose, applied by FlowDocs.closeIfSettled). Only legacy jobs keep this rule.
+    if (Number(pj.flowVersion) >= 2) return false;
     const contractC = Math.round((Number(pj.contractAmount) || 0) * 100);
     const collectedC = Math.round((Number(pj.amountCollected) || 0) * 100);
     if (pj.stage !== 'delivered' || !(contractC > 0) || collectedC < contractC) return false;
@@ -2137,9 +2148,25 @@ async function advanceProjectStage(p, nextId){
   }
   const who=userProfile?.displayName||currentUser.email;
   const ns=jobStage(nextId);
+  // Flow-2 jobs (spec §5.4): J8 — no move to Completed without the signed acceptance and a cleared punch list; J9 — a job is never moved to
+  // Paid / Closed by hand (it closes by itself when it is completed and the balance is zero). Legacy jobs are untouched by both.
+  let _flowStamp = {};
+  if (Number(p.flowVersion) >= 2) {
+    try { await window.ensureScript('js/flow-core.js'); await window.ensureScript('js/screens/flow-docs.js'); }
+    catch (_) { Notifs.showToast('Could not check the turnover paperwork — try again.','error'); return; }
+    if (nextId === 'paid') { Notifs.showToast('A job closes by itself once the client has accepted the work and the balance is paid.','error'); return; }
+    if (nextId === 'completed') {
+      let fresh = p;
+      try { const fs = await db.collection('job_projects').doc(p.id).get(); if (fs.exists) fresh = { id:p.id, ...fs.data() }; } catch(_){}
+      const blockers = window.FlowCore.completeBlockers(fresh);
+      if (blockers.length) { window.FlowDocs.showCompleteBlocked(fresh, blockers, ()=>{ try{ window.renderProjectLifecycle(); }catch(_){} }); return; }
+    }
+    const _key = window.FlowCore.keyForProjectStage(nextId);
+    if (_key) _flowStamp = window.FlowCore.stageStamp(_key, new Date().toISOString());
+  }
   try{
     await db.collection('job_projects').doc(p.id).update({
-      stage:nextId, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+      stage:nextId, updatedAt:firebase.firestore.FieldValue.serverTimestamp(), ..._flowStamp,
       timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to '+ns.label, by:who })
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
@@ -2150,11 +2177,13 @@ async function advanceProjectStage(p, nextId){
     const dept=ns.dept;
     try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     // A fully prepaid job closes by itself (SF19): there is no balance to bill, so Finance is not asked to collect one.
-    const autoClosed = nextId==='delivered' ? await closePrepaidJobIfDelivered(p.id, who) : false;
+    let autoClosed = nextId==='delivered' ? await closePrepaidJobIfDelivered(p.id, who) : false;
+    // J9: a flow-2 job whose acceptance has just been completed and whose balance is already zero closes right here (best-effort, never undoes the move).
+    if (nextId==='completed' && Number(p.flowVersion) >= 2) { try { autoClosed = await window.FlowDocs.closeIfSettled(p.id, who); } catch(_){} }
     if(nextId==='delivered' && !autoClosed && Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)) > 0) { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
     if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid', link:'projects-lifecycle' }); }catch(_){} }
     window.logAudit && window.logAudit('update','project',p.id,{ stage:nextId });
-    Notifs.success(autoClosed ? 'Delivered — and closed, because it is fully paid' : 'Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
+    Notifs.success(autoClosed ? (nextId==='completed' ? 'Completed — and closed, because it is fully paid' : 'Delivered — and closed, because it is fully paid') : 'Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 
@@ -2295,7 +2324,8 @@ async function openProjectBillingModal(p){
         payments:firebase.firestore.FieldValue.arrayUnion(payment),
         documents:firebase.firestore.FieldValue.arrayUnion({ type:'Payment Acknowledgement', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
         timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Payment ₱${window.fmtN2(amount)} (${type})`, by:who }) };
-      if(newAR<=0) update.stage='paid';
+      // J9 (spec §5.4): a flow-2 job never closes because its balance reached zero — it closes when it is also completed (FlowCore.shouldClose).
+      if(newAR<=0 && !(Number(p.flowVersion)>=2)) update.stage='paid';
       const res = await window.Ledger.post({
         ref: projLedgerRef, date: today(), kind: 'credit',
         accountType: 'income', account: 'Sales Revenue', category: 'Sales Revenue',
@@ -2781,8 +2811,11 @@ async function syncJobFromProdStage(projectId, prodStageId) {
     const ord = s => JOB_STAGES.findIndex(x => x.id === s);
     const evt = { at:new Date().toISOString(), event:`Production: ${stageDef?.label||prodStageId}`, by:userProfile?.displayName||currentUser.email };
     const advance = cur !== 'paid' && cur !== 'cancelled' && ord(projStage) > ord(cur);
+    // flow-2 jobs: the stage the job moves INTO is stamped stageAt.<key> (spec §5.4); best-effort, a missing core stamps nothing.
+    let _stamp = {};
+    if (advance && Number(jdoc.exists ? jdoc.data().flowVersion : 0) >= 2) { try { await window.ensureScript('js/flow-core.js'); const _k = window.FlowCore.keyForProjectStage(projStage); if (_k) _stamp = window.FlowCore.stageStamp(_k, new Date().toISOString()); } catch(_){} }
     await db.collection('job_projects').doc(projectId).update({
-      ...(advance ? { stage: projStage } : {}),
+      ...(advance ? { stage: projStage, ..._stamp } : {}),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       timeline: firebase.firestore.FieldValue.arrayUnion(evt) });
     // reflect the milestone on the client's public tracker (forward only)

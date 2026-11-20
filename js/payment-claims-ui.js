@@ -335,6 +335,8 @@
     await step(async function () { if (o.createdBy && o.createdBy !== vNow.uid) await N.send(o.createdBy, { title: '✅ Payment confirmed', body: client + ' — ₱' + amt + ' (' + label + ') confirmed by ' + whoLabel + '. The Payment Acknowledgement is ready.', icon: '✅', type: 'payment_confirmed', link: 'sales-orders', dedupKey: 'payok-claim-' + o.id }); });
     await step(async function () { await N.sendToDept('Finance', { title: '💵 Payment confirmed', body: client + ' — ₱' + amt + ' (' + label + ') confirmed by ' + whoLabel + ' and posted to the ledger. No action needed.', icon: '💵', type: 'payment_confirmed', link: 'sales-orders', dedupKey: 'payfin-claim-' + o.id }); });
     await step(async function () { if (!vNow.isPresident) await N.sendToOwner({ title: '✅ Payment confirmed by ' + who + ' (Finance)', body: client + ' — ₱' + amt + ' (' + label + '), recorded by ' + (o.createdByName || '') + '. Confirmed in your place and posted to the ledger.', icon: '✅', type: 'payment_confirmed', link: 'sales-orders', dedupKey: 'payown-claim-' + o.id }); });
+    // J9 (spec §5.4, §13.2 Phase 4): a confirmed payment can settle a COMPLETED job, which then closes by itself. Last, best-effort, never undoes the post.
+    await step(async function () { if (o.projectId) { await window.ensureScript('js/screens/flow-docs.js'); await window.FlowDocs.closeIfSettled(o.projectId, who); } });
     invalidate();
   }
 

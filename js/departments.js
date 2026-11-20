@@ -4721,7 +4721,8 @@ async function openRecordSaleModal(o, container){
               payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount, vatAmount, net, method, orRef, date:today(), by:who, ledgerId:precomputedLedgerId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null }),
               documents:firebase.firestore.FieldValue.arrayUnion({ type:'Payment Acknowledgement', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
               timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale recorded ₱${window.fmtN2(amount)} by Finance`, by:who }) };
-            if (newAR<=0) fields.stage='paid';
+            // J9 (spec §5.4): a flow-2 job closes only when it is also completed (FlowCore.shouldClose), never because the balance hit zero.
+            if (newAR<=0 && !(Number(p.flowVersion)>=2)) fields.stage='paid';
             projectSync = { collection:'job_projects', docId:o.projectId, fields };
             if (o.trackingToken) window.syncOrderTracking(o.trackingToken, { paid:newCollected, balance:newAR });
           }
