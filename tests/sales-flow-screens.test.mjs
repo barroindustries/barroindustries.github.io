@@ -1112,7 +1112,7 @@ describe('clear error states and no dead buttons (owner quality bar)', () => {
     same(dead(d.lastPage()), []);
   });
   it('every class-bound button the Sales Orders page draws has a handler in its code (no dead buttons in any state, for any viewer)', async () => {
-    const wired = ['so-link-btn', 'so-del-btn', 'so-confirm-btn', 'so-reject-btn', 'so-editpay-btn', 'so-generate-btn', 'so-attach-btn', 'so-jo-btn', 'so-record-btn', 'so-design-btn', 'so-retry-btn', 'so-revise-btn'];
+    const wired = ['so-link-btn', 'so-del-btn', 'so-confirm-btn', 'so-reject-btn', 'so-editpay-btn', 'so-generate-btn', 'so-attach-btn', 'so-jo-btn', 'so-record-btn', 'so-design-btn', 'so-retry-btn', 'so-revise-btn', 'so-recpay-btn'];
     const seenClasses = new Set();
     for (const who of [PRES, SALES, FIN, MGR, PROD]) {
       const env = makeEnv(who, { seed: { sales_orders: {

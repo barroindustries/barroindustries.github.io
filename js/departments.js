@@ -4027,6 +4027,8 @@ window.renderSalesOrders = async function(container){
     if (st === 'awaiting_confirmation' && viewer.isFinanceTier && !viewer.isPresident && viewer.uid && o.createdBy === viewer.uid) h += sub('You recorded this payment, so the President confirms it.', 'var(--text-muted)');
     // CONTRACT-REVISE-HOOK (F3): placeholder filled lazily by js/contract-ui.js (revisions list, pending state, client credit). Nothing is loaded for an order that has none.
     try { const _pj = o.projectId ? projById[o.projectId] : null; if ((Number(o.contractRev) || 0) > 0 || o.pendingRevision || (_pj && Number(_pj.clientCredit) > 0)) h += `<div class="so-adj" data-id="${escHtml(o.id)}"></div>`; } catch (_) {}
+    // PAYMENT-CLAIM-HOOK (P5): placeholder filled lazily by js/payment-claims-ui.js (later payments of a confirmed flow-2 order, with state and PA button).
+    try { if (o.status === 'recorded' && o.flowVersion === 2) h += `<div class="so-claims" data-id="${escHtml(o.id)}"></div>`; } catch (_) {}
     return h;
   };
   // FLOW-FORM-HOOK: Sales Order / Payment Acknowledgement buttons from the form engine — only when it is ALREADY loaded
@@ -4071,6 +4073,8 @@ window.renderSalesOrders = async function(container){
     b.push(formBtns(o));
     // CONTRACT-REVISE-HOOK (F3): "Revise contract amount" — Sales members and the President, once the payment is confirmed, until the job is paid or cancelled.
     try { const _pj = o.projectId ? projById[o.projectId] : null; if (o.status === 'recorded' && (isSalesActor || isPres) && _pj && !['paid','cancelled'].includes(_pj.stage)) b.push(`<button class="btn-secondary btn-sm so-revise-btn" data-id="${o.id}" style="min-height:44px">Revise contract amount</button>`); } catch (_) {}
+    // PAYMENT-CLAIM-HOOK (P5): "Record payment" for a later payment (balance / progress / change-order down payment) on a confirmed flow-2 order whose job still has a balance. Sales + President; lazy js/payment-claims-ui.js.
+    try { const _pj2 = o.projectId ? projById[o.projectId] : null; if (o.status === 'recorded' && o.flowVersion === 2 && (isSalesActor || isPres) && _pj2 && !['paid','cancelled'].includes(_pj2.stage) && (_pj2.arBalance != null && _pj2.arBalance !== '' ? Number(_pj2.arBalance) : (Number(_pj2.contractAmount)||0) - (Number(_pj2.amountCollected)||0)) > 0) b.push(`<button class="btn-primary btn-sm so-recpay-btn" data-id="${o.id}" style="min-height:44px">Record payment</button>`); } catch (_) {}
     if (isPres) b.push(`<button class="btn-danger btn-sm so-del-btn" data-id="${o.id}" title="Delete this sales order and everything it created">${emojiIcon('🗑',14)}</button>`);
     return `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end">${b.join('')}</div>`;
   };
@@ -4143,6 +4147,13 @@ window.renderSalesOrders = async function(container){
     catch (_) { Notifs.showToast('Could not open the contract screen. Check your connection and try again.', 'error'); }
   })));
   try { if (c.querySelector('.so-adj')) window.ensureScript('js/contract-ui.js').then(()=>window.ContractUI.fillAdjustments(c, orders, projById, rerender)).catch(()=>{}); } catch (_) {}
+  // PAYMENT-CLAIM-HOOK (P5): Record payment + the later-payment lines; the screens live in js/payment-claims-ui.js (lazy). A failed load is a plain toast.
+  c.querySelectorAll('.so-recpay-btn').forEach(b=>b.addEventListener('click', ()=>window.busy(b, async ()=>{
+    const o = byId(b); if(!o) return;
+    try { await window.ensureScript('js/payment-claims-ui.js'); await window.PaymentClaimsUI.openRecordSheet({ orderId: o.id }, rerender); }
+    catch (_) { Notifs.showToast('Could not open the payment screen. Check your connection and try again.', 'error'); }
+  })));
+  try { if (c.querySelector('.so-claims')) window.ensureScript('js/payment-claims-ui.js').then(()=>window.PaymentClaimsUI.fillClaims(c, orders, rerender)).catch(()=>{}); } catch (_) {}
   // The President's one-tap confirmation (or Finance standing in); each card is gated again inside the sheet and the core.
   c.querySelectorAll('.so-confirm-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.openPaymentConfirmSheet(o, rerender); }));
   c.querySelectorAll('.so-reject-btn').forEach(b=>b.addEventListener('click', ()=>{ const o = byId(b); if(o) window.rejectOrderPayment(o, rerender); }));
@@ -4336,8 +4347,16 @@ async function _loadPendingPaymentConfirmations(){
     .filter(o => window.SalesFlow.orderState(o) === 'awaiting_confirmation')
     .sort((a, b) => ((b.createdAt && b.createdAt.seconds) || 0) - ((a.createdAt && a.createdAt.seconds) || 0));
 }
+// Later payments (P5): payment_claims waiting for a decision. Never throws; a failed read is "none" (the order list still shows).
+async function _loadPendingPaymentClaims(){
+  try {
+    const snap = await dbCachedGet('approvals-pending:payment_claims-pending', () => db.collection('payment_claims').where('status', '==', 'pending').orderBy('createdAt', 'desc').get(), 30000);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { return []; }
+}
+// The count the dashboard banner shows: the first payments of orders AND the later payments (payment_claims).
 window.pendingPaymentConfirmations = async function(){
-  try { return await _loadPendingPaymentConfirmations(); }
+  try { return (await _loadPendingPaymentConfirmations()).concat(await _loadPendingPaymentClaims()); }
   catch (e) { console.warn('[payments to confirm] could not load', e); return []; }
 };
 
@@ -4700,7 +4719,7 @@ async function openRecordSaleModal(o, container){
             const newAR = Math.max(0, (p.contractAmount||contract) - newCollected);
             const fields = { amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
               payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount, vatAmount, net, method, orRef, date:today(), by:who, ledgerId:precomputedLedgerId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null }),
-              documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
+              documents:firebase.firestore.FieldValue.arrayUnion({ type:'Payment Acknowledgement', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
               timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale recorded ₱${window.fmtN2(amount)} by Finance`, by:who }) };
             if (newAR<=0) fields.stage='paid';
             projectSync = { collection:'job_projects', docId:o.projectId, fields };

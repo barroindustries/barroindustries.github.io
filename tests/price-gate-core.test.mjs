@@ -19,7 +19,7 @@ const approved = (total, lines) => ({ total, lines: lines.map(([key, unit]) => (
 
 describe('module contract', () => {
   it('exports the documented members; F7 flag defaults to false', () => {
-    assert.deepEqual(Object.keys(PG).sort(), ['REQUIRE_APPROVAL_FOR_PAYMENT', 'evaluate', 'lastApprovedFromChain', 'lineKey', 'snapshotFromQuote']);
+    assert.deepEqual(Object.keys(PG).sort(), ['REQUIRE_APPROVAL_FOR_PAYMENT', 'evaluate', 'lastApprovedFromChain', 'lineKey', 'pickLastApprovedQuote', 'snapshotFromQuote']);
     assert.equal(PG.REQUIRE_APPROVAL_FOR_PAYMENT, false);
     assert.equal(globalThis.window.PriceGate, PG);
   });

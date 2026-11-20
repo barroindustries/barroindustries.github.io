@@ -255,7 +255,7 @@ window.Notifs = (() => {
     delete_denied:{icon:'🗑️',accent:'#D92D20'}, client_delete_request:{icon:'🗑️',accent:'#D92D20'},
     quote_delete_request:{icon:'🗑️',accent:'#D92D20'},
     // Sales / quotes
-    quote_filed:{icon:'📄',accent:'#1C7ED6'}, quote_returned:{icon:'↩️',accent:'#E8590C'},
+    quote_filed:{icon:'📄',accent:'#1C7ED6'}, quote_carried:{icon:'📄',accent:'#2F9E44'}, quote_returned:{icon:'↩️',accent:'#E8590C'},
     quote_review_request:{icon:'👀',accent:'#1C7ED6'}, quote_approved:{icon:'✅',accent:'#2F9E44'},
     quote_rejected:{icon:'❌',accent:'#D92D20'}, bs_quote:{icon:'📄',accent:'#1C7ED6'},
     quote_comment:{icon:'💬',accent:'#1C7ED6'},   // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §7.2: a comment on a quote's approval thread

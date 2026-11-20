@@ -5134,6 +5134,68 @@ function _qbCleanApprovalWhy(w) {
   return { reasons: ORDER.filter(c => got.indexOf(c) >= 0), text: String(w.text == null ? '' : w.text).slice(0, 600), ticked: w.ticked === true };
 }
 
+// ── P1, Phase 3 (SALES-FLOW-SPEC-2026-11-19 §6): the price gate at filing ──────────────────────────────────────────────────────────────────────────────────────
+// priceCheck (§6.3) is the builder's own standard-price answer for the quote (C2; absent until the builder sends it). Sanitised to the exact keys; null for anything else.
+function _qbCleanPriceCheck(pc) {
+  if (!pc || typeof pc !== 'object' || Array.isArray(pc) || !Array.isArray(pc.lines)) return null;
+  const num = x => (x !== null && x !== undefined && x !== '' && isFinite(Number(x))) ? Number(x) : null;
+  const total = num(pc.total); if (total === null) return null;
+  return {
+    v: 1, source: pc.source === 'kc' ? 'kc' : 'qb2', basis: 'net', total, stdTotal: num(pc.stdTotal),
+    lines: pc.lines.slice(0, 200).filter(l => l && typeof l === 'object').map(l => ({
+      key: String(l.key == null ? '' : l.key).slice(0, 200), name: String(l.name == null ? '' : l.name).slice(0, 200), qty: num(l.qty), unit: num(l.unit) === null ? 0 : num(l.unit),
+      std: num(l.std), mode: ['cost', 'list', 'fee', 'unknown'].indexOf(l.mode) >= 0 ? l.mode : 'unknown' })),
+  };
+}
+// The quotes of one revision chain (rootQuoteId), as plain { id, ...data }. A non-admin can read only their own quotes (rules), so the query is narrowed to createdBy — the same
+// rows, and a query the rules can prove. The root doc is read by id as well (an older root may not carry rootQuoteId itself). Throws when a read fails: the callers decide what that means.
+async function _qbChainQuotes(coll, rootId) {
+  const admin = ['president', 'manager', 'secretary'].indexOf(currentRole) >= 0;
+  let q = db.collection(coll).where('rootQuoteId', '==', rootId);
+  if (!admin) q = q.where('createdBy', '==', currentUser.uid);
+  const byId = new Map();
+  (await q.get()).docs.forEach(d => byId.set(d.id, { id: d.id, ...d.data() }));
+  if (!byId.has(rootId)) { const r = await db.collection(coll).doc(rootId).get(); if (r && r.exists) byId.set(rootId, { id: rootId, ...r.data() }); }
+  return Array.from(byId.values());
+}
+// "BKxx-007R2" -> 2 (0 when the number carries no revision suffix).
+function _qbRevOf(no) { const m = /R(\d+)\s*(?:\(\d+\))?$/i.exec(String(no || '').trim()); return m ? Number(m[1]) : 0; }
+// The reasons of a gate result in one plain sentence for the review page and the notification (the R style, no "Rev.").
+function _qbGateText(g) {
+  const p = x => '₱' + window.fmtN2(x);
+  const bits = (g.reasons || []).slice(0, 6).map(r => (r.level === 'total' ? 'Total' : (r.name || 'A line')) + ' ' + p(r.price)
+    + (r.approved === null || r.approved === undefined ? ' (new line)' : ' is below the ' + p(r.approved) + ' you approved')
+    + (r.std === null || r.std === undefined ? ', cost unknown' : ', and below the standard ' + p(r.std)));
+  const head = g.error ? 'Could not check the earlier approval.' : (g.approveAll ? 'Every quote needs your approval (switch).' : (g.builderDisagrees ? 'The builder and the price check disagree.' : ''));
+  return [head, bits.length ? 'Price check: ' + bits.join('; ') + '.' : ''].filter(Boolean).join(' ').slice(0, 600);
+}
+// The gate (§6.6). Runs only for a revision (the payload names its chain) filed by someone other than the President.
+//   -> { mode: 'none' }  nothing in the chain was approved by Neil: file as today, the gate does not run
+//      { mode: 'carry', fromId, approvedOn, approvedTotal }  the revision rides Neil's approval
+//      { mode: 'approve', reasons, error?, approveAll?, builderDisagrees? }  it goes to Neil, whatever the "send for approval" tick said
+// approveAll ON never carries. builderCovered is the builder's own verdict when its payload carries one (true / false / null); a disagreement goes to Neil. A failed read goes to Neil too.
+async function _qbChainGate(coll, data, builderCovered) {
+  if (!data.rootQuoteId) return { mode: 'none' };
+  try {
+    const PG = window.PriceGate;
+    if (!PG) throw new Error('price gate not loaded');
+    const [flags, chain] = await Promise.all([db.collection('settings').doc('quote_builder').get(), _qbChainQuotes(coll, data.rootQuoteId)]);
+    const approved = chain.filter(x => x.approvalStatus === 'approved');   // only an approved doc can be named by approvalCarriedFrom (rules C3)
+    const best = PG.pickLastApprovedQuote(approved);
+    if (!best) return { mode: 'none' };
+    if (flags && flags.exists && flags.data().approveAll === true) return { mode: 'approve', reasons: [], approveAll: true };
+    const lastApproved = PG.lastApprovedFromChain(approved);
+    const res = PG.evaluate({ priceCheck: data.priceCheck, items: data.items, total: data.total, grandTotal: data.grandTotal }, lastApproved);
+    if (res.needsApproval) return { mode: 'approve', reasons: res.reasons };
+    if (builderCovered === false) return { mode: 'approve', reasons: [], builderDisagrees: true };
+    const at = best.approvedAt && typeof best.approvedAt.toDate === 'function' ? best.approvedAt.toDate() : null;
+    return { mode: 'carry', fromId: best.id, approvedOn: at ? at.toISOString() : String((best.approvedSnapshot && best.approvedSnapshot.at) || ''), approvedTotal: lastApproved.total };
+  } catch (err) {
+    console.warn('[QB bridge] the price gate could not read the chain; the revision goes to the President', err);
+    return { mode: 'approve', reasons: [], error: true };
+  }
+}
+
 // §8.1 — record a filed / sent-for-approval / updated quote on the request or brief it came from, and move that request to 'quoted'.
 //   sourceRef  the (untrusted) link the builder posted        info  { docId, coll, quoteNumber, version, total, status, byName }
 //   -> true when the request was updated; false for anything else. NEVER throws and never blocks a filing: a request that is gone
@@ -5220,7 +5282,8 @@ window.addEventListener('message', async (e) => {
   // #qb-frame iframe — do the same here for defense-in-depth.
   const qbFrame = document.getElementById('qb-frame');
   if (!qbFrame || e.source !== qbFrame.contentWindow) return;
-  const { type, payload, docId, collection } = e.data || {};
+  let { type, payload } = e.data || {};
+  const { docId, collection } = e.data || {};
   if (!payload || !currentUser || !db) return;
 
   // QUOTE-BUILDER-CONFIGURATOR-SPEC §6.5: "Open request" in the builder's hand-off bar. No write, so it needs no costSidecar / collection;
@@ -5420,6 +5483,23 @@ window.addEventListener('message', async (e) => {
   // saveReviewedPartnerQuote() .update() path above: the user reopened an
   // existing quote and chose "update original" at File time instead of filing
   // a new copy. Only known quote collections are ever touched.
+  // P1 (SALES-FLOW-SPEC §6.6, Q65): an APPROVED quote is never edited in place — that would change the price Neil approved without the gate. The save is filed as a new revision
+  // instead (R2, R3… from the highest suffix in the chain) and falls through to the QUOTE_FILED path below, where the gate carries or re-approves it. A source that cannot be read counts as approved.
+  if (type === 'QUOTE_UPDATE' && docId && window.QUOTE_COLLECTIONS.includes(collection)) {
+    try {
+      let src = null, srcReadFailed = false;
+      try { const sn = await db.collection(collection).doc(docId).get(); src = sn && sn.exists ? sn.data() : null; } catch (_) { srcReadFailed = true; }
+      if (srcReadFailed || (src && src.approvalStatus === 'approved')) {
+        const root = (src && src.rootQuoteId) || (payload && payload.rootQuoteId) || docId;
+        let chain = []; try { chain = await _qbChainQuotes(collection, root); } catch (_) {}
+        const base = String((payload && payload.quoteNumber) || (src && src.quoteNumber) || '').replace(/R\d+\s*(?:\(\d+\))?$/i, '');
+        const next = Math.max(_qbRevOf(payload && payload.quoteNumber), _qbRevOf(src && src.quoteNumber), ...chain.map(c => _qbRevOf(c.quoteNumber))) + 1;
+        payload = Object.assign({}, payload, { quoteNumber: base + 'R' + next, rootQuoteId: root, parentQuoteId: docId, company: (payload && payload.company) || (src && src.company) || 'BK' });
+        type = 'QUOTE_FILED';
+        try { Notifs.showToast('This quote is approved, so your changes were filed as a new revision (R' + next + ').', 'info'); } catch (_) {}
+      }
+    } catch (err) { console.error('[QB bridge] approved-source check failed', err); type = 'QUOTE_FILED'; }
+  }
   if (type === 'QUOTE_UPDATE') {
     try {
       if (!docId || !window.QUOTE_COLLECTIONS.includes(collection)) return;
@@ -5471,6 +5551,7 @@ window.addEventListener('message', async (e) => {
         // allowlist sanitisers.
         ...(Object.prototype.hasOwnProperty.call(payload, 'sourceRef') ? { sourceRef: _qbCleanSourceRef(payload.sourceRef) } : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, 'estimateCheck') ? { estimateCheck: _qbCleanEstimateCheck(payload.estimateCheck) } : {}),
+        ...(Object.prototype.hasOwnProperty.call(payload, 'priceCheck') ? { priceCheck: _qbCleanPriceCheck(payload.priceCheck) } : {}),   // §6.3, same rule as estimateCheck
         // rootQuoteId/parentQuoteId are deliberately NOT touched here — this is
         // the SAME doc being edited, its place in the revision chain doesn't change.
         editedAt:       firebase.firestore.FieldValue.serverTimestamp(),
@@ -5564,6 +5645,8 @@ window.addEventListener('message', async (e) => {
       // serves QUOTE_FILED and QUOTE_APPROVAL_REQUESTED below, so both paths carry them.
       sourceRef:      _qbCleanSourceRef(payload.sourceRef),
       estimateCheck:  _qbCleanEstimateCheck(payload.estimateCheck),
+      // §6.3 — the builder's standard-price answer, kept on the quote for the price gate (and for approvedSnapshot at approval). null until the builder sends it.
+      priceCheck:     _qbCleanPriceCheck(payload.priceCheck),
       // Wave 3 Q5 — revision-chain links. parentQuoteId is null for a
       // from-scratch quote. rootQuoteId is patched to the new doc's own id
       // below when this is the first-ever filing in its chain (payload didn't
@@ -5583,6 +5666,17 @@ window.addEventListener('message', async (e) => {
     // Quotations summary, which badges the BI ones — and Brilliant Steel quotes
     // in bs_quotes.
     const coll = window.quoteCollectionFor(data.company);
+
+    // P1 (§6.6): the price gate. `route` is what the quote does: QUOTE_FILED files it, QUOTE_APPROVAL_REQUESTED sends it to Neil. The gate can only move a FILED quote to
+    // approval ("needs approval" wins over the tick) or file it as carried; a quote the builder already sent for approval stays with Neil (the builder asked, or disagrees).
+    let route = type;
+    let gate = { mode: 'none' };
+    if (currentRole !== 'president' && data.rootQuoteId) {
+      const bc = typeof payload.approvalCovered === 'boolean' ? payload.approvalCovered : (typeof e.data.approvalCovered === 'boolean' ? e.data.approvalCovered : null);
+      gate = await _qbChainGate(coll, data, bc);
+      if (route === 'QUOTE_FILED' && gate.mode === 'approve') route = 'QUOTE_APPROVAL_REQUESTED';
+    }
+    const gateText = route === 'QUOTE_APPROVAL_REQUESTED' && gate.mode === 'approve' ? _qbGateText(gate) : '';
 
     // Versioning: if THIS user re-files a quote with the same number, save a new
     // version named "<quoteNo> (2)", "(3)"… instead of silently duplicating.
@@ -5615,9 +5709,13 @@ window.addEventListener('message', async (e) => {
     // deletes ITS OWN doc, not just the slot above.
     const deleteNamedDraft = async () => { const id0 = e.data.draftDocId; if (id0) { try { await db.collection(coll).doc(id0).delete(); } catch(_){} await deleteCostSidecar(coll, id0); } };
 
-    if (type === 'QUOTE_FILED') {
-      Object.assign(data, window.quoteStateFields('filed'));
+    const carried = route === 'QUOTE_FILED' && gate.mode === 'carry';
+    if (route === 'QUOTE_FILED') {
+      Object.assign(data, window.quoteStateFields(carried ? 'approved' : 'filed'));
       data.filedAt = firebase.firestore.FieldValue.serverTimestamp();
+      // Filed under Neil's earlier approval (§6.6): the doc that approval is on, when it was filed under it, and the date of Neil's own approval (for the "carried" badge). Carried approvals never become
+      // the bar for the next revision (PriceGate.lastApprovedFromChain skips approvalCarriedFrom), and no approvedBy / approvedSnapshot is written: this is not a new approval.
+      if (carried) { data.approvalCarriedFrom = gate.fromId; data.approvalCarriedAt = firebase.firestore.FieldValue.serverTimestamp(); data.approvalCarriedOn = gate.approvedOn || ''; }
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
@@ -5627,7 +5725,16 @@ window.addEventListener('message', async (e) => {
       await deleteDraftSlot();
       await deleteNamedDraft();
       // Notify president so they're aware of filed quotes
-      await Notifs.sendToOwner({
+      if (carried) {
+        // the control behind the carry (§6.6, §12): Neil is told every time, in the R style, and nothing is asked of him
+        const rn = _qbRevOf(data.quoteNumber), on = gate.approvedOn ? new Date(gate.approvedOn) : null;
+        const date = on && !isNaN(on) ? on.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' }) : 'earlier';
+        await Notifs.sendToOwner({
+          title: '📋 Quote revision filed (no action)',
+          body: `${agentName}: ${rn ? 'R' + rn + ' of ' : ''}${data.fileName} filed under your approval of ${date}: ₱${window.fmtN2(gate.approvedTotal||0)} → ₱${window.fmtN2(payload.total||0)}. No action needed.`.slice(0, 2000),
+          icon: '📋', type: 'quote_carried', link: (coll === 'bk_quotes') ? 'bk-quotations' : 'bs-quotations'
+        });
+      } else await Notifs.sendToOwner({
         title: '📋 Quote Filed',
         body: `${agentName} filed "${data.fileName}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)}`,
         icon: '📋', type: 'quote_filed', link: (coll === 'bk_quotes') ? 'bk-quotations' : 'bs-quotations'
@@ -5642,6 +5749,8 @@ window.addEventListener('message', async (e) => {
       data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
       // QUOTE-APPROVAL-LINK-SPEC-2026-11-20 §3.1 — why it went for approval (this branch only: QUOTE_FILED and QUOTE_UPDATE never write the field).
       data.approvalWhy = _qbCleanApprovalWhy(e.data.approvalWhy);
+      // the gate's reasons join the builder's sentence (§6.6): the review page and the notification say WHY it came back to Neil
+      if (gateText) data.approvalWhy = _qbCleanApprovalWhy(Object.assign({ reasons: [], text: '', ticked: false }, data.approvalWhy, { text: [data.approvalWhy && data.approvalWhy.text, gateText].filter(Boolean).join(' ') }));
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
@@ -5672,7 +5781,7 @@ window.addEventListener('message', async (e) => {
       } catch (thErr) { console.warn('[QB bridge] approval thread entry failed (non-blocking)', thErr); }
       await Notifs.sendToOwner({
         title: '📤 Quote Awaiting Approval',
-        body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.`,
+        body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.${gateText ? ' ' + gateText : ''}`.slice(0, 2000),
         icon: '📤', type: 'quote_review_request', link: approvalRef ? 'quote-approval/' + approvalRef : 'approvals'
       });
       // The shell owns the link (D5): the doc id exists only here. Remembered for the builder's "Pending Approval" badge (QB_SHOW_APPROVAL_LINK).

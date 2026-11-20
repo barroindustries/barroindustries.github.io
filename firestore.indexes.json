@@ -403,6 +403,22 @@
         { "fieldPath": "sharedUids", "arrayConfig": "CONTAINS" },
         { "fieldPath": "updatedAt",  "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "payment_claims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "payment_claims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orderId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

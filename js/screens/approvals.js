@@ -286,6 +286,7 @@ window.renderApprovals = async function(currentUser) {
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('ℹ️',16)} Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
     <div id="approvals-payconfirm"></div>
     <div id="approvals-contractchange"></div>
+    <div id="approvals-payclaims"></div>
     ${window.chipTabs(approvalChips, 'all')}
     <div id="approvals-content">${window.skeletonHtml('rows')}</div>
   `;
@@ -295,6 +296,8 @@ window.renderApprovals = async function(currentUser) {
   if (typeof window.renderPaymentConfirmList === 'function') window.renderPaymentConfirmList(c.querySelector('#approvals-payconfirm'), { onDone: () => renderApprovals(currentUser) });
   // "Contract changes" (SALES-FLOW-SPEC §7.3): the decision block of F3, lazy (js/contract-ui.js). It gates itself; a failed load leaves the host empty.
   try { window.ensureScript('js/contract-ui.js').then(() => window.ContractUI.renderDecisionBlock(c.querySelector('#approvals-contractchange'), { onDone: () => renderApprovals(currentUser) })).catch(() => {}); } catch (_) {}
+  // "Later payments to confirm" (SALES-FLOW-SPEC §8): balance / progress / change-order payments (payment_claims), lazy (js/payment-claims-ui.js). It gates itself; a failed load leaves the host empty.
+  try { window.ensureScript('js/payment-claims-ui.js').then(() => window.PaymentClaimsUI.renderDecisionBlock(c.querySelector('#approvals-payclaims'), { onDone: () => renderApprovals(currentUser) })).catch(() => {}); } catch (_) {}
 
   // Which sub-tab the DOM currently inside #approvals-content belongs to. Seeded
   // to 'all' because the container is rendered above ALREADY holding the 'all'
@@ -1588,10 +1591,27 @@ async function decideQuoteApproval(o){
       return { ok:false, reason:'state', state: d.approvalStatus || d.status || '' };
     }
     const FV = firebase.firestore.FieldValue;
+    // P1 (SALES-FLOW-SPEC §6.5): the approval also records WHAT was approved — the bar a later revision is compared with (PriceGate, js/price-gate-core.js).
+    // Built from priceCheck when the quote has one, else its total and items. The President's edits count; edits that change the money make the builder's priceCheck stale, so it is ignored then.
+    // The ONE place it is written (every Approve goes through this function). Best-effort: a snapshot that cannot be built never blocks the approval (the gate rebuilds one from the quote).
+    let snapFields = {};
+    if(approve){
+      const byName = (typeof userProfile !== 'undefined' && userProfile && userProfile.displayName) || currentUser.email || '';
+      snapFields = { approvedByName: byName };
+      try{
+        if(window.PriceGate && typeof window.PriceGate.snapshotFromQuote === 'function'){
+          const e = o.edits || {};
+          const money = ['items','total','grandTotal','netAmount','subtotal','amount','priceCheck'].some(k => Object.prototype.hasOwnProperty.call(e, k));
+          const merged = Object.assign({}, d, e); if(money && !Object.prototype.hasOwnProperty.call(e, 'priceCheck')) delete merged.priceCheck;
+          const snap = window.PriceGate.snapshotFromQuote(merged);
+          snapFields.approvedSnapshot = { total: snap.total, lines: snap.lines, at: new Date().toISOString(), by: currentUser.uid, byName, quoteNumber: String(merged.quoteNumber || d.quoteNumber || '') };
+        }
+      }catch(snapErr){ console.warn('[approvals] approvedSnapshot not built (non-blocking)', snapErr); }
+    }
     await db.collection(coll).doc(quoteId).update({
       ...(o.edits || {}),
       ...(approve ? window.quoteStateFields('approved') : window.quoteStateFields('needs_revision')),
-      ...(approve ? { approvedAt: FV.serverTimestamp(), approvedBy: currentUser.uid } : { returnedAt: FV.serverTimestamp(), returnedBy: currentUser.uid }),
+      ...(approve ? { approvedAt: FV.serverTimestamp(), approvedBy: currentUser.uid, ...snapFields } : { returnedAt: FV.serverTimestamp(), returnedBy: currentUser.uid }),
       ...(notes ? { presidentNotes: notes } : {}) });
     await window.syncQuoteStatusToRequest(coll, quoteId, approve ? 'approved' : 'needs_revision');   // best-effort: the website request this quote came from follows its status
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(x=>x.ref.update({status: approve ? 'approved' : 'returned'}))));

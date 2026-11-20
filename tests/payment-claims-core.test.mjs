@@ -420,3 +420,28 @@ describe('runConfirmation (§8.3)', () => {
     assert.equal(w.ledgerCalls[0].projectSync.fields.amountCollected, 100000);
   });
 });
+
+describe('the claim keeps its own "as of this payment" figures (for its Payment Acknowledgement)', () => {
+  it('a confirmed claim stores collectedAfter and balanceAfter as of that payment', async () => {
+    const { w, deps } = world();
+    await PC.runConfirmation('clm1', deps);
+    assert.equal(w.claimPatches[0].collectedAfter, 100000);
+    assert.equal(w.claimPatches[0].balanceAfter, 0);
+  });
+  it('a partial payment: 65,000 collected + 20,000 → 85,000 collected, 15,000 balance', () => {
+    const pl = PC.planConfirmation(claim({ paymentReceived: 20000 }), project(), ctxOf());
+    assert.equal(pl.claimPatch.collectedAfter, 85000);
+    assert.equal(pl.claimPatch.balanceAfter, 15000);
+  });
+  it('a repaired claim does NOT get these figures (the fresh job already counts this payment, so they would be double)', async () => {
+    const { w, deps } = world({ failClaimOnce: true });
+    await assert.rejects(() => PC.runConfirmation('clm1', deps), /network/);
+    await PC.runConfirmation('clm1', deps);
+    assert.ok(!('collectedAfter' in w.claimPatches[0]) && !('balanceAfter' in w.claimPatches[0]));
+  });
+  it('a site-visit fee claim has no job figures', () => {
+    const pl = PC.planConfirmation(claim({ kind: 'site_visit', projectId: null }), null, ctxOf());
+    assert.ok(pl.ok, pl.code);
+    assert.ok(!('collectedAfter' in pl.claimPatch));
+  });
+});

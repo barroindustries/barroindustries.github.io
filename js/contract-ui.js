@@ -33,7 +33,7 @@
   function isSalesActor() { return typeof window.canEditDept === 'function' && window.canEditDept('Sales') && (window.currentRole || '') !== 'secretary'; }
 
   async function loadCores() {
-    await window.ensureScript('js/price-gate-core.js');
+    if (!window.PriceGate) await window.ensureScript('js/price-gate-core.js');   // eager in the app kit since Phase 3; the lazy load is only a fallback
     await window.ensureScript('js/contract-core.js');
     if (!window.ContractCore || !window.PriceGate) throw new Error('The contract engine did not load.');
   }

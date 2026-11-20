@@ -1988,7 +1988,7 @@ describe('Fable review F7: the typed costs of a custom item survive an update in
     const ctx = vm.createContext({ window: win, db, console: { log() {}, error() {}, warn() {} }, document: { getElementById: (id) => (id === 'qb-frame' ? { contentWindow: FRAME } : null) },
       firebase: { firestore: { FieldValue: { serverTimestamp: () => ({ ts: 1 }) } } }, currentUser: { uid: 'u-sales', email: 's@example.test' }, userProfile: { displayName: 'Sales One' }, currentRole: 'employee',
       Notifs: { showToast() {}, success() {}, sendToOwner: async () => {} }, dbCacheInvalidate() {}, setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, clearTimeout });
-    vm.runInContext('function _qbCleanSourceRef() { return null; } function _qbCleanEstimateCheck() { return null; }\n' + (opt.noKeep ? '' : KEEP + '\n') + LISTENER, ctx);       // the two sanitisers are not what this is about
+    vm.runInContext('function _qbCleanSourceRef() { return null; } function _qbCleanEstimateCheck() { return null; } function _qbCleanPriceCheck() { return null; } async function _qbChainGate() { return { mode: "none" }; } function _qbRevOf() { return 0; } async function _qbChainQuotes() { return []; } function _qbGateText() { return ""; }\n' + (opt.noKeep ? '' : KEEP + '\n') + LISTENER, ctx);       // the two sanitisers are not what this is about
     const send = async (type, payload, extra) => { await listeners[0]({ origin: ORIGIN, source: FRAME, data: Object.assign({ type, payload }, extra || {}) }); };
     return { store, reads, sets, send, ctx };
   }

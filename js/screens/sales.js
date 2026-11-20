@@ -790,6 +790,12 @@ window.quoteDisplayNo = function (q) {
 // quote. Returns null when the normal status badge should stay (not filed, already ordered, or no approval state).
 window.quoteApprovalBadge = function (q) {
   if (!q || q.salesOrderId || q.status !== 'filed') return null;
+  // P1 (SALES-FLOW-SPEC §6.6): a revision filed under Neil's earlier approval. The date is Neil's own approval it rides on (approvalCarriedOn; older docs fall back to the day it was carried).
+  if (q.approvalStatus === 'approved' && q.approvalCarriedFrom) {
+    const t = q.approvalCarriedOn ? new Date(q.approvalCarriedOn) : (q.approvalCarriedAt && typeof q.approvalCarriedAt.toDate === 'function' ? q.approvalCarriedAt.toDate() : null);
+    const on = t && !isNaN(t) ? t.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    return { cls: 'badge-green', label: 'Approved (carried)', title: on ? 'Filed under the President\'s approval of ' + on : 'Filed under an earlier approval by the President' };
+  }
   return ({
     approved:       { cls: 'badge-green',  label: 'Approved' },
     pending_review: { cls: 'badge-orange', label: 'Pending approval' },
@@ -1519,7 +1525,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         <div style="text-align:right">
           <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0)}</div>
           ${(() => { const ab = window.quoteApprovalBadge(q); return ab
-            ? `<span class="badge ${ab.cls}" style="margin-top:4px">${ab.label}</span>`
+            ? `<span class="badge ${ab.cls}" style="margin-top:4px"${ab.title ? ' title="' + escHtml(ab.title) + '"' : ''}>${ab.label}</span>`
             : `<span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>`; })()}
           ${(q.sentAt || q.status==='sent')?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">Sent${q.sentDate ? ' · ' + escHtml(q.sentDate) : ''}</span>`:''}
           ${q.status==='lost'?`<div style="font-size:10px;color:var(--text-muted)">${escHtml(q.lostReasonLabel||'')}${q.lostNote ? ' — ' + escHtml(q.lostNote) : ''}</div>`:''}
@@ -2363,6 +2369,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
               <td class="tc-detail" data-label="Agent">${escHtml(q.agentName||q.createdByName||'—')}</td>
               <td class="tc-detail" data-label="Status">
                 <span class="badge ${badge}">${window.statusLabel2('quote', status)}</span>
+                ${(() => { const ab = q.approvalCarriedFrom ? window.quoteApprovalBadge(q) : null; return ab ? `<span class="badge ${ab.cls}" style="font-size:9px;margin-left:4px" title="${escHtml(ab.title || '')}">${ab.label}</span>` : ''; })()}
                 ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
                 ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
                 ${window.quoteShareChipHtml(q)}

@@ -299,7 +299,9 @@ function openDeliveryReceiptModal(order, onSaved, opts){
         ${dr.notes?`<span style="color:var(--text-muted)">Notes</span><span>${escHtml(dr.notes)}</span>`:''}
         <span style="color:var(--text-muted)">Recorded by</span><span>${escHtml(dr.byName||'')}</span>
       </div>`,
-      `<button class="btn-primary" id="dr-print">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+      `<button class="btn-primary" id="dr-print">${emojiIcon('🖨',16)} Print</button><span id="dr-forms"></span><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    // FLOW-FORM-HOOK: the same receipt on the form engine, as a downloadable form. Silent when the engine is absent.
+    try { window.flowForms().then((F)=>{ const h = _viewPanel.querySelector('#dr-forms'); if (!h || !panelLive(_viewPanel)) return; h.innerHTML = String(F.buttonHtml('delivery_receipt', { docId: order.id, projectId: order.projectId || null }, { label: 'Download' }) || ''); F.bind(h); }).catch(()=>{}); } catch (_) {}
     // ⚠ SCOPED TO THIS PANEL, NOT document — see openQCModal's note above.
     _viewPanel.querySelector('#dr-print')?.addEventListener('click', ()=>printDeliveryReceipt(order));
     return;
@@ -1862,6 +1864,10 @@ function openJobProjectDetail(p, opts){
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
       ${visDocs.length?`<div class="table-wrap"><table class="data-table"><tbody>${visDocs.map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${(dc.driveUrl||dc.url)?`<a href="${escHtml(dc.driveUrl||dc.url)}" target="_blank" rel="noopener">${escHtml(dc.ref||'Open')}</a>`:escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
     </div></div>
+    ${/* PAYMENT-CLAIM-HOOK (P5): the job's payment lines + Record payment, lazy (js/payment-claims-ui.js). Money viewers of a flow-2 job only. */''}
+    ${(showMoney && !isBsOnlyU && Number(p.flowVersion)>=2 && p.salesOrderId)?'<div id="jpd-payments"></div>':''}
+    ${/* FLOW-FORM-HOOK (P4): the Operations forms (QC checklist, installation checklist, punch list, client acceptance), drawn by js/forms.js when it loads. */''}
+    <div id="jpd-forms"></div>
     ${(showMoney && (p.invoices||[]).length)?`
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🧾',16)} Billing Invoices</div>
     <div class="item-list" style="margin-bottom:10px">${(p.invoices||[]).slice().reverse().map(inv=>`
@@ -1873,7 +1879,7 @@ function openJobProjectDetail(p, opts){
     <div style="max-height:160px;overflow:auto;font-size:12px">${visTimeline.map(t=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(t.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${t.at?new Date(t.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''} · ${escHtml(t.by||'')}</div></div>`).join('')||'<div style="color:var(--text-muted)">No activity yet.</div>'}</div>
     <div id="proj-detail-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `
-    ${_isFinAdmin()&&!isBsOnlyU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
+    ${_isFinAdmin()&&!isBsOnlyU&&!(Number(p.flowVersion)>=2)?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
     ${_isFinAdmin()&&!isBsOnlyU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
     ${/* 'in_design' is deliberately excluded — a job in Design cannot get a production order; 'won' is kept only for legacy pre-design-flow projects. */''}
     ${!isBsOnlyU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage) && !(p.flowVersion === 2 && p.stage === 'won')?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
@@ -1992,6 +1998,24 @@ function openJobProjectDetail(p, opts){
   }));
 
   jpdPanel.querySelector('#proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
+  // PAYMENT-CLAIM-HOOK (P5) + FLOW-FORM-HOOK: both lazy, both silent on failure (the job opens either way).
+  try {
+    const _payHost = jpdPanel.querySelector('#jpd-payments');
+    // Redraws THIS block in place from a fresh job read (never closeModal + reopen: dismissTop() is an async history.back()).
+    if (_payHost) window.ensureScript('js/payment-claims-ui.js').then(()=>{
+      const _paint = async ()=>{ let pj = p; try { const fr = await db.collection('job_projects').doc(p.id).get(); if (fr.exists) pj = { id:p.id, ...fr.data() }; } catch (_) {} if (panelLive(jpdPanel)) await window.PaymentClaimsUI.renderJobPayments(_payHost, pj, _paint); };
+      return _paint();
+    }).catch(()=>{});
+    const _formHost = jpdPanel.querySelector('#jpd-forms');
+    if (_formHost) window.flowForms().then((F)=>{
+      if (!panelLive(jpdPanel)) return;
+      const ref = { projectId: p.id };
+      const btns = ['qc_checklist','installation_checklist','punch_list','client_acceptance'].map(id=>String(F.buttonHtml(id, ref)||'')).join('');
+      if (!btns) return;
+      _formHost.innerHTML = `<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📄',16)} Forms</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${btns}</div>`;
+      F.bind(_formHost);
+    }).catch(()=>{});
+  } catch (_) {}
   jpdPanel.querySelector('#proj-invoice-btn')?.addEventListener('click',()=>openJobBillingInvoiceModal(p));
   jpdPanel.querySelector('#proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
   jpdPanel.querySelector('#proj-job-btn')?.addEventListener('click',()=>{ closeModal(); prodOrderModal(null, currentUser, currentRole, ()=>window.renderProjectLifecycle&&window.renderProjectLifecycle(), p.id); });
@@ -2269,7 +2293,7 @@ async function openProjectBillingModal(p){
       const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:precomputedLedgerId, paymentId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null };
       const update={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
         payments:firebase.firestore.FieldValue.arrayUnion(payment),
-        documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
+        documents:firebase.firestore.FieldValue.arrayUnion({ type:'Payment Acknowledgement', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
         timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Payment ₱${window.fmtN2(amount)} (${type})`, by:who }) };
       if(newAR<=0) update.stage='paid';
       const res = await window.Ledger.post({

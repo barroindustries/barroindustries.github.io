@@ -409,7 +409,7 @@ describe('decideQuoteApproval — ONE function behind every Approve / Return, gu
   const base = (over) => ({ [RAW_Q1]: quoteDoc(Object.assign({ createdBy: AGENT, rootQuoteId: Q1 }, over || {})), [RAW_QR]: requestDoc(), 'approval_requests/ar1': { type: 'bs_quote', quoteId: Q1, status: 'pending' } });
   const D = (S, over) => S.decide(Object.assign({ coll: 'bk_quotes', quoteId: Q1, action: 'approve', agentId: AGENT, quoteNumber: 'BK-ML-WB-261028-001', clientName: 'Juan Dela Cruz' }, over || {}));
   const quoteWrites = (S) => S.updates.filter((u) => u.key === RAW_Q1);
-  const STATE_KEYS = ['status', 'approvalStatus', 'approvedAt', 'approvedBy', 'returnedAt', 'returnedBy', 'presidentNotes'];
+  const STATE_KEYS = ['status', 'approvalStatus', 'approvedAt', 'approvedBy', 'approvedByName', 'returnedAt', 'returnedBy', 'presidentNotes'];
   const statePart = (patch) => Object.fromEntries(STATE_KEYS.filter((k) => k in patch).map((k) => [k, plain(patch[k])]));
 
   it('the three former copies write the identical decision for the same input: the two wrappers, the review panel and the builder\'s review bar — approve and return', async () => {

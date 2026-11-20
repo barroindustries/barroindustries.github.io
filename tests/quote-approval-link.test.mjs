@@ -36,7 +36,7 @@ const PAGE = read('js/screens/quote-approval.js'), BUILDER = read('quote-builder
 const ESC_SRC = read('js/modules.js').match(/function escHtml\(str\) \{[\s\S]*?\n\}/)[0];
 const piece = (src, re, what) => { const m = src.match(re); assert.ok(m, `${what} not found`); return m[0]; };
 const cfgPiece = (name) => piece(CONFIG, new RegExp(`^window\\.${name} = function[\\s\\S]*?\\n\\};`, 'm'), `window.${name} in js/config.js`);
-const appFn = (name) => piece(APP, new RegExp(`^function ${name}\\([\\s\\S]*?\\n\\}`, 'm'), `${name} in js/app.js`);
+const appFn = (name) => piece(APP, new RegExp(`^(?:async )?function ${name}\\([\\s\\S]*?\\n\\}`, 'm'), `${name} in js/app.js`);
 const appWin = (name) => piece(APP, new RegExp(`^window\\.${name} = (?:async )?function[\\s\\S]*?\\n\\};`, 'm'), `window.${name} in js/app.js`);
 
 const ORIGIN = 'https://app.test';
@@ -169,6 +169,7 @@ describe('3 · the builder bridge (js/app.js, listener lifted whole)', () => {
     return APP.slice(start, end + 4);
   })();
   const CODE = [cfgPiece('quoteApprovalRefOf'), piece(APP, /^const QB_SOURCE_REF_RE = .*;$/m, 'QB_SOURCE_REF_RE'), appFn('_qbCleanSourceRef'), appFn('_qbCleanEstimateCheck'), appFn('_qbCleanApprovalWhy'),
+    appFn('_qbCleanPriceCheck'), appFn('_qbChainQuotes'), appFn('_qbRevOf'), appFn('_qbGateText'), appFn('_qbChainGate'),
     piece(SVC, /^window\.QuoteThread = \{[\s\S]*?\n\};/m, 'window.QuoteThread'), LISTENER].join('\n');
 
   function makeBridge(opts) {
@@ -191,6 +192,7 @@ describe('3 · the builder bridge (js/app.js, listener lifted whole)', () => {
       Notifs: { showToast: (m, t) => toasts.push({ m, t }), success: (m) => toasts.push({ m, t: 'success' }), sendToOwner: async (n) => { D.ops.push('notify owner'); notified.push(plain(n)); } },
       dbCacheInvalidate: () => {},
     });
+    vm.runInContext(read('js/price-gate-core.js'), ctx);   // Phase 3: the gate runs for a revision (this payload names a chain); nothing in this chain is approved, so it files as today
     vm.runInContext(CODE, ctx);
     const send = async (type, payload, extra) => { await listeners[0]({ origin: ORIGIN, source: FRAME, data: Object.assign({ type, payload }, extra || {}) }); };
     return Object.assign(D, { win, toasts, notified, links, send, FRAME, listeners });

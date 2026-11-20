@@ -59,13 +59,18 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
   // §6.5: `lastApproved` for a new revision = the snapshot of the NEWEST quote in the chain that Neil approved HIMSELF
   // (approvedBy set, no approvalCarriedFrom). Carried approvals never move the bar. A quote approved before
   // approvedSnapshot existed gets one built on the fly. Nothing approved by Neil → null (the gate does not run).
-  function lastApprovedFromChain(quotes) {
+  // The quote itself (not its snapshot): the bridge needs its id for approvalCarriedFrom (Phase 3). Same pick as before, split out.
+  function pickLastApprovedQuote(quotes) {
     let best = null; let bestAt = '';
     (quotes || []).forEach(function (q) {
       if (!q || !q.approvedBy || q.approvalCarriedFrom) return;
       const at = String((q.approvedSnapshot && q.approvedSnapshot.at) || q.approvedAt || '');
       if (best === null || at > bestAt) { best = q; bestAt = at; }
     });
+    return best;
+  }
+  function lastApprovedFromChain(quotes) {
+    const best = pickLastApprovedQuote(quotes);
     if (!best) return null;
     const snap = best.approvedSnapshot;
     if (snap && isNum(snap.total) && Array.isArray(snap.lines)) return { total: r2(snap.total), lines: snap.lines.map(function (l) { return { key: String(l.key), unit: r2(l.unit) }; }) };
@@ -123,6 +128,7 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     lineKey: lineKey,
     snapshotFromQuote: snapshotFromQuote,
     lastApprovedFromChain: lastApprovedFromChain,
+    pickLastApprovedQuote: pickLastApprovedQuote,
     evaluate: evaluate,
   };
 })();

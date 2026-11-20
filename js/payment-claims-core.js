@@ -171,6 +171,9 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
       bankAccountId: bankAccountId, bankAccountName: bankAccountName,
       paymentConfirm: Object.assign({}, claim.paymentConfirm, { decision: 'confirmed', reason: '' }, sf().decisionStamp(viewer, who, ctx.nowIso)),
     };
+    // The Payment Acknowledgement's "paid to date / balance AS OF THIS PAYMENT" (forms-core reads collectedAfter / balanceAfter).
+    // Not on a repair: the fresh job there already includes this payment, so these figures would count it twice.
+    if (!fee && project && !ctx.repair) { claimPatch.collectedAfter = newCollected; claimPatch.balanceAfter = newAR; }
 
     return {
       ok: true, ref: ref, amount: amount, net: net, vatAmount: vatAmount, vatTreatment: vatTreatment,

@@ -1380,14 +1380,33 @@ service cloud.firestore {
         resource.data.createdBy == request.auth.uid || (hasProfile() && isOfficeStaff())   // an agent reads only their own (2026-11-20)
         || docId == 'draft_' + request.auth.uid
       );
+      // C3 (SALES-FLOW-SPEC 6.6): a non-admin write that makes a quote approved must name an approved quote of the same chain in approvalCarriedFrom.
+      function carriedApprovalOk() {
+        return request.resource.data.get('approvalCarriedFrom', '') is string && request.resource.data.get('approvalCarriedFrom', '') != ''
+          && exists(/databases/$(database)/documents/bs_quotes/$(request.resource.data.approvalCarriedFrom))
+          && get(/databases/$(database)/documents/bs_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('approvalStatus', '') == 'approved'
+          && (get(/databases/$(database)/documents/bs_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('rootQuoteId', request.resource.data.approvalCarriedFrom) == request.resource.data.get('rootQuoteId', '_'));
+      }
+      // Lost/reopen: the saved approval must be the quote's real one when marked lost (never written on create), so reopening an approved quote is honest.
+      function lostPrevOk() {
+        return isAdmin() || (resource == null && !('lostPrevApprovalStatus' in request.resource.data))
+          || (resource != null && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lostPrevApprovalStatus'])
+               || !('lostPrevApprovalStatus' in request.resource.data)
+               || request.resource.data.lostPrevApprovalStatus == resource.data.get('approvalStatus', null)));
+      }
+      function approvalWriteOk() {
+        return lostPrevOk() && (isAdmin() || request.resource.data.get('approvalStatus', '') != 'approved'
+          || (resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk()
+          || (resource != null && resource.data.get('status', '') == 'lost' && resource.data.get('lostPrevApprovalStatus', '') == 'approved'));
+      }
       allow create: if isAuth() && (
         request.resource.data.createdBy == request.auth.uid
         || docId == 'draft_' + request.auth.uid
-      );
+      ) && approvalWriteOk();
       allow update: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
         || docId == 'draft_' + request.auth.uid
-      );
+      ) && approvalWriteOk();
       // QB-DRAFTS-SPEC-2026-09-11: creator may delete their own explicit draft.
       allow delete: if isAuth() && (isAdmin() || docId == 'draft_' + request.auth.uid
         || (resource.data.get('status','') == 'draft'
@@ -1402,13 +1421,32 @@ service cloud.firestore {
         || docId == 'draft_' + request.auth.uid
       );
       // [RN-92] Admins may also create with a DIFFERENT createdBy: require -> docs/firestore-rules-notes.md#rn-92
+      // C3 (SALES-FLOW-SPEC 6.6): a non-admin write that makes a quote approved must name an approved quote of the same chain in approvalCarriedFrom.
+      function carriedApprovalOk() {
+        return request.resource.data.get('approvalCarriedFrom', '') is string && request.resource.data.get('approvalCarriedFrom', '') != ''
+          && exists(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom))
+          && get(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('approvalStatus', '') == 'approved'
+          && (get(/databases/$(database)/documents/bk_quotes/$(request.resource.data.approvalCarriedFrom)).data.get('rootQuoteId', request.resource.data.approvalCarriedFrom) == request.resource.data.get('rootQuoteId', '_'));
+      }
+      // Lost/reopen: the saved approval must be the quote's real one when marked lost (never written on create), so reopening an approved quote is honest.
+      function lostPrevOk() {
+        return isAdmin() || (resource == null && !('lostPrevApprovalStatus' in request.resource.data))
+          || (resource != null && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lostPrevApprovalStatus'])
+               || !('lostPrevApprovalStatus' in request.resource.data)
+               || request.resource.data.lostPrevApprovalStatus == resource.data.get('approvalStatus', null)));
+      }
+      function approvalWriteOk() {
+        return lostPrevOk() && (isAdmin() || request.resource.data.get('approvalStatus', '') != 'approved'
+          || (resource != null && resource.data.get('approvalStatus', '') == 'approved') || carriedApprovalOk()
+          || (resource != null && resource.data.get('status', '') == 'lost' && resource.data.get('lostPrevApprovalStatus', '') == 'approved'));
+      }
       allow create: if isAuth() && hasProfile() &&
         (request.resource.data.createdBy == request.auth.uid || isAdmin()
-         || docId == 'draft_' + request.auth.uid);
+         || docId == 'draft_' + request.auth.uid) && approvalWriteOk();
       allow update: if isAuth() && hasProfile() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
         || docId == 'draft_' + request.auth.uid
-      );
+      ) && approvalWriteOk();
       // v14 wave3 Q6: own draft slot deletable (deleted on File).
       // QB-DRAFTS-SPEC-2026-09-11: creator may delete their own explicit draft.
       allow delete: if isAuth() && (isAdmin()
@@ -2631,6 +2669,27 @@ service cloud.firestore {
     match /company_year_review/{year} {
       allow read:   if isAuth() && hasProfile();
       allow create, update, delete: if isAuth() && isPresident();
+    }
+
+    // Payment claims (SALES-FLOW-SPEC 11.1): Sales records, the books tier decides; Ops users cannot read.
+    match /payment_claims/{id} {
+      function pcDiff() { return request.resource.data.diff(resource.data).affectedKeys(); }
+      // Read: books tier, admins (the Corporate Secretary reads through isAdmin), Sales, or the creator.
+      allow read: if isAuth() && hasProfile()
+        && (canFinance() || isAdmin() || inDept('Sales') || resource.data.createdBy == request.auth.uid);
+      // Create: any non-secretary profile, as itself, pending and undecided.
+      allow create: if isAuth() && hasProfile() && !isSecretary()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.get('paymentConfirm', {}).get('decision', null) == null;
+      // Update: the books tier decides; Sales may only fix and resend an unconfirmed claim.
+      allow update: if isAuth() && ( canFinance()
+        || ( hasProfile() && !isSecretary() && (inDept('Sales') || resource.data.createdBy == request.auth.uid)
+             && resource.data.status != 'recorded' && request.resource.data.status == 'pending'
+             && request.resource.data.paymentConfirm.get('decision', null) == null
+             && pcDiff().hasOnly(['paymentReceived','paymentMethod','vatTreatment','orRef','paymentDate',
+                  'receiptUrl','receiptName','kind','status','paymentConfirm','updatedAt']) ) );
+      allow delete: if isAuth() && isPresident();
     }
   }
 }
