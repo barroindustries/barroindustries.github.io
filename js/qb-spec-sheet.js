@@ -33,7 +33,7 @@
     dimsLegend: 'Dimensions are Length × Width × Height in mm (hoods: Length × Depth).',
     toleranceNote: 'Fabricated dimensions carry the ±5 mm tolerance stated in the terms.',
     warrantyShort: '12-month service warranty',
-    pmsShort: '12-month PMS with KitchenShield™'
+    pmsShort: 'KitchenShield™ PMS at a discount'
   });
 
   // A lead time the owner ruled on (2026-11-05 #4): "<N> working days" — the MINIMUM, from downpayment and approved drawings. Only this form prints; any other text a legacy

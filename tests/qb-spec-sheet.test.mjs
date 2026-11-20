@@ -332,7 +332,7 @@ describe('the once-per-document text — docNotes(), summaryStrip(), constructio
   });
 
   it('summaryStrip: the KitchenShield part follows the full-kitchen plan ONLY — never the standard plan, never when the warranty is off', () => {
-    assert.equal(QS.summaryStrip({ warrantyPlan: 'kitchenshield12' }), '12-month service warranty · 12-month PMS with KitchenShield™');
+    assert.equal(QS.summaryStrip({ warrantyPlan: 'kitchenshield12' }), '12-month service warranty · KitchenShield™ PMS at a discount');
     for (const plan of ['service6', undefined, '', 'KITCHENSHIELD12', 'kitchenshield', null]) assert.equal(QS.summaryStrip({ warrantyPlan: plan }).includes('KitchenShield'), false, String(plan));
     assert.equal(QS.summaryStrip({ warrantyPlan: 'kitchenshield12', warrantyOn: false }), '');
   });

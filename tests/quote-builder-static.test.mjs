@@ -2970,7 +2970,7 @@ describe('SELLING QUOTE — the markup, the loader and the constants', () => {
     const sel = HTML.match(/<select id="warrantyPlan" onchange="onWarrantyPlanChange\(\)">([\s\S]*?)<\/select>/)[1];
     assert.deepEqual([...sel.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]), ['service6', 'kitchenshield12'], 'the standard plan is first (the default)');
     assert.match(sel, /12-month service warranty \(standard\)/);
-    assert.match(sel, /Full kitchen — 12-month service warranty \+ 12 months PMS with KitchenShield™/);
+    assert.match(sel, /Full kitchen — 12-month warranty, with KitchenShield™ PMS at a discount/);
     assert.match(HTML, /<input type="checkbox" id="showStandardPage" checked onchange="onShowStandardPageChange\(\)">/);
     assert.equal(/fullKitchen/.test(HTML), false, 'the fullKitchen checkbox of the first draft of the spec is replaced by the warranty plan (ruling #1)');
   });
@@ -3463,7 +3463,7 @@ describe('SELLING QUOTE — what a saved quote carries: the four new fields, the
 
 describe('SELLING QUOTE — the Warranty and Site Requirements terms in the builder: per plan, per company; a stored wording always wins; an unedited block keeps following its default', () => {
   const WARRANTY_6 = '12-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.';
-  const KS = 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.';
+  const KS = 'KitchenShield™ preventive maintenance service (PMS) for 12 months is offered with this project at a discounted rate.';
   const termHtml = (b, id) => { const grid = b.el('termsGrid').innerHTML; return (grid.split('<div class="terms-block').find((x) => x.includes(`saveTerm('${id}'`)) || '').split('>').slice(-2, -1).join('>') ? grid.split('<div class="terms-block').find((x) => x.includes(`saveTerm('${id}'`)).match(/<div class="term-content"[^>]*>([\s\S]*?)<\/div>/)[1] : ''; };
 
   it('renderTerms() prints the plan\'s wording: the 6-month sentence by default, plus the PMS sentence on the full-kitchen plan; switching the plan re-renders it', () => {
@@ -3512,7 +3512,7 @@ describe('SELLING QUOTE — the Warranty and Site Requirements terms in the buil
     assert.equal(termHtml(b, 'tc_warranty'), '12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.');
     assert.equal(termHtml(b, 'tc_site'), 'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.');
     b.run(`setCompany('BK')`);
-    assert.match(termHtml(b, 'tc_warranty'), /KitchenShield™\.$/, 'back on Barro Kitchens the plan applies again');
+    assert.match(termHtml(b, 'tc_warranty'), /at a discounted rate\.$/, 'back on Barro Kitchens the plan applies again');
   });
 });
 
@@ -3541,7 +3541,7 @@ describe('SELLING QUOTE — "Our standard", the summary strip and the dimension 
 
   it('the full-kitchen plan adds the KitchenShield paragraph to the warranty block — on that plan only; Barro Industries names itself "Barro Industries"', () => {
     const ks = sellBuilder(sampleItems(), { plan: 'kitchenshield12' });
-    assert.ok(stdOf(ks).includes(`<p>${WARRANTY_SERVICE}</p><p>This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>`));
+    assert.ok(stdOf(ks).includes(`<p>${WARRANTY_SERVICE}</p><p>KitchenShield™ preventive maintenance service (PMS) for 12 months is offered with this project at a discounted rate.</p>`));
     assert.equal(stdOf(sellBuilder(sampleItems(), { plan: 'service6' })).includes('KitchenShield'), false);
     const bi = sellBuilder(sampleItems(), { co: 'BI' });
     assert.ok(stdOf(bi).includes('<div class="std-meta">Barro Industries</div>'));
@@ -3588,7 +3588,7 @@ describe('SELLING QUOTE — "Our standard", the summary strip and the dimension 
     assert.equal(b.el('summaryStrip').textContent, 'Valid 30 days · 50% down payment, balance on completion · Lead time from 25 working days · Delivery: Company delivery truck · 12-month service warranty');
     b.el('quoteValidDays').value = '120'; b.el('dpMode').value = '30'; b.el('balMode').value = 'stagger3'; b.el('warrantyPlan').value = 'kitchenshield12';
     b.run('renderTotals()');
-    assert.equal(b.el('summaryStrip').textContent, 'Valid 120 days · 30% down payment, balance in 3 staggered payments · Lead time from 25 working days · Delivery: Company delivery truck · 12-month service warranty · 12-month PMS with KitchenShield™');
+    assert.equal(b.el('summaryStrip').textContent, 'Valid 120 days · 30% down payment, balance in 3 staggered payments · Lead time from 25 working days · Delivery: Company delivery truck · 12-month service warranty · KitchenShield™ PMS at a discount');
     b.run(`payMilestones = [{pct:50,label:'a',date:''},{pct:50,label:'b',date:''}]; renderTotals();`);
     assert.match(b.el('summaryStrip').textContent, /^Valid 120 days · 2 payment milestones · /);
     assert.equal(sellBuilder(sampleItems(), { co: 'BS' }).el('summaryStrip').textContent, '');
@@ -3843,7 +3843,7 @@ describe('SELLING QUOTE — the tutorial (TUTORIAL_VERSION 49, Help and the demo
     const li = (HTML.match(/<li><strong>Details ▸ on each line<\/strong>[\s\S]*?<\/li>/) || [''])[0];
     for (const must of ['spec sheet', 'Details ▸', 'finish', 'hairline is the standard', 'brushed, mirror, satin', 'Includes', 'Not included', 'extra rows', '25 working days minimum, from downpayment and approved drawings', '⚙ configure regenerates its includes, not-included and lead time from the new options (your finish stays)',
       'no size', 'no specs', 'no finish', 'no photo', 'Quote strength n/10', 'custom wording', '↺ regenerate', 'dimension legend', 'Brilliance Steel quotes are not changed by any of this']) assert.ok(li.includes(must), `Help bullet does not say: ${must}`);
-    assert.match(help, /<strong>Warranty plan<\/strong> is the standard 12-month service warranty, or <em>Full kitchen<\/em> — the 12-month warranty plus 12 months of preventive maintenance service \(PMS\) with KitchenShield™ — and a tick prints the <strong>“Our standard” page<\/strong> after the terms/);
+    assert.match(help, /<strong>Warranty plan<\/strong> is the standard 12-month service warranty, or <em>Full kitchen<\/em> — the same 12-month warranty, with 12 months of KitchenShield™ preventive maintenance service \(PMS\) offered at a discount \(no PMS price prints; Sales quotes it\) — and a tick prints the <strong>“Our standard” page<\/strong> after the terms/);
     assert.match(help, /A made-to-order line with no size blocks filing; lines still missing specs or a finish are only listed \(you can file anyway\)\./);
     assert.ok(help.indexOf('Details ▸ on each line') > help.indexOf('Configure a product') && help.indexOf('Details ▸ on each line') < help.indexOf('Pricing is automatic'));
     const steps = makeEnv().plain('TOUR_STEPS');
@@ -3862,7 +3862,7 @@ describe('SELLING QUOTE — the tutorial (TUTORIAL_VERSION 49, Help and the demo
     assert.match(steps[at('.line-details-toggle')].title, /Details ▸/);
     assert.match(steps[at('.line-details-toggle')].body, /hairline is the standard/);
     assert.match(steps[at('.line-details-toggle')].body, /A made-to-order line with no size cannot be filed\./);
-    assert.match(steps[at('#termsOptionsBox')].body, /Full kitchen — the 12-month warranty plus 12 months of preventive maintenance service \(PMS\) with KitchenShield™/);
+    assert.match(steps[at('#termsOptionsBox')].body, /Full kitchen — the same 12-month warranty, with 12 months of KitchenShield™ preventive maintenance service \(PMS\) offered at a discount/);
     assert.match(steps[at('#termsOptionsBox')].body, /Brilliance Steel quotes do not get it\./);
     assert.ok(HTML.includes('class="cfg-link line-details-toggle"') && HTML.includes('id="termsOptionsBox"'));
     const verify = steps.find((s) => s.target === '#btnVerify').body;
@@ -4244,7 +4244,7 @@ describe('AS ISSUED — a quotation filed before the warranty plan existed keeps
     assert.equal(b.toast(), 'This quotation now follows the current terms: the plan’s warranty wording and a lead time of 25 working days minimum.');
     assert.equal(money(b).rushActive, false);
     assert.equal(b.run('getLeadDays()'), 29);
-    assert.equal(termText(b, 'tc_warranty'), `${WARRANTY_SERVICE} This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.`);
+    assert.equal(termText(b, 'tc_warranty'), `${WARRANTY_SERVICE} KitchenShield™ preventive maintenance service (PMS) for 12 months is offered with this project at a discounted rate.`);
   });
 
   it('NEW QUOTE, DRAFT and LINK read the current rules; a FILED new-schema quotation reopened keeps its plan and its page; the marker never makes Brilliant Steel differ', () => {

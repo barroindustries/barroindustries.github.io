@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.28';
+window.APP_VERSION = '15.0.29';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -2894,7 +2894,7 @@ window.QB_STANDARD_PAGE = Object.freeze({
   materials: 'Our standard material is SS304 food-grade stainless steel. SS316 laboratory grade is available on request. Standard finish: hairline. Brushed, mirror or satin on request.',
   warranty: Object.freeze({
     service6: '12-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.',
-    kitchenshield12: 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.'
+    kitchenshield12: 'KitchenShield™ preventive maintenance service (PMS) for 12 months is offered with this project at a discounted rate.'
   }),
   process: Object.freeze(['Site measurement and design', 'Fabrication in our Quezon City shop', 'Delivery', 'Installation and commissioning', 'Turnover and after-sales service']),
   references: 'Institutional clients include DMMMSU and ISPSC.',

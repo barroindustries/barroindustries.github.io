@@ -92,7 +92,7 @@ const resolver = new Function(`
 `)();
 
 const WARRANTY_6 = '12-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.';
-const KITCHENSHIELD = 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.';
+const KITCHENSHIELD = 'KitchenShield™ preventive maintenance service (PMS) for 12 months is offered with this project at a discounted rate.';
 // Brilliant Steel exactly as it was (owner ruling 2026-11-05 #6)
 const BS_WARRANTY_OLD = '12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.';
 const BS_SITE_OLD = 'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.';
@@ -166,7 +166,7 @@ describe('the Warranty and Site Requirements terms — per company and per warra
     for (const co of ['BK', 'BI']) {
       const t = resolver.terms(co, 'kitchenshield12');
       assert.equal(t.tc_warranty, `${WARRANTY_6} ${KITCHENSHIELD}`, co);
-      assert.ok(t.tc_warranty.endsWith('This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.'));
+      assert.ok(t.tc_warranty.endsWith('KitchenShield™ preventive maintenance service (PMS) for 12 months is offered with this project at a discounted rate.'));
       assert.equal(/12 months warranty|12-month warranty/i.test(t.tc_warranty), false);
     }
   });
