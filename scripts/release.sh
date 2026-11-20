@@ -170,7 +170,7 @@ verify_live() {
   if [ -n "$live_v" ] && [ "$local_v" = "$live_v" ]; then
     echo "  ✓ live matches local. (Devices may still hold the old SW until reload — banner handles it.)"
   else
-    echo "  … not matching yet. Pages takes a few minutes; if it persists, check the pages-deploy-check workflow."
+    echo "  … not matching yet. Pages takes a few minutes; if it persists, check the "Deploy site" workflow (.github/workflows/pages.yml)."
   fi
 }
 

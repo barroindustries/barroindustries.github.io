@@ -3790,6 +3790,17 @@ function renderBillStrip(){
   box.style.display='block';
 }
 
+// Owner 2026-11-20: a filed quote downloads its PDF in one tap, but only as filed. filedSig() is the part of the quote a client sees priced
+// (each line's name, quantity, unit and price, the client and number, the discount); _filedBaseline is taken when the quote is filed or reopened as filed.
+let _filedBaseline=null;
+function filedSig(){
+  try{
+    const v=id=>{ const e=document.getElementById(id); return e ? (e.type==='checkbox' ? !!e.checked : String(e.value||'')) : null; };
+    return JSON.stringify({ it:(Array.isArray(items)?items:[]).map(i=>[String(i.name||''), +i.qty||0, String(i.unit||''), +i.unitPrice||0]),
+      f:['clientName','clientCompany','clientAddress','quoteNo','quoteDate','discountPct','discountMode'].map(v) });
+  }catch(e){ return ''; }
+}
+function filedChangedSinceFiling(){ return quoteStatus==='filed' && _filedBaseline!==null && filedSig()!==_filedBaseline; }
 function updateFiledSig(){
   const el=document.getElementById('sigFiledDate'); if(!el) return;
   el.textContent=(quoteStatus==='filed'&&filedAt)?('Reviewed & filed: '+fmtDate(new Date(filedAt))):'';
@@ -9062,7 +9073,7 @@ function clearForm(){
   if(!confirm('Start a new quote? Current data will be cleared.')) return;
   items=[];termsContent={};quotePhotos=[];
   termsEnabled={tc_completion:true,tc_payment:true,tc_warranty:true,tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true};
-  laborState={};miscCosts=[];quoteStatus='draft';waiveFlags={};filedAt='';
+  laborState={};miscCosts=[];quoteStatus='draft';waiveFlags={};filedAt='';_filedBaseline=null;
   // COSTING-QB-UX-SPEC-2026-08-26 §3 — a brand-new quote starts with the OH%
   // un-overridden (follows the live suggested value) and the per-item table
   // collapsed, same as any other quote-level state reset above.
@@ -9608,6 +9619,7 @@ async function fileQuotation(){
 
   quoteStatus='filed';
   filedAt=new Date().toISOString();
+  _filedBaseline=filedSig();   // owner 2026-11-20: edits after filing ask to file again before a PDF
   updateFiledSig();
   document.getElementById('filedBadge').textContent='✓ FILED';
   document.getElementById('filedBadge').style.background='';
@@ -9979,6 +9991,7 @@ function loadEditableState(state, opts){
     }
     renderTerms();renderItems();updatePrintHeader();
     renderHandoffBar();
+    _filedBaseline = (quoteStatus==='filed') ? filedSig() : null;   // owner 2026-11-20: a quote reopened as filed downloads its PDF at once; a change asks to re-file
   }catch(e){console.warn('loadEditableState failed',e);}
 }
 // D7:E5 (the one piece of it that is ported) — the body of the old `message` listener, moved here unchanged so the configurator layer can hand the page a message without a postMessage round trip.
@@ -10139,6 +10152,10 @@ function doPrint(){
   document.getElementById('phAgentTag').style.display='none';
   applyLetterheadHeader();   // v12 WS31 — refresh the shared letterhead so the doc number is current
   updatePrintRunFooter();
+  if(filedChangedSinceFiling()){
+    showToast('You changed this quote after it was filed. File it again (Verify & File → update in place) before printing.','error');
+    doVerifyAndFile(); return;
+  }
   if(quoteStatus!=='filed'){
     showToast('Please file this quote before printing — tap "Verify & File" first.','error');
     doVerifyAndFile(); return;

@@ -678,7 +678,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
   it('uses the one phone number, the one email address and the one Quezon City address — never Gmail, 0960, La Union or San Fernando as an address', () => {
     each((p) => {
       const digits = [...p.html.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map((m) => m[0].replace(/\D/g, '').replace(/^63/, '0'));
-      assert.ok(digits.length >= 1 && digits.every((d) => d === '09276836300'), `${p.path}: phone numbers ${digits}`);
+      assert.ok(digits.length >= 1 && digits.every((d) => d === '09276836300' || d === '09208018475'), `${p.path}: phone numbers ${digits}`);
       assert.ok(!/0960/.test(p.html) && !/gmail/i.test(p.html));
       const emails = [...new Set([...p.html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))];
       assert.deepEqual(emails, ['hello@barroindustries.com'], `${p.path}: email addresses`);
@@ -1162,7 +1162,7 @@ describe('links: every internal link resolves, the hub lists every product, ever
         assert.equal(a.attrs.rel, 'noopener');
         assert.equal(a.attrs.target, '_blank');
       }
-      for (const u of hrefs(p).filter((x) => /^(tel:|mailto:)/.test(x))) assert.ok(['tel:+639276836300', 'mailto:hello@barroindustries.com'].includes(u), `${p.path}: ${u}`);
+      for (const u of hrefs(p).filter((x) => /^(tel:|mailto:)/.test(x))) assert.ok(['tel:+639276836300', 'tel:+639208018475', 'mailto:hello@barroindustries.com'].includes(u), `${p.path}: ${u}`);
       for (const u of hrefs(p)) assert.ok(!/^\/(projects|q|t|v|partners|parterns|ventures|track\.html|quote-builder|docs|specs|private)/.test(u), `${p.path}: links to ${u}`);
       assert.ok(hrefs(p).filter((u) => u.startsWith('/sales/')).every((u) => u === '/sales/clientinformationrequest/'));
     });

@@ -120,20 +120,21 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
     <div class="page-header">
       <div>
         <h2>${emojiIcon('🍽️',20)} Barro Kitchens — Sales</h2>
-        <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">One-stop kitchen design &amp; build · Inquiry → Quote → Order</p>
+        <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">Inquiry → Quote → Approval → Payment → Sales Order → Delivery</p>
       </div>
     </div>
     ${window.sopPanel('How Sales works', [
-      'Clients is the CRM book here; the AEC architect/engineer/contractor prospecting directory moved to the CRM department.',
-      'Briefs holds every Client Information Request sent from barroindustries.com/sales/clientinformationrequest/ — review the answers and photos, add notes, then Convert to client.',
-      'Quote requests holds every "Get a quote" request sent from barroindustries.com/catalogue/ — review the items and the estimate the client saw, then Open in Quote Builder to price it properly.',
-      'Quotes has ＋New Quotation and Quick Estimate; everything filed lands in Records. On each quote: Mark sent when it goes out, Lost (with a reason) when the client says no, Record payment when the client pays.',
-      'After Record payment the President confirms it in the app (Finance may confirm when he cannot be reached). Then open Sales Orders and tap Generate SO & JO to hand the job to Production.',
-      'Won / Projects lists every won job (the same records as the Projects page): client, quote number, amount, stage and payments. Tap Open for the full project folder.',
-      'Brilliant Steel is a read-only window into the department\'s quotes and files for coordination.',
-      'Files holds Work Plans and Proposals; Tasks is the department board.'
+      'Clients is the CRM book. Log every inquiry here the same day, with its source. The architect / engineer / contractor prospecting directory lives in the CRM department.',
+      'Briefs holds the Client Information forms from barroindustries.com, and Quote requests holds the "Get a quote" requests from the catalogue. Review the answers, then Convert to client. On a quote request, Open in Quote Builder to price it.',
+      'Quotes: tap ＋ New Quotation to open the quote builder, always from here (the standalone page is preview only and cannot file). The Barro Kitchens configurators are on: pick the area tab, Configure the product, then Add to Quote. Prices come from the Standard Price List; use Add custom item for anything else. Quick Estimate is only a rough price check.',
+      'Every quote needs the President\'s approval. In the builder tap Verify & File, then Send for approval (get the link), and send the link to him by Messenger or Viber. He approves it in Approvals and you are notified.',
+      'Filed quotes land in Records. For the client copy of an approved quote, Reopen it, Verify & File with Update the original quote in place, then PDF ▾ → Download PDF. On each quote: Mark sent when it goes out, Lost (with a reason) when the client says no, New Revision for any change.',
+      'When the client pays, tap Record payment on the quote. The President confirms it in the app (Finance may confirm when he cannot be reached). Then open Sales Orders and tap Generate SO & JO to hand the job to Production.',
+      'Won / Projects lists every won job from the moment its payment is recorded (the same records as the Projects page): client, quote number, amount, stage, payments and balance. Tap Open for the full project folder.',
+      'Brilliance Steel is a read-only window into that company\'s quotes and files, for coordination.',
+      'Analytics shows your month against its quota. Files holds Work Plans and Proposals. SOP is the full step-by-step process. Tasks is the department board.'
     ])}
-    ${window.chipTabs(salesTabs.map(s=>({key:s,label: s==='Won' ? 'Won / Projects' : s})), subtab)}
+    ${window.chipTabs(salesTabs.map(s=>({key:s,label: s==='Won' ? 'Won / Projects' : s==='Brilliant Steel' ? 'Brilliance Steel' : s})), subtab)}
     <div id="sales-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
@@ -199,7 +200,7 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       const header = `
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px">
           <button class="btn-primary btn-sm" onclick="navigateTo('bk-quote-builder')">＋ New Quotation</button>
-          <span style="font-size:12px;color:var(--text-muted)">Build a full quote, or use <strong>Quick Estimate</strong> for a fast price check. Filed &amp; revised quotes live under <strong>Records</strong>.</span>
+          <span style="font-size:12px;color:var(--text-muted)">Build every quote here: the Barro Kitchens configurators are on, and the President approves each quote before it goes out. Filed &amp; revised quotes live under <strong>Records</strong> (Mark sent · Record payment · Lost · New Revision). <strong>Quick Estimate</strong> is only a rough price check.</span>
         </div>`;
       salesSubNav(content, ['Records','Quick Estimate'], 'Records', header, (key, view) => {
         if (key === 'Quick Estimate') renderQuickEstimate(view, currentUser, currentRole);
@@ -210,7 +211,7 @@ async function loadSalesContent(currentUser, currentRole, sub) {
 
     case 'Brilliant Steel':
       salesSubNav(content, ['Quotes','Files'], 'Quotes',
-        `<div style="font-size:12px;color:var(--text-muted);background:rgba(15,108,189,.06);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🤝',16)} Brilliant Steel — quotes &amp; files shared with Sales for coordination.</div>`,
+        `<div style="font-size:12px;color:var(--text-muted);background:rgba(15,108,189,.06);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🤝',16)} Brilliance Steel — quotes &amp; files shared with Sales for coordination.</div>`,
         (key, view) => {
           if (key === 'Files') renderBSFiles(view, currentUser, currentRole);
           else renderSalesBSQuotes(view, currentUser, currentRole);
@@ -299,7 +300,7 @@ async function renderSalesWonProjects(content, currentUser, currentRole) {
   let filter = 'active', q = '';
   content.innerHTML = `
     <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
-      <span style="font-size:12px;color:var(--text-muted)">Every won job: the same records as the Projects page. Tap a job for the full project folder.</span>
+      <span style="font-size:12px;color:var(--text-muted)">Every won job, from the moment its payment is recorded: the same records as the Projects page. Tap <strong>Open</strong> for the full project folder.</span>
       <button type="button" class="btn-secondary btn-sm" onclick="navigateTo('projects-lifecycle')">Open the Projects board →</button>
     </div>
     <div class="kpi-row" style="margin-bottom:14px">
@@ -346,7 +347,7 @@ async function renderSalesWonProjects(content, currentUser, currentRole) {
     const rows = projects.filter(f.test).filter(p => !needle ||
       [p.clientName, p.name, p.quoteNumber, p.oldQuoteNumber, p.projectNo].some(v => String(v||'').toLowerCase().includes(needle)));
     list.innerHTML = !rows.length
-      ? window.renderEmptyState({ icon:'🤝', title: projects.length ? 'No won jobs match' : 'No won jobs yet', hint: projects.length ? 'Try another filter or search.' : 'A job appears here when a quote is converted to a Sales Order.' })
+      ? window.renderEmptyState({ icon:'🤝', title: projects.length ? 'No won jobs match' : 'No won jobs yet', hint: projects.length ? 'Try another filter or search.' : 'A job appears here as soon as a client\'s payment is recorded on a quote.' })
       : `<div class="card"><div class="table-wrap"><table class="data-table table-cards">
           <thead><tr><th>Quote # / Project</th><th>Client</th>${showMoney?'<th>Contract</th>':''}<th>Stage</th>${showMoney?'<th>Collected</th><th>Balance</th><th>Payments</th>':''}<th>Order</th><th></th></tr></thead>
           <tbody>${rows.map(row).join('')}</tbody></table></div></div>`;
@@ -713,7 +714,7 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
 
   container.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);background:rgba(230,81,0,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
-      ${emojiIcon('⚡',16)} <strong>Quick Estimate</strong> — check & total prices fast using the live product database. Add as many items as you like, then create a formal quotation when the client is ready.
+      ${emojiIcon('⚡',16)} <strong>Quick Estimate</strong> — a rough price check from the live product database. Add as many items as you like. The quote itself is built in the Quote Builder, where the Barro Kitchens configurators and the Standard Price List set the price.
     </div>
 
     <!-- Picker -->
@@ -765,7 +766,7 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
       <label style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.03em">Client name (optional — carried into the quote)</label>
       <input type="text" id="qe-client" placeholder="e.g. Juan Dela Cruz / ABC Restaurant" style="${ctrlStyle};width:100%;margin:5px 0 12px;box-sizing:border-box">
       <button class="btn-primary" onclick="qeCreateFormalQuote()" style="width:100%;padding:13px;font-weight:800;font-size:14px">${emojiIcon('📄',14)} Create Formal Quotation →</button>
-      <p style="font-size:11px;color:var(--text-muted);margin:8px 0 0;text-align:center">Opens the full Quote Builder pre-filled with these items, where you can refine, file, and export a PDF.</p>
+      <p style="font-size:11px;color:var(--text-muted);margin:8px 0 0;text-align:center">Opens the full Quote Builder pre-filled with these items, where you can refine them, send the quote for approval, and download the PDF once it is approved.</p>
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
@@ -773,7 +774,7 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
   qeRenderItems();   // render any items already in the session basket
 }
 
-// ── Sales SOP — Inquiry → Sales Order ─────────────
+// ── Sales SOP — Inquiry → Close-out ───────────────
 // Editable playbook. Persisted to settings/sales_sop (President-only write per
 // firestore.rules → settings); falls back to DEFAULT_SALES_SOP when no doc exists.
 // Body text supports lightweight **bold** markup; everything is escaped first.
@@ -798,88 +799,124 @@ window.quoteApprovalBadge = function (q) {
   })[q.approvalStatus] || null;
 };
 const DEFAULT_SALES_SOP = {
-  // Version 2 = the flow of 2026-11-19 (Record payment -> the President confirms -> Sales generates). A SAVED SOP without this is the older flow.
-  sopVersion: 2,
-  intro: "The standard end-to-end process every Sales staff and agent follows. Each step shows who owns it and which tab to use. Follow the steps in order — don't skip review or confirmation.",
+  // Version 3 = the process of 2026-11-20: the Barro Kitchens configurators in the quote builder, the President approves every quote,
+  // Record payment -> the President confirms -> Sales generates the SO & JO, and the Won / Projects tab. (Version 2 was the 2026-11-19 flow,
+  // before the configurators.) A SAVED SOP without sopVersion >= 3 is an older version: renderSalesSOPView offers the President the new default.
+  sopVersion: 3,
+  intro: "How Barro Kitchens sells, from the first inquiry to the last payment. Each step shows who owns it and where to do it in the app. Follow the steps in order: no quote goes out without the President's approval, and no job goes to Production until a payment is confirmed.",
   steps: [
-    { short:'Inquiry', title:'Inquiry Received', owner:'Sales Agent / Sales Staff', tab:'Clients',
-      desc:'Capture every incoming inquiry the moment it arrives — walk-in, phone, email, Facebook / Messenger, website, or referral.',
+    { short:'Lead', title:'Lead Comes In', owner:'Sales', tab:'Clients · Briefs · Quote requests',
+      desc:'Every inquiry goes straight to Sales. Log it and answer it the same day.',
       actions:[
-        'Greet the customer and acknowledge the inquiry within the day.',
-        'Log the lead in **Sales → Clients**: name, contact number, email, source, and what they are asking for.',
-        'Note the product line of interest — Barro Kitchen build, appliances, or steel.'
-      ], out:'New client / lead record created.' },
-    { short:'Qualify', title:'Qualify the Inquiry', owner:'Sales Agent / Sales Staff', tab:'Clients',
-      desc:'Understand the requirement before spending time on a quote.',
+        'Website requests arrive on their own: **Briefs** holds the Client Information forms, **Quote requests** holds the "Get a quote" requests from the catalogue.',
+        'Open each new one, read the answers, then tap **Convert to client**.',
+        'Anything else (call, Messenger, Facebook, referral, walk-in): add the client in **Clients** with contact details, source and what they want.'
+      ], out:'Every lead is a client record with its source.' },
+    { short:'Qualify', title:'Qualify the Request', owner:'Sales', tab:'Clients',
+      desc:'Know what the client needs before you spend time on a quote.',
       actions:[
-        'Confirm scope: standard product, or custom design & build?',
-        'Identify budget range, target timeline, and the decision-maker.',
-        'Flag delivery location (affects freight / installation).',
-        'Disqualify or park leads that are not a real fit — keep the pipeline clean.'
-      ], out:'Qualified requirement with clear scope.' },
-    { short:'Site Visit', title:'Site Visit & Measurement', owner:'Sales + Design', tab:'Clients · Files',
-      desc:'For custom kitchen builds or fabricated steel — gather exact requirements on site. Skip for off-the-shelf items.',
+        'Confirm the scope: a standard product, a kitchen layout, or a custom job.',
+        'Ask for the site location, the budget range, the target date and who decides.',
+        'For a large or unusual job, or a key account, tell the President early: he closes the big accounts with you.',
+        'Park or close leads that are not a real fit, so the list stays honest.'
+      ], out:'A clear scope you can quote.' },
+    { short:'Visit', title:'Site Visit & Measurement', owner:'Operations (Rene)', tab:'Files → Work Plans',
+      desc:'Only when exact measurements are needed, such as a custom kitchen or a tight site. Sales works remotely, so Rene visits. Skip it for standard products.',
       actions:[
-        'Schedule the visit; take measurements, photos, and the customer brief.',
-        'Coordinate with **Design** for drawings / layout where a design is required.',
-        'Record findings as a Work Plan in **Sales → Files → Work Plans**.'
-      ], out:'Site data & design brief ready for pricing.' },
-    { short:'Quote', title:'Prepare the Quotation', owner:'Sales Agent / Sales Staff', tab:'Quotes',
-      desc:'Build the priced quotation using the system, not a manual computation.',
+        'Ask Rene to book the visit. Give him the client\'s contact details, the address and what to check.',
+        'The site-visit fee is optional. If it is charged, it is credited to the job when the client goes ahead.',
+        'Rene brings back measurements, photos and a hand layout. Save them in **Files → Work Plans**.',
+        'Rene never quotes a price on site. Prices come only from Sales.'
+      ], out:'Measurements, photos and a layout ready for the quote.' },
+    { short:'Quote', title:'Build the Quotation', owner:'Sales', tab:'Quotes',
+      desc:'Build every quote in the quote builder. The Barro Kitchens configurators are on for everyone.',
       actions:[
-        'Open **Sales → Quotes → ＋ New Quotation** to price products, materials, labor, delivery, and installation (use **Quick Estimate** for a fast price check first).',
-        'Apply correct unit prices, quantities, and any approved discounts.',
-        'State validity period and payment terms (e.g. 50% down payment, balance before delivery).'
-      ], out:'Draft quotation saved.' },
-    { short:'Approve', title:'Internal Review & Approval', owner:'President', tab:'Quotes → Records',
-      desc:'Every quotation is approved by the President before it goes out.',
+        'Open **Sales → Quotes → ＋ New Quotation**, or **Open in Quote Builder** on a quote request. Always open it from inside the app: the standalone page is preview only and cannot file.',
+        'In **Add items**, pick the tab for the area. Each product card shows a "from" price. Tap **Configure**: the recommended options are already selected, so change only what the client asked for, then tap **Add to Quote**. A standard item takes three taps or fewer.',
+        'Prices come from the Standard Price List, so do not retype them. For grilling and bakery items use the catalogue search; for anything else use **Add custom item**.',
+        'Terms start at 65% down payment and 35% on delivery, a 6-month service warranty and a hairline finish. The discount starts at none: give one only from the discount list, 30% at most. The "offer up to n%" line in the calculator is only a hint.',
+        'The quote number is automatic and unique: never type one. If you see "The configurators did not load", tap **Reload DB**. If it stays, tell the President.'
+      ], out:'A complete quote, ready to send for approval.' },
+    { short:'Approve', title:'President Approves', owner:'President (Neil)', tab:'Quote Builder · Approvals',
+      desc:'The President approves every quote before it goes out to the client.',
       actions:[
-        'Send the quotation for approval from the quote builder.',
-        'The President reviews pricing, margin, discounts and terms, and approves or returns it.',
-        'An approved quotation comes back to Sales to file. Use **New Revision** for any change.'
-      ], out:'Approved quotation, filed and ready to send.' },
-    { short:'Send', title:'Send Quotation to Client', owner:'Sales', tab:'Quotes → Records',
-      desc:'Deliver the approved quote and record that it went out.',
+        'In the builder tap **Verify & File**, then tap **Send for approval (get the link)**.',
+        'Send the approval link to the President by Messenger or Viber.',
+        'He reviews the quote in **Approvals** and approves it, or returns it with a note. You are notified either way.',
+        'If it comes back, fix what he asked for and send it for approval again.'
+      ], out:'An approved quote, filed and ready to send.' },
+    { short:'Send', title:'Send the Quotation', owner:'Sales', tab:'Quotes → Records',
+      desc:'Give the client the approved quote and record that it went out.',
       actions:[
-        'Use **Share** for the client link, or export the PDF.',
-        'Tap **Mark sent** on the quote the same day.',
-        'Confirm the client received it.'
+        'To get the PDF of an approved quote, tap **↻ Reopen** on it in **Quotes → Records**, then **Verify & File**. Choose **Update the original quote in place** (it keeps the number and the approval) and tap **File Quotation**.',
+        'Then use **PDF ▾ → Download PDF** (on a phone: **☰ → Download PDF**). It is an A4 file named by the quote number.',
+        'Check the PDF before it goes out. Each line shows its item code in small grey text, for example PS-PT-1200.',
+        'Send the PDF to the client, or tap **Share** on the quote for the client link.',
+        '**Agent Copy** (also in the **PDF ▾** menu) is internal: never send it to the client. **Workforce Copy** has no prices and is for the crew.',
+        'Tap **Mark sent** on the quote the same day, and confirm that the client received it.'
       ], out:'Quotation sent and marked Sent.' },
     { short:'Follow-up', title:'Follow-up & Negotiation', owner:'Sales', tab:'Quotes → Records',
       desc:'Most deals are won in the follow-up.',
       actions:[
         'Follow up within 2 working days of sending.',
-        'Use **New Revision** for every change so each version stays on record; a revised price goes back for approval.',
-        'If the client says no, tap **Lost** and choose the reason. Every lost quote needs a reason.'
+        'To change a quote, tap **New Revision** (or **↻ Reopen** and choose **File as a new revision**). Every version stays on record as R2, R3 and so on. **Update in place** keeps the same number.',
+        'A revised quote goes back to the President unless his approval still covers the change.',
+        'If the client says no, tap **Lost** and choose the reason. Every lost quote needs a reason. If the client comes back, tap **Reopen quote**.'
       ], out:'A clear client decision: paying, or Lost with a reason.' },
-    { short:'Design', title:'Drawings', owner:'Sales + Design / Production', tab:'Projects',
+    { short:'Drawings', title:'Drawings', owner:'Rene / Design, or the client\'s own', tab:'Sales Orders · Projects',
       desc:'Agree what will be built before the client pays.',
       actions:[
-        'Coordinate the layout and shop drawings with Rene.',
-        'If the client already has a drawing, keep the file; you attach it when you generate the job order.'
-      ], out:'Agreed drawing, or the client\'s own.' },
+        'When the client is ready to go ahead, ask Rene for the layout and shop drawings, and agree them with the client.',
+        'If the client already has a drawing, keep the file: you attach it when you generate the job order.',
+        'For a large job the President approves the drawings.'
+      ], out:'An agreed drawing, or the client\'s own.' },
     { short:'Payment', title:'Record the Payment', owner:'Sales records · President confirms (Finance as stand-in)', tab:'Quotes → Records · Sales Orders',
       desc:'No job starts without a confirmed payment.',
       actions:[
-        'When the client pays, tap **Record payment** on the quote: amount, date, method, VAT, OR number and the receipt.',
-        'The contract amount is the quote total and cannot be typed. To change it, revise the quote.',
-        'The President gets a notification and confirms in one tap. If the President cannot be reached, Finance may confirm in his place; the app records who confirmed and tells the President. If something is wrong it is sent back with a reason; fix it and resubmit.'
+        'When the client pays, tap **Record payment** on the quote: amount, date paid, method, VAT, reference or OR number, and the receipt. The receipt or proof of payment is required.',
+        'The contract amount is the quote total and cannot be typed. To change it, make a **New Revision** of the quote and have it approved.',
+        'Tap **Record payment — send to President**. He is notified and confirms in one tap (**Confirm payment**, in **Approvals** or on **Sales Orders**). If he cannot be reached, Finance may confirm in his place; the app records who confirmed and tells him.',
+        'If something is wrong it comes back with a reason. Tap **Fix & resubmit** on **Sales Orders**.'
       ], out:'Payment confirmed and posted to the ledger, once.' },
     { short:'Generate', title:'Sales Order & Job Order', owner:'Sales', tab:'Sales Orders',
-      desc:'Hand the job to Production yourself. No Finance step.',
+      desc:'Hand the job to Production yourself. The sales order and job order are the handoff to Rene: no Finance step and no handoff meeting.',
       actions:[
-        'In **Sales Orders**, tap **Generate SO & JO** on the confirmed order.',
-        'Enter the target date, priority and notes for Production.',
-        'Attach the drawing (the client\'s or ours). If nothing is drawn yet, choose "send to Design first"; if nobody is available to draw it, attach the drawing yourself later from the Sales Orders row.',
+        'In **Sales Orders**, tap **Generate SO & JO** on the order that shows Payment confirmed.',
+        'Enter the target date, priority and notes for Production. All three are required.',
+        'Drawings: choose **The client supplied the drawing** or **Our drawing is already done**, and attach the file. If nothing is drawn yet, choose **Not drawn yet — send to Design first**, and attach the drawing yourself later with **Attach drawing** on the Sales Orders row.',
+        'Tap **Generate**. The **Documents ready** box offers the PDFs: the Sales Order, and the Job Order and Handoff pack once a drawing is attached.',
         'Keep the client updated with the tracking **Link**.'
-      ], out:'Sales order and job order with Production. Sales cycle complete.' },
+      ], out:'Sales order and job order with Production.' },
+    { short:'Track', title:'Production, Delivery & Turnover', owner:'Operations (Rene) · Sales watches', tab:'Won / Projects',
+      desc:'Rene owns the job from the handoff: fabrication, quality check, delivery, installation and turnover. Sales keeps watching, and stays the client\'s contact for prices.',
+      actions:[
+        'Open **Sales → Won / Projects** to see every won job: stage, contract, amount collected and balance. Filter by stage, or search by client, quote number or project number.',
+        'Tap **Open** on a job for its full project folder.',
+        'Rene is the client\'s contact for schedule, installation and permits. Sales answers questions about prices, change orders and the balance.',
+        'A change after payment: Rene gathers the details and never quotes. Sales prices the change and the client signs it; nothing starts until it is signed and any added down payment is paid. Do not record it as a new payment: ask the President to update the order.'
+      ], out:'Job delivered and accepted by the client.' },
+    { short:'Balance', title:'Balance & Close-out', owner:'Sales follows up · Finance bills', tab:'Won / Projects',
+      desc:'The job closes when the balance is paid.',
+      actions:[
+        'When the job is delivered, Finance is told to bill the balance. Sales stays the client\'s contact and follows up until it is paid.',
+        'Finance records each payment on the project. Check the balance on **Won / Projects**.',
+        'If a payment is late: Sales chases first, Finance sends the statement, and the President steps in only after 30 days overdue.',
+        'A fully paid job closes itself after delivery, and the President is told.',
+        'Warranty and service calls go to Rene. If a client calls Sales about one, pass it on.'
+      ], out:'Balance collected and the job closed (Paid / Closed).' },
   ],
   rules: [
-    'Log **every** inquiry — an unlogged lead is a lost lead.',
-    'No quotation goes out without internal review & approval (Step 5).',
+    'Log **every** inquiry and answer it the same day. An unlogged lead is a lost lead.',
+    'No quotation goes out without the President\'s approval (Step 5).',
     'No job goes to Production without a payment the President has confirmed (Step 9).',
-    'Keep quotation & order status current so the pipeline reflects reality.',
-    'Respond within the day; follow up within 2 working days.'
+    'Build every quote in the quote builder, opened from inside the app. Prices come from the Standard Price List; discounts only from the discount list, 30% at most.',
+    'Only Sales gives prices. Rene never quotes on site, and the crew never sees a price: give them the **Workforce Copy**.',
+    'One voice for the client: Sales for quotes, prices, change orders and the balance; Rene for schedule, site, installation, permits and warranty; Finance for billing.',
+    'Every client group chat includes Sales and Rene. The President joins only key-account chats.',
+    'Give clients only the business mobile, hello@barroindustries.com and the Facebook page. Never the President\'s personal number.',
+    'Bring the President in early for large accounts, unusual jobs and serious complaints. For anything else he is the last step, not the first.',
+    'Keep quote and order status current (**Mark sent**, **Lost**, **Record payment**) so the pipeline shows the truth.',
+    'Follow up within 2 working days of sending a quote, and report weekly: leads received, quotes sent, deals closed and balances still owed.'
   ]
 };
 
@@ -935,11 +972,11 @@ function renderSalesSOPView(container, data, loadErr) {
       </div>`
     : '';
 
-  // A SAVED SOP from before the 2026-11-19 sales flow carries no sopVersion >= 2 (the shipped default always does, so it never shows this).
+  // A SAVED SOP with no sopVersion >= 3 is an older version of the process (the shipped default is always current, so it never shows this).
   // The President can load the new default into the editor in one tap; everyone else is told it is being updated.
-  const oldSopBanner = (data.sopVersion >= 2) ? '' : (canEdit
-    ? `<div class="alert-banner" style="cursor:default;margin-bottom:12px">The sales flow changed on 19 Nov 2026 (payment confirmed in the app by the President, or by Finance in his place; Sales generates the sales order and job order). This saved SOP is the older version. <button class="btn-secondary btn-sm" id="sop-load-v2">Load the new default</button></div>`
-    : `<div class="alert-banner" style="cursor:default;margin-bottom:12px">This SOP is being updated to the new sales flow.</div>`);
+  const oldSopBanner = (data.sopVersion >= 3) ? '' : (canEdit
+    ? `<div class="alert-banner" style="cursor:default;margin-bottom:12px">The sales process was updated (Nov 2026): the Barro Kitchens configurators, the President's approval of every quote, Record payment, Generate SO &amp; JO and the Won / Projects tab. This saved SOP is the older version. <button class="btn-secondary btn-sm" id="sop-load-v2">Load the new default</button></div>`
+    : `<div class="alert-banner" style="cursor:default;margin-bottom:12px">This SOP is being updated to the new sales process.</div>`);
 
   container.innerHTML = `
     ${loadWarn}
@@ -948,7 +985,7 @@ function renderSalesSOPView(container, data, loadErr) {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:24px">${emojiIcon('📖',24)}</span>
-          <h3 style="margin:0;font-size:17px;color:var(--text)">Sales SOP — Inquiry to Sales Order</h3>
+          <h3 style="margin:0;font-size:17px;color:var(--text)">Sales SOP — Inquiry to Close-out</h3>
         </div>
         ${canEdit?`<button class="btn-secondary btn-sm" id="sop-edit-btn" style="flex-shrink:0">${emojiIcon('✏️',16)} Edit SOP</button>`:''}
       </div>
@@ -997,7 +1034,7 @@ function renderSalesSOPView(container, data, loadErr) {
     </div>`:''}
 
     <p style="text-align:center;font-size:11px;color:var(--text-muted);margin:16px 0 4px">
-      Barro Industries · Sales Department · Standard Operating Procedure
+      Barro Kitchens (Barro Industries OPC) · Sales Department · Standard Operating Procedure
     </p>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
@@ -1657,7 +1694,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       const bar = document.createElement('div');
       bar.className = 'alert-banner';
       bar.style.cssText = 'margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
-      bar.innerHTML = `<span>${emojiIcon('🧭',16)} ${n} Barro Kitchens quote(s) are stranded in the Brilliant Steel collection.</span><button class="btn-primary btn-sm" id="bkq-repair-btn">Repair now</button>`;
+      bar.innerHTML = `<span>${emojiIcon('🧭',16)} ${n} Barro Kitchens quote(s) are stranded in the Brilliance Steel collection.</span><button class="btn-primary btn-sm" id="bkq-repair-btn">Repair now</button>`;
       if (window.lucide) lucide.createIcons({ nodes: [bar] });
       container.prepend(bar);
       document.getElementById('bkq-repair-btn').addEventListener('click', async () => {
@@ -1693,7 +1730,7 @@ async function renderSalesBSQuotes(container, currentUser, currentRole) {
   let snap;
   try { snap = await db.collection('bs_quotes').orderBy('createdAt','desc').get(); }
   catch (err) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load Brilliant Steel quotes</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm spq-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load Brilliance Steel quotes</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm spq-retry-btn" style="margin-top:14px">Retry</button></div>`;
     container.querySelector('.spq-retry-btn')?.addEventListener('click', () => renderSalesBSQuotes(container, currentUser, currentRole));
     if (window.lucide) lucide.createIcons({ nodes: [container] });
     return;
@@ -1710,7 +1747,7 @@ async function renderSalesBSQuotes(container, currentUser, currentRole) {
       <div style="flex:1;min-width:0">
         <div class="item-title" style="font-size:13px">${escHtml(q.quoteNumber||q.id.slice(-6).toUpperCase())} — ${escHtml(q.clientName||'Unnamed')}</div>
         <div class="item-meta" style="margin-top:4px">
-          <span>${emojiIcon('👤',16)} ${escHtml(q.createdByName||q.agentName||'Brilliant Steel')}</span>
+          <span>${emojiIcon('👤',16)} ${escHtml(q.createdByName||q.agentName||'Brilliance Steel')}</span>
           ${q.date?`<span>${escHtml(q.date)}</span>`:''}
         </div>
       </div>
@@ -1732,7 +1769,7 @@ async function renderSalesBSQuotes(container, currentUser, currentRole) {
       const prevTot = prev ? (Number(prev.total) || Number(prev.grandTotal) || Number(prev.amount) || 0) : 0;
       const ts = q.date || (q.createdAt?.toDate ? q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '');
       return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px${i?';border-top:1px solid var(--border)':''}">
-        <div style="flex:1;min-width:120px;font-size:12px"><strong>R${i+1}</strong> · ${escHtml(ts)} · ${escHtml(q.createdByName||q.agentName||'Brilliant Steel')}</div>
+        <div style="flex:1;min-width:120px;font-size:12px"><strong>R${i+1}</strong> · ${escHtml(ts)} · ${escHtml(q.createdByName||q.agentName||'Brilliance Steel')}</div>
         <div style="font-size:12px;font-weight:700">₱${fmt(tot)}</div>
         <div>${i>0?quoteRevDeltaHtml(tot,prevTot):'<span style="font-size:11px;color:var(--text-muted)">first filing</span>'}</div>
       </div>`;
@@ -1746,16 +1783,16 @@ async function renderSalesBSQuotes(container, currentUser, currentRole) {
 
   container.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);background:rgba(10,132,255,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
-      ${emojiIcon('🤝',16)} Read-only view of <strong>Brilliant Steel</strong> quotes. Sales can see these for coordination.
+      ${emojiIcon('🤝',16)} Read-only view of <strong>Brilliance Steel</strong> quotes. Sales can see these for coordination.
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px">
-      <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Brilliant Steel Quotes</div></div>
+      <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Brilliance Steel Quotes</div></div>
       <div class="stat-card"><div class="stat-num">₱${fmt(total)}</div><div class="stat-label">Total Value</div></div>
       <div class="stat-card"><div class="stat-num">${accepted.length}</div><div class="stat-label">Accepted / Filed</div></div>
     </div>
     <div class="item-list">
       ${!quotes.length
-        ? window.renderEmptyState({ icon:'📋', title:'No Brilliant Steel quotes yet', hint:"Brilliant Steel quotes will appear here as they're created." })
+        ? window.renderEmptyState({ icon:'📋', title:'No Brilliance Steel quotes yet', hint:"Brilliance Steel quotes will appear here as they're created." })
         : buildQuoteChains(quotes).map(bsQuoteChainCard).join('')}
     </div>`;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
@@ -2398,7 +2435,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
     // (message-only before this pass). Titled after the thing that failed, the
     // same way every other list in this file names its own failure, now that
     // the swallowing catches above no longer keep this branch unreachable.
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load Brilliant Steel quotations</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm bsq-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load Brilliance Steel quotations</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm bsq-retry-btn" style="margin-top:14px">Retry</button></div>`;
     container.querySelector('.bsq-retry-btn')?.addEventListener('click', () => renderBSQuotationsSummary(container, currentUser, currentRole));
     if (window.lucide) lucide.createIcons({ nodes: [container] });
   }

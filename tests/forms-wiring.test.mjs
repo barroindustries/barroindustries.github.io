@@ -39,7 +39,7 @@ describe('1. files and wiring', () => {
   it('the forms files are LAZY: none is a <script> in index.html (they load through ensureScript), and nothing else of the app kit moved', () => {
     const html = read('index.html');
     assert.doesNotMatch(html, /js\/forms(-core|-set-1|-pdf)?\.js/);
-    assert.doesNotMatch(html.replace(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="topbar-hlogo"[^>]*>/, ''), /barro-industries-horizontal/, 'only the app top bar (owner 2026-11-20) references the horizontal logo');
+    assert.doesNotMatch(html.replace(/<img src="icons\/barro-industries-horizontal\.png" alt="Barro Industries" class="(topbar|splash)-hlogo"[^>]*>/g, ''), /barro-industries-horizontal/, 'only the app top bar and the splash (owner 2026-11-20) reference the horizontal logo');
     const cfg = read('js/config.js');
     assert.ok(!/forms-core|forms-set-1|forms-pdf/.test(cfg), 'config.js (PAGE_SCRIPTS) is not touched by Phase 1 — QF loads the engine with ensureScript');
   });

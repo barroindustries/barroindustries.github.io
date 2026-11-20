@@ -1016,3 +1016,30 @@ describe('owner 2026-11-20 "Start at no discount": a new quote never pre-selects
   });
   it('the hint stays: "Month pace: offer up to n% discount"', () => { assert.match(code, /Month pace: offer up to \$\{_sd\.tier\}% discount/); });
 });
+
+describe('owner 2026-11-20 "make the approved quote PDF one tap": a quote reopened as filed downloads at once; a change after filing asks to file again', () => {
+  it('filedChangedSinceFiling: false right after the baseline, true after a price, quantity or client change, false again after a new baseline; never for a draft', () => {
+    const b = makeEnv();
+    b.run(`items.length = 0; items.push({ name: 'Prep table', qty: 1, unit: 'pc', unitPrice: 28500 }); quoteStatus = 'filed'; _filedBaseline = filedSig();`);
+    assert.equal(b.run('filedChangedSinceFiling()'), false, 'nothing changed: one tap');
+    b.run('items[0].unitPrice = 25000'); assert.equal(b.run('filedChangedSinceFiling()'), true, 'a price change');
+    b.run('items[0].unitPrice = 28500'); assert.equal(b.run('filedChangedSinceFiling()'), false, 'back to as filed');
+    b.run('items[0].qty = 2'); assert.equal(b.run('filedChangedSinceFiling()'), true, 'a quantity change');
+    b.run('_filedBaseline = filedSig()'); assert.equal(b.run('filedChangedSinceFiling()'), false, 're-filed');
+    b.run("quoteStatus = 'draft'"); assert.equal(b.run('filedChangedSinceFiling()'), false, 'a draft is gated by the old rule, not this one');
+  });
+  it('the baseline is taken when the quote is filed and when a filed quote is loaded, cleared by New; both PDF gates check it first', () => {
+    const code = stripComments(SCRIPT);
+    assert.match(code, /quoteStatus='filed';\s*filedAt=new Date\(\)\.toISOString\(\);\s*_filedBaseline=filedSig\(\);/);
+    assert.match(code, /_filedBaseline = \(quoteStatus==='filed'\) \? filedSig\(\) : null;/);
+    assert.match(code, /filedAt='';_filedBaseline=null;/);
+    assert.match(code, /if\(filedChangedSinceFiling\(\)\)\{\s*showToast\('You changed this quote after it was filed\./);
+    const doc = fs.readFileSync(path.join(ROOT, 'qb/d7/d7-doc.js'), 'utf8');
+    assert.ok(doc.indexOf("filedChangedSinceFiling()") > 0 && doc.indexOf("filedChangedSinceFiling()") < doc.indexOf("quoteStatus !== 'filed'"), 'the KC gate checks for changes first');
+  });
+  it('the app reopens a filed (or approved) quote as filed, never one waiting for or refused approval', () => {
+    const app = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+    assert.match(app, /if \(!window\._qbReopenState\.filedAt && q\.status === 'filed' && !\['pending_review', 'returned', 'rejected'\]\.includes\(appr\)\)/);
+    assert.match(app, /const t = q\.approvedAt \|\| q\.filedAt \|\| q\.createdAt;/);
+  });
+});

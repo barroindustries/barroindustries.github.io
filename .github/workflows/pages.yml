@@ -1,0 +1,115 @@
+name: Deploy site
+
+# Publishes barroindustries.com from a PUBLIC-ONLY copy of master (owner, 2026-11-20).
+# Before this, Pages served the whole branch, so STATUS.md, docs/reviews/*, firestore.rules,
+# functions/, scripts/ and the agent notes were all readable on the live domain.
+# scripts/build-public-site.js decides what ships (tests/public-site-build.test.mjs pins it).
+#
+# REQUIRES: repo Settings -> Pages -> Source = "GitHub Actions". While the source is still
+# "Deploy from a branch", the deploy job below fails harmlessly and the old full-branch build keeps
+# serving the site.
+#
+# Replaces pages-deploy-check.yml (which polled the legacy /pages/builds API): the live-version
+# check and the IndexNow ping now run here, after the deploy.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the public copy
+        run: node scripts/build-public-site.js _site
+      - name: Refuse to publish anything internal
+        run: |
+          set -euo pipefail
+          for p in STATUS.md CLAUDE.md AGENTS.md docs firestore.rules functions scripts tests .github; do
+            if [ -e "_site/$p" ]; then echo "::error::_site/$p would be published"; exit 1; fi
+          done
+          if find _site -name '*.md' | grep -q .; then echo "::error::a Markdown note would be published"; exit 1; fi
+          test -f _site/index.html && test -f _site/CNAME && test -f _site/56a23bfe1bfdd002453891cc782415f3.txt
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify-live:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: js/config.js
+          sparse-checkout-cone-mode: false
+      - name: Confirm the live site serves this commit's version, and not the internal files
+        shell: bash
+        run: |
+          set -uo pipefail
+          want="$(grep -oE "APP_VERSION *= *'[^']+'" js/config.js | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)"
+          ok=""
+          for i in $(seq 1 12); do
+            got="$(curl -fsS --max-time 15 "https://barroindustries.com/js/config.js?cb=$RANDOM" 2>/dev/null \
+                   | grep -oE "APP_VERSION *= *'[^']+'" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)"
+            echo "[$i] live=$got want=$want"
+            [ -n "$want" ] && [ "$got" = "$want" ] && { ok=1; break; }
+            sleep 15
+          done
+          [ -n "$ok" ] || echo "::warning::Live site has not served $want within ~3 minutes (CDN lag?)."
+          for p in STATUS.md firestore.rules docs/firestore-rules-notes.md; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "https://barroindustries.com/$p?cb=$RANDOM")"
+            echo "/$p -> $code"
+            [ "$code" = "200" ] && echo "::warning::/$p still answers 200 (CDN cache can take up to 10 minutes)."
+          done
+          exit 0
+
+  # IndexNow (2026-10-29): tell Bing / Yandex / Seznam / Naver which public pages changed.
+  # Key file: /56a23bfe1bfdd002453891cc782415f3.txt at the site root — never delete it.
+  indexnow:
+    needs: deploy
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Send the changed sitemap URLs
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            node scripts/indexnow.js --changed "$BEFORE" "$AFTER"
+          else
+            node scripts/indexnow.js
+          fi
