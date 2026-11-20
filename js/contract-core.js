@@ -122,7 +122,7 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
       ref: ref, date: ctx.today,
       kind: delta >= 0 ? 'debit' : 'credit',
       accountType: 'asset', account: 'Accounts Receivable', category: 'Contract adjustment',
-      description: 'Contract revised — ' + (order.clientName || '') + ' (' + soNumber + ' Rev. ' + n + '): ₱' + from + ' → ₱' + to,
+      description: 'Contract revised — ' + (order.clientName || '') + ' (' + soNumber + ' R' + n + '): ₱' + from + ' → ₱' + to,
       amount: Math.abs(delta),
       source: 'Sales', projectId: order.projectId || null,
       extra: { contractFrom: from, contractTo: to, signedDelta: delta, revNo: n, kind: pr.kind, confirmedBy: who },
@@ -136,11 +136,11 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     isA ? { items: ctx.quote.items, quoteId: ctx.quote.id != null ? ctx.quote.id : (pr.quoteId || null), quoteNumber: ctx.quote.number != null ? ctx.quote.number : (pr.quoteNumber || null) } : {},
     (scopeChanged && project.jobOrder && project.jobOrder.items) ? { 'jobOrder.scopeReviewNeeded': true } : {},
     {
-      timeline: union({ at: ctx.nowIso, event: 'Contract revised — ' + soNumber + ' Rev. ' + n + (joNumber ? ' / ' + joNumber + ' Rev. ' + n : ''), by: who }),
+      timeline: union({ at: ctx.nowIso, event: 'Contract revised — ' + soNumber + ' R' + n + (joNumber ? ' / ' + joNumber + ' R' + n : ''), by: who }),
       // One union with both rows: a document can carry only one array-union per field per write.
       documents: union(
-        { type: 'Sales Order', ref: soNumber + ' Rev. ' + n, at: ctx.nowIso, by: who },
-        { type: 'Job Order', ref: (joNumber || 'JO') + ' Rev. ' + n, at: ctx.nowIso, by: who }),
+        { type: 'Sales Order', ref: soNumber + ' R' + n, at: ctx.nowIso, by: who },
+        { type: 'Job Order', ref: (joNumber || 'JO') + ' R' + n, at: ctx.nowIso, by: who }),
       updatedAt: serverTime(),
     });
 
@@ -245,7 +245,7 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     const ledgerEntry = {
       ref: ref, date: ctx.today, kind: 'debit', accountType: 'expense',
       account: 'Sales Refunds', category: 'Sales Refunds',
-      description: 'Refund — ' + (order.clientName || '') + ' (' + soNumber + ' Rev. ' + n + ')',
+      description: 'Refund — ' + (order.clientName || '') + ' (' + soNumber + ' R' + n + ')',
       amount: amount, source: 'Finance', projectId: order.projectId || null,
       extra: Object.assign({}, ctx.bankTag || {}),
       projectSync: {

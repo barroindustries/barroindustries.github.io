@@ -671,3 +671,34 @@ describe('kc1 lines: section names, codes and quantities on every form', () => {
     }
   });
 });
+
+// ── F3 (flow spec §7): what the REAL ContractCore writes is what the forms read ───────────────────────────────────
+describe('F3 apply → forms: the revision ContractCore writes prints on the Sales Order and Job Order', () => {
+  const req = createRequire(import.meta.url);
+  req('../js/money-core.js'); req('../js/sales-flow-core.js'); req('../js/price-gate-core.js');
+  const CC = req('../js/contract-core.js');
+  it('SO-0012 R1 / JO-0012 R1, the proposer\'s reason in the history, the new contract and balance; no "Rev." anywhere', () => {
+    const fx = fixtures();
+    fx.order.soNumber = 'SO-0012'; fx.project.joNumber = 'JO-0012';
+    fx.order.pendingRevision = { revNo: 1, kind: 'manual', fromAmount: 150000, toAmount: 170000, delta: 20000, changeReason: 'Client added a pot rack',
+      gate: { approval: 'none' }, status: 'pending_confirm', requestedAt: '2026-11-19T01:00:00.000Z', requestedBy: 'u-uri', requestedByName: 'Uriel Sagaoinit', decision: null };
+    const viewer = { uid: 'u-neil', isPresident: true, isFinanceTier: false };
+    const plan = CC.planApply(fx.order, fx.project, { today: '2026-11-20', nowIso: '2026-11-20T02:00:00.000Z', who: 'Neil Barro', viewer,
+      union: (...xs) => xs, serverTime: () => '2026-11-20T02:00:00.000Z', deleteField: () => undefined });
+    assert.equal(plan.ok, true, plan.code);
+    for (const s of [JSON.stringify(plan.projectFields.timeline), JSON.stringify(plan.projectFields.documents), plan.ledgerEntry.description]) assert.ok(!/Rev\./.test(s), 'owner SF23: "R1", never "Rev."');
+    const order = { ...fx.order, contractAmount: plan.orderPatch.contractAmount, contractRev: plan.orderPatch.contractRev, originalContractAmount: plan.orderPatch.originalContractAmount, revisions: [plan.revision] };
+    delete order.pendingRevision;
+    const project = { ...fx.project, contractAmount: plan.projectFields.contractAmount, arBalance: plan.projectFields.arBalance, joRev: plan.projectFields.joRev, joRevAt: plan.projectFields.joRevAt, joRevNote: plan.projectFields.joRevNote };
+    const so = FC.prepare('sales_order', ctxOf({ order, project }, PEOPLE.uriel));
+    assert.equal(so.ok, true, so.error); assert.equal(so.numberText, 'SO-0012 R1');
+    assert.equal(so.data.contract, 170000); assert.equal(so.data.balance, 95000);
+    assert.equal(so.data.revisions[0].reason, 'Client added a pot rack', 'the history reads changeReason (the name the core writes)');
+    const html = FC.compose(so, FC.renderSections(so)).bodyHtml;
+    assert.ok(html.includes('Client added a pot rack')); assert.ok(!/Rev\./.test(html));
+    const jo = FC.prepare('job_order', ctxOf({ project, order }, PEOPLE.rene));
+    assert.equal(jo.ok, true, jo.error); assert.equal(jo.numberText, 'JO-0012 R1');
+    const joHtml = FC.compose(jo, FC.renderSections(jo)).bodyHtml;
+    assert.ok(!/₱|Client added a pot rack/.test(joHtml), 'the job order carries no amount and no Sales reason');
+  });
+});

@@ -742,7 +742,7 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     return { start: FC.toIsoDate(first(t.startDate, j.startDate)), lead: lead ? `${lead} calendar days` : '', completion: FC.toIsoDate(first(t.completionDate, c.order && c.order.targetDate, c.project && c.project.targetDate)) };
   }
   const orderDate = (c) => (c.order && (c.order.releasedAt || c.order.createdAt)) || (c.project && c.project.createdAt) || '';
-  const revisionRows = (c) => arr(c.order && c.order.revisions).map((r) => ({ rev: 'R' + Math.floor(Number(r.revNo) || 0), date: FC.toIsoDate(r.decidedAt), reason: str(r.reason), delta: fin(r.delta) }));
+  const revisionRows = (c) => arr(c.order && c.order.revisions).map((r) => ({ rev: 'R' + Math.floor(Number(r.revNo) || 0), date: FC.toIsoDate(r.decidedAt), reason: str(r.changeReason || r.reason), delta: fin(r.delta) }));
 
   FC.register({
     id: 'sales_order', title: 'SALES ORDER', audience: 'sales', orientation: 'portrait', bodySet: 'js/forms-set-1.js',

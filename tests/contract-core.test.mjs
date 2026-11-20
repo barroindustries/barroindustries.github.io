@@ -187,12 +187,12 @@ describe('planApply — numbers and ledger entry (§7.4, §7.5)', () => {
     const docs = JSON.stringify(p.projectFields.documents);
     assert.ok(!tl.includes('₱') && !docs.includes('₱'));
     assert.ok(!JSON.stringify(p.projectFields.joRevNote).includes('₱'));
-    assert.deepEqual(p.projectFields.timeline.__union[0].event, 'Contract revised — SO-0012 Rev. 1 / JO-0007 Rev. 1');
-    assert.deepEqual(p.projectFields.documents.__union.map((d) => [d.type, d.ref]), [['Sales Order', 'SO-0012 Rev. 1'], ['Job Order', 'JO-0007 Rev. 1']]);
+    assert.deepEqual(p.projectFields.timeline.__union[0].event, 'Contract revised — SO-0012 R1 / JO-0007 R1');
+    assert.deepEqual(p.projectFields.documents.__union.map((d) => [d.type, d.ref]), [['Sales Order', 'SO-0012 R1'], ['Job Order', 'JO-0007 R1']]);
   });
   it('the books row is the receivable adjustment, described with pesos only on the ledger row', () => {
     const p = plan(rev(120000), project());
-    assert.equal(p.ledgerEntry.description, 'Contract revised — Acme Foods (SO-0012 Rev. 1): ₱100000 → ₱120000');
+    assert.equal(p.ledgerEntry.description, 'Contract revised — Acme Foods (SO-0012 R1): ₱100000 → ₱120000');
   });
   it('rounds to centavos', () => {
     const p = plan(rev(100000.1 + 0.2), project());   // 100000.3 (float dust)
@@ -486,7 +486,7 @@ describe('planRefund (§7.7)', () => {
     assert.equal(e.category, 'Sales Refunds');
     assert.equal(e.amount, 15000);
     assert.equal(e.source, 'Finance');
-    assert.equal(e.description, 'Refund — Acme Foods (SO-0012 Rev. 1)');
+    assert.equal(e.description, 'Refund — Acme Foods (SO-0012 R1)');
     assert.equal(e.extra.bankAccountId, 'ba1');
     assert.equal(e.projectSync.docId, 'prj1');
     assert.equal(e.projectSync.fields.amountCollected, 50000);
