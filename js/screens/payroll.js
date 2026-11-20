@@ -1696,11 +1696,16 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
         // before this change, in which case this falls back to the old,
         // undetailed note).
         const kb = r.kpiBreakdown;
-        note = (kb && kb.inScopeCount != null)
-          ? `${kb.doneInM} of ${kb.inScopeCount} in-scope tasks done` +
-            (kb.deliverableScore != null ? ` · deliverables ${Math.round(kb.deliverableScore)}%` : '') +
-            ' (70% tasks, 30% deliverables)'
-          : 'tasks finished this period + deliverables score';
+        // SALES MANAGER KPI (rollout step 6) — a line whose KPI came from the Sales KPI says so, and says what it is made of; its full working
+        // (the sales line and the rating line) is printed under the figures on the card (_pyPersonCard). The task wording below is for every
+        // other line, exactly as it was.
+        note = (kb && kb.kpiSource === 'sales')
+          ? 'Sales KPI — confirmed sales 70%, client rating 30%'
+          : (kb && kb.inScopeCount != null)
+            ? `${kb.doneInM} of ${kb.inScopeCount} in-scope tasks done` +
+              (kb.deliverableScore != null ? ` · deliverables ${Math.round(kb.deliverableScore)}%` : '') +
+              ' (70% tasks, 30% deliverables)'
+            : 'tasks finished this period + deliverables score';
       }
     } else if (col.key === 'takeHome') {
       // item 5, THE reversal (see js/pay-policy.js's header on
@@ -1851,7 +1856,9 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
         // _pyRead's own `earnings` mapping just above in this file), so it is
         // always undefined for an office line and would render "₱0.00 base".
         base: r.earnings, allowance: r.allowances,
-        kpiFactor: r.kpiFactor, incentiveFull: r.incentiveFull, incentiveEarned: r.incentiveEarned
+        kpiFactor: r.kpiFactor, incentiveFull: r.incentiveFull, incentiveEarned: r.incentiveEarned,
+        // SALES MANAGER KPI — which words the 'basekpi' sentence uses for the two parts of the KPI (undefined for every line that is not one).
+        kpiSource: r.kpiBreakdown ? r.kpiBreakdown.kpiSource : undefined
       });
       return s ? `<div class="py-oneoff">${_pyEsc(s)}</div>` : '';
     })()) || '';
@@ -1870,6 +1877,14 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // "Pay records are kept in HR" (§6.5) — permanently visible text, never
     // behind a tap, plus the one door out. Read-only here on purpose: the
     // payroll screen writes only period-scoped inputs, never standing pay.
+    // SALES MANAGER KPI (rollout step 6; spec §5.4) — the two working lines of a Sales-KPI line, read off the frozen kpiBreakdown (js/pay-policy.js
+    // salesKpiWords: the same words the scorecard prints). Nothing for any other line.
+    const salesKpiLines = (r.kpiBreakdown && r.kpiBreakdown.kpiSource === 'sales' && typeof window.salesKpiWords === 'function')
+      ? (() => {
+          const w = window.salesKpiWords(r.kpiBreakdown, r.kpiScore);
+          return w ? `<div class="py-oneoff">KPI working: ${_pyEsc(w.sales)}</div><div class="py-oneoff">KPI working: ${_pyEsc(w.rating || w.note)}</div>` : '';
+        })()
+      : '';
     const hrBtn = _pyHrRecordBtn();
     const hrLine = '<div class="py-oneoff">Pay records are kept in HR.</div>';
     // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.3 — the reason government
@@ -1895,6 +1910,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       ${perfLine}
       ${taskBasedLine}
       ${basekpiLine}
+      ${salesKpiLines}
       ${statusLine}
       ${hrLine}
       ${acts.length ? `<div class="py-rowacts">${acts.join('')}</div>` : ''}

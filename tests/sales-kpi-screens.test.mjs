@@ -922,11 +922,12 @@ describe('wiring: where each piece appears (textual pins)', () => {
     assert.match(SW, /^  '\/js\/screens\/sales-kpi\.js',$/m);
     assert.equal((INDEX.match(/sales-kpi/g) || []).length, (kit.match(/sales-kpi/g) || []).length, 'never listed outside the app-kit (not in <body>)');
   });
-  it('the screen is NOT an app-kit script (lazy only) and the payroll files do not mention it', () => {
+  it('the screen is NOT an app-kit script (lazy only); the frozen money-core and the weekly (Operations) engine never mention the Sales KPI', () => {
     const kit = INDEX.slice(INDEX.indexOf('<template id="app-kit">'), INDEX.indexOf('</template>'));
     assert.ok(!kit.includes('js/screens/sales-kpi.js'));
-    for (const f of ['js/money-core.js', 'js/pay-policy.js', 'js/payroll.js', 'js/payroll-weekly.js', 'js/screens/payroll.js']) assert.ok(!/SalesKpi|sales_kpi|sales-kpi/.test(read(f)), `${f} must not know about the Sales KPI yet`);
-    assert.ok(!/SalesKpi|sales_kpi|sales-kpi/.test(stripComments(read('js/departments.js'))), 'departments.js (buildPayRunLines) must not know about the Sales KPI yet');
+    // Rollout step 6 (the payroll switch, tests/sales-kpi-payroll.test.mjs) wires the MONTHLY pay engine, the roster / payslip / My Finance screens and pay-policy.js to the Sales KPI; this
+    // file's earlier pin ("the payroll files must not know about it yet") held the line until then. money-core.js is frozen and the Operations Team has no KPI: both stay clean.
+    for (const f of ['js/money-core.js', 'js/payroll-weekly.js']) assert.ok(!/SalesKpi|sales_kpi|sales-kpi/.test(read(f)), `${f} must not know about the Sales KPI`);
   });
   it('the preview label is exactly "Preview — not yet used for pay"', () => {
     assert.ok(SCREEN.includes("const PREVIEW = 'Preview — not yet used for pay';"));

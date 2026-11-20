@@ -2070,6 +2070,108 @@ window.periodExclusionsFor = async function(month) {
   } catch (_) { return null; }                     // could not read — caller must stop
 };
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   SALES MANAGER KPI — THE PAY-SIDE RESOLVER (specs/SALES-MANAGER-KPI-SPEC-2026-11-20.md §5.3, §11–§13; rollout step 6,
+   the ONLY step that moves money).
+
+   For one person and one pay month this answers: "is the Sales KPI the source of this person's KPI?" —
+     • null                 the Sales KPI is not in force for them that month (no sales_kpi/{uid} document, it is switched off, or the
+                            month is before its startMonth): the caller keeps the task KPI, exactly as before this existed;
+     • { kpiScore, breakdown, salesKpi }
+                            it is in force: kpiScore is the number pay uses (confirmed sales 70% + client rating 30%, js/sales-kpi-core.js —
+                            this function counts nothing itself), `breakdown` is SalesKpi.compute()'s whole result (screens may name clients from
+                            it; it is NEVER stored), and `salesKpi` is the numbers-and-labels-only working that buildPayRunLines freezes onto the
+                            line: { target, collected, count, salesScore, avgStars, ratingCount, satScore, weights, mode[, ratingWindow] };
+     • THROWS               a read failed, the engine is missing, or no target is set for the month.
+
+   ⚠ A THROW IS NEVER ANSWERED WITH THE TASK KPI. Guessing "tasks" on a failed read would pay Uriel on a different score than the one the owner
+   decided on, silently — the same stance as the pay-method and exclusions refusals in buildPayRunLines. The pay run refuses and says why.
+   ⚠ EVERY READ IS FRESH: source:'server' on each get (no dbCachedGet, no IndexedDB cache answering offline), because this decides pay — the
+   switch, the target, who counts as the President and what was confirmed are all read at the moment the figure is worked out.
+   ⚠ NO TARGET, NO RUN: a month without a target (its own or the default) throws "Set the sales target for <Month YYYY> first …". Nothing is invented.
+   The owner's default target is typed into the card by the President (sales_kpi/{uid}.defaultTarget) — it is never in source (the repo is public).
+
+   `db` is firebase-config.js's top-level const and NOT a property of window (js/errlog.js and js/screens/sales-kpi.js document the trap): every read goes
+   through the accessor below, never through the window property. The function is self-contained on purpose (no top-level helper constants: a second
+   classic script declaring the same name would stop this whole file loading).
+   opts.ratings: 'all' (default — the pay run is read by the President / Finance, who may read every rating) or 'own' (the person reading their
+   OWN scorecard, who may read only the ratings that name them: firestore.rules client_ratings). ═══════════════════════════════════════════════════════════════════ */
+window.resolveSalesKpi = async function(uid, month, opts) {
+  const fdb = (typeof db !== 'undefined' && db) ? db : (window.db || null);
+  if (!fdb) throw new Error('Could not read the Sales KPI setting — Firestore is not ready, so nothing was worked out. Try again in a moment.');
+  if (!uid) throw new Error('The Sales KPI needs to know whose KPI to work out — nothing was worked out.');
+  if (!(typeof month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(month))) throw new Error('The Sales KPI needs a month like 2027-01 — nothing was worked out.');
+  const SERVER = { source: 'server' };
+  const read = async (what, ref) => {
+    try { return await ref.get(SERVER); }
+    catch (err) { throw new Error('Could not read ' + what + ' — nothing was worked out. Try again in a moment.'); }
+  };
+  // The switch first: for everyone without a Sales KPI this is the one small read and nothing else is touched.
+  const cfgSnap = await read('the Sales KPI setting', fdb.collection('sales_kpi').doc(uid));
+  if (!cfgSnap || !cfgSnap.exists) return null;
+  const K = window.SalesKpi;
+  if (!K || typeof K.compute !== 'function') throw new Error('The Sales KPI engine did not load — reload the app, then try again. Nothing was worked out.');
+  const cfg = cfgSnap.data() || {};
+  if (!K.isActive(cfg, month)) return null;
+  const target = K.targetFor(cfg, month);
+  if (target == null) throw new Error('Set the sales target for ' + K.monthLabel(month) + ' first (Finance › Payroll & HR › Sales KPI)');
+
+  const ratingsRef = (opts && opts.ratings === 'own')
+    ? fdb.collection('client_ratings').where('salesUid', '==', uid)
+    : fdb.collection('client_ratings');
+  const [ordersSnap, claimsSnap, projectsSnap, ratingsSnap, usersSnap] = await Promise.all([
+    read('the confirmed orders', fdb.collection('sales_orders').where('status', '==', 'recorded')),
+    read('the confirmed payment claims', fdb.collection('payment_claims').where('status', '==', 'recorded')),
+    read('the job refunds', fdb.collection('job_projects')),
+    read('the client ratings', ratingsRef),
+    read('the staff list', fdb.collection('users'))
+  ]);
+  const docs = (snap) => snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const text = (v) => (v == null ? '' : String(v));
+  // The refunds of every job as the flat list the engine expects — the same shape js/screens/sales-kpi.js refundsOf builds for the scorecard
+  // (tests/sales-kpi-payroll.test.mjs pins the two together), so the scorecard and the pay can never read a refund differently.
+  const refunds = [];
+  docs(projectsSnap).forEach((p) => {
+    (Array.isArray(p.refunds) ? p.refunds : []).forEach((r, i) => {
+      refunds.push({ id: p.id + ':' + i, projectId: p.id, clientName: text(p.clientName), quoteNumber: text(p.quoteNumber), company: text(p.company), createdBy: text(p.createdBy), amount: r && r.amount, date: r && r.date });
+    });
+  });
+  const b = K.compute({ cfg: cfg, month: month, uid: uid, orders: docs(ordersSnap), claims: docs(claimsSnap), refunds: refunds, ratings: docs(ratingsSnap), users: docs(usersSnap) });
+  const sc = b.score;
+  if (!sc || sc.ok !== true || typeof sc.kpiScore !== 'number' || !isFinite(sc.kpiScore)) throw new Error('The Sales KPI could not be worked out for ' + K.monthLabel(month) + ' — nothing was worked out.');
+  return {
+    kpiScore: sc.kpiScore,
+    breakdown: b,
+    salesKpi: Object.assign({
+      target: b.target, collected: b.collected.total, count: b.collected.items.length,
+      salesScore: sc.salesScore, avgStars: b.rating.source === 'none' ? null : b.rating.avg, ratingCount: b.rating.n,
+      satScore: sc.satScore, weights: { sales: sc.weights.sales, satisfaction: sc.weights.satisfaction }, mode: sc.mode
+    }, b.rating.source === 'previous' ? { ratingWindow: 'previous' } : {})
+  };
+};
+
+/* The DISPLAY face of the resolver: one answer a screen can switch on, so no screen has to remember the rule "a failed read is never the task KPI".
+     { state: 'sales', kpi }          the Sales KPI is in force: show kpi.kpiScore and its working (js/pay-policy.js salesKpiWords)
+     { state: 'tasks' }               it is not: the screen shows the task KPI exactly as it always did
+     { state: 'unavailable', error }  the read failed / no target: the screen says "KPI unavailable" — NEVER the task KPI
+   Pay does not use this (buildPayRunLines calls resolveSalesKpi and lets the throw refuse the run). A person reading their OWN scorecard without the
+   books tier asks only for the ratings that name them; everyone else reads them all. */
+window.salesKpiState = async function(uid, month, opts) {
+  try {
+    const o = Object.assign({}, opts);
+    if (!o.ratings) {
+      const me = window.currentUser && window.currentUser.uid;
+      const books = (typeof window.isMoneyPriv === 'function' && window.isMoneyPriv())
+        || ((window.currentDepts || []).indexOf('Finance') >= 0 && window.currentRole !== 'secretary');
+      o.ratings = (me && me === uid && !books) ? 'own' : 'all';
+    }
+    const kpi = await window.resolveSalesKpi(uid, month, o);
+    return kpi ? { state: 'sales', kpi: kpi } : { state: 'tasks' };
+  } catch (error) {
+    return { state: 'unavailable', error: error };
+  }
+};
+
 // window.buildPayRunLines — READ-ONLY line builder for a month, extracted
 // VERBATIM out of computePayRun below (PAYROLL-LIVE-SPEC-2026-08-11 §4.4, D2:
 // one pipeline, two callers). Same inputs, same maths, same skip reasons as
@@ -2182,7 +2284,15 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     // Adjust override on a specific employee/month if that's materially
     // wrong for a delayed run.
     const kpiTargetD = kpiTargetsMap[emp.id] || {};
-    const kpiScore = window.computeKpiForMonth(userTasks, month,
+    // SALES MANAGER KPI (SALES-MANAGER-KPI-SPEC-2026-11-20 §5.3, rollout step 6) — for the one person whose sales_kpi/{uid} is in force this
+    // month, the KPI is confirmed sales 70% + client rating 30% and TASKS DO NOT COUNT; for everyone else the call below is exactly what it
+    // was. window.resolveSalesKpi (above) reads the switch FRESH and answers null for anyone it does not apply to. If it THROWS (a failed read,
+    // or no target set for the month) the throw is NOT caught here: Promise.all rejects, nothing is built, and the run refuses with the reason on
+    // screen — a failed read is never answered with the task KPI. ovr.kpiScore below still wins over either source.
+    const salesKpi = await window.resolveSalesKpi(emp.id, month);
+    const kpiScore = salesKpi
+      ? salesKpi.kpiScore
+      : window.computeKpiForMonth(userTasks, month,
         kpiTargetD.deliverableScore, window.taskDoneMonth, window.taskCreatedMonth);
     // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — additive DISPLAY metadata only.
     // window.kpiMonthBreakdown (js/pay-policy.js) mirrors computeKpiForMonth's
@@ -2251,7 +2361,11 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     // figure computePayLine returned.
     line.kpiBreakdown = {
       doneInM: kpiBreak.doneInM, inScopeCount: kpiBreak.inScopeCount,
-      deliverableScore: (typeof kpiTargetD.deliverableScore === 'number') ? kpiTargetD.deliverableScore : null
+      deliverableScore: (typeof kpiTargetD.deliverableScore === 'number') ? kpiTargetD.deliverableScore : null,
+      // Sales Manager KPI (step 6): only a line whose KPI came from the Sales KPI carries these two keys, so every other line is byte-for-byte what it
+      // was. `salesKpi` is numbers and labels only (no client names) — what the roster, the payslip and My Finance print as the working. The three task
+      // keys above stay as they are for every line (a sales line's task counts are simply never shown: its kpiSource says which working applies).
+      ...(salesKpi ? { kpiSource: 'sales', salesKpi: salesKpi.salesKpi } : {})
     };
     return line;
   }));
@@ -2543,6 +2657,10 @@ window.disbursePayRun = async function(month, opts = {}) {
       kpiFactor: line.kpiFactor ?? null,
       incentiveFull: line.incentiveFull ?? null,
       incentiveEarned: line.incentiveEarned ?? null,
+      // SALES MANAGER KPI (rollout step 6) — display only, same additive-mirror idea as the three keys above: a line whose KPI came from the Sales
+      // KPI carries its working onto the employee-readable record, so the payslip and My Finance can print the sales lines for a finalised month
+      // from the FROZEN figures instead of working them out again. The spread is {} for everyone else: their salary_history docs are unchanged.
+      ...(line.kpiBreakdown && line.kpiBreakdown.kpiSource === 'sales' ? { kpiSource: 'sales', salesKpi: line.kpiBreakdown.salesKpi } : {}),
       policy: line.policy, runMonth: month,
       caDeducted: line.caPlanned, netPay: line.netBeforeCA, finalPay: line.finalPay,
       // v12 WS39 — mirror the frozen statutory IDs so a historical salary_history

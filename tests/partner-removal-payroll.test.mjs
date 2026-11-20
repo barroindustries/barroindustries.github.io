@@ -104,6 +104,8 @@ const DEPT = read('js/departments.js');
 const BPRL      = piece(DEPT, /^window\.buildPayRunLines = async function[\s\S]*?\n\};\n/m, 'window.buildPayRunLines in js/departments.js');
 const SKIP      = piece(DEPT, /^window\.monthlyRunSkipReason = function[\s\S]*?\n\};\n/m, 'window.monthlyRunSkipReason in js/departments.js');
 const PERIOD_EX = piece(DEPT, /^window\.periodExclusionsFor = async function[\s\S]*?\n\};\n/m, 'window.periodExclusionsFor in js/departments.js');
+// The Sales Manager KPI resolver (step 6) is called by buildPayRunLines for every employee: it answers null (one small read, nothing else) for anyone without a sales_kpi document, which is everyone here.
+const RESOLVE_SALES_KPI = piece(DEPT, /^window\.resolveSalesKpi = async function[\s\S]*?\n\};\n/m, 'window.resolveSalesKpi in js/departments.js');
 const HR_PAYROLL = piece(read('js/screens/hr.js'), /^async function renderPayrollManagement\([\s\S]*?\n\}\n/m, 'renderPayrollManagement in js/screens/hr.js');
 const STAT = read('js/screens/statutory-rates.js');
 const STAT_STATUS = piece(STAT, /^window\.renderStatutoryStatusSection = async function[\s\S]*?\n\};\n/m, 'window.renderStatutoryStatusSection in js/screens/statutory-rates.js');
@@ -235,7 +237,7 @@ describe('buildPayRunLines run for real — Brilliant Steel employees land on th
       doc: () => ({ get: async () => (name === 'pay_runs' && excluded ? { exists: true, data: () => ({ excluded }) } : { exists: false, data: () => ({}) }) }),
       get: async () => ({ docs: name === 'worker_profiles' ? docsOf(workerProfiles) : [] }),
     }) };
-    for (const src of [SKIP, PERIOD_EX, BPRL]) vm.runInContext(src, ctx);
+    for (const src of [SKIP, PERIOD_EX, RESOLVE_SALES_KPI, BPRL]) vm.runInContext(src, ctx);
     return ctx;
   }
   const PAY = { salary: 23750, allowance: 1250, deductions: 0, payClass: 'regular' };

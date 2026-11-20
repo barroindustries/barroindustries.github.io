@@ -1031,6 +1031,24 @@ async function computeEomStandings(users, monthStr) {
       const mine = allTasks.filter(t => isAssigned(t, uid));
 
       if (kpiOnly) {
+        // SALES MANAGER KPI (rollout step 6) — one person, one KPI, and "one score drives both pay and recognition": the person whose sales_kpi is in force
+        // for `month` is scored on the Sales KPI pay uses (confirmed sales 70% + client rating 30%; tasks do not count for them). Ranked only if at least one
+        // confirmed payment counted that month (the analogue of "at least one in-scope task"). If their KPI cannot be read they are NOT ranked and are named
+        // as "KPI unavailable" — never scored on the task KPI instead. Everyone else: exactly as before.
+        const skSt = await window.salesKpiState(uid, month);
+        const base = {
+          uid, displayName: u.displayName || u.email || '', email: u.email || '',
+          photoUrl: u.photoUrl || '', role: u.role || 'employee',
+          departments: Array.isArray(u.departments) && u.departments.length ? u.departments : (u.department ? [u.department] : []),
+          attScore: null, attDays: null, attPct: null, grade: null, citation: ''
+        };
+        if (skSt.state === 'sales') {
+          const ks = skSt.kpi.kpiScore;
+          return Object.assign(base, { kpiSource: 'sales', salesCount: skSt.kpi.salesKpi.count, taskScore: ks, doneTasks: 0, totalTasks: 0, taskPct: Math.round(ks * 100), score: ks });
+        }
+        if (skSt.state === 'unavailable') {
+          return Object.assign(base, { kpiUnavailable: true, taskScore: null, doneTasks: 0, totalTasks: 0, taskPct: null, score: null });
+        }
         const deliv = kpiTargets[uid]?.deliverableScore;
         const kpiScore = window.computeKpiForMonth(mine, month, deliv, window.taskDoneMonth, window.taskCreatedMonth);
         const kb = window.kpiMonthBreakdown ? window.kpiMonthBreakdown(mine, month) : { doneInM: null, inScopeCount: null };
@@ -1075,18 +1093,24 @@ async function computeEomStandings(users, monthStr) {
       };
     }));
 
-    const eligible = kpiOnly ? rows.filter(r => (r.totalTasks || 0) >= 1) : rows.filter(r => r.attDays >= 1);
+    const eligible = kpiOnly
+      ? rows.filter(r => r.kpiSource === 'sales' ? (r.salesCount || 0) >= 1 : (!r.kpiUnavailable && (r.totalTasks || 0) >= 1))
+      : rows.filter(r => r.attDays >= 1);
     eligible.sort((a, b) =>
       b.score - a.score || (b.attScore || 0) - (a.attScore || 0) || b.taskScore - a.taskScore
       || (a.displayName || '').localeCompare(b.displayName || ''));
     const monthLbl = eomMonthLabel(month) || month;
     eligible.forEach(r => {
       r.citation = kpiOnly
-        ? `Top performer for ${monthLbl} — ${r.taskPct}% KPI (tasks 70% / deliverables 30%)`
-          + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.'
+        ? (r.kpiSource === 'sales'
+          ? `Top performer for ${monthLbl} — ${r.taskPct}% KPI (confirmed sales 70% / client rating 30%).`
+          : `Top performer for ${monthLbl} — ${r.taskPct}% KPI (tasks 70% / deliverables 30%)`
+            + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.')
         : `Top performer for ${monthLbl} — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
           + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.';
     });
+    // The people whose Sales KPI could not be read: not ranked, but named (openEomStandingsModal) so a missing score is never mistaken for a low one.
+    eligible.unavailable = kpiOnly ? rows.filter(r => r.kpiUnavailable).map(r => ({ uid: r.uid, displayName: r.displayName })) : [];
     return eligible;
   };
 
@@ -1102,9 +1126,12 @@ function openEomStandingsModal(standings, month) {
   // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R7 — copy must not mention attendance
   // once `month` is on/after the KPI-only cutover.
   const kpiOnly = (month || '') >= EOM_KPI_ONLY_FROM;
+  // SALES MANAGER KPI (rollout step 6) — people whose Sales KPI could not be read are not ranked; they are named here so a missing score is never read as a low one.
+  const unavailNote = (standings && standings.unavailable && standings.unavailable.length)
+    ? `<p style="font-size:12px;color:var(--text-muted);margin:10px 0 0"><strong>KPI unavailable</strong> (not ranked): ${standings.unavailable.map(x => escHtml(x.displayName || x.uid)).join(', ')}.</p>` : '';
   if (!standings || !standings.length) {
     openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`,
-      `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>${kpiOnly ? 'No eligible team members have recorded KPI activity yet this month.' : 'No eligible team members have logged attendance yet this month.'}</p></div>`,
+      `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>${kpiOnly ? 'No eligible team members have recorded KPI activity yet this month.' : 'No eligible team members have logged attendance yet this month.'}</p>${unavailNote}</div>`,
       `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     return;
   }
@@ -1134,11 +1161,12 @@ function openEomStandingsModal(standings, month) {
     : `<button class="btn-primary" id="eom-announce-btn">${emojiIcon('📣',16)} Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
 
   const rankingExplainer = kpiOnly
-    ? 'ranked by KPI score alone — tasks 70% / deliverables 30%, the same score that drives Base + KPI pay'
+    ? 'ranked by KPI score alone — tasks 70% / deliverables 30% (confirmed sales 70% / client rating 30% for the Sales Manager), the same score that drives Base + KPI pay'
     : 'ranked by task KPI (50%), attendance (40%) and performance grade (10%)';
   const _panel = openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Final standings for <strong>${escHtml(eomMonthLabel(month) || 'last month')}</strong> — ${rankingExplainer}. Revealed &amp; awarded on the 5th.</p>
     <div>${rows}</div>
+    ${unavailNote}
   `, footer);
 
   // ⚠ SCOPED TO THIS PANEL, NOT document.
@@ -3064,10 +3092,11 @@ async function loadMyProfileTab(key) {
 // salary_history). No new aggregation infrastructure, no writes.
 window.renderPersonalAnalytics = async function(host, uid) {
   const month = window.bizDate().slice(0, 7);
-  let kpi, att, taskSnap, histSnap, evalSnap;
+  let kpiInfo, att, taskSnap, histSnap, evalSnap;
   try {
-    [kpi, att, taskSnap, histSnap, evalSnap] = await Promise.all([
-      (typeof getKpiScore === 'function')        ? getKpiScore(uid)        : 0.5,
+    // SALES MANAGER KPI (rollout step 6): the person's KPI — task KPI, or the Sales KPI pay uses, or 'unavailable' (shown as "KPI unavailable", never as the task KPI).
+    [kpiInfo, att, taskSnap, histSnap, evalSnap] = await Promise.all([
+      (typeof getKpiInfo === 'function')         ? getKpiInfo(uid)         : { source: 'unavailable', score: null },
       (typeof getAttendanceScore === 'function') ? getAttendanceScore(uid) : 0,
       db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
       db.collection('salary_history').where('userId', '==', uid).orderBy('month', 'desc').limit(6).get().catch(() => ({ docs: [] })),
@@ -3091,7 +3120,7 @@ window.renderPersonalAnalytics = async function(host, uid) {
   const overdueTasks = tasks.filter(t => !DONE.includes(t.status) && t.dueDate && t.dueDate < todayStr);
   const taskPct = tasks.length ? Math.round(doneTasks.length / tasks.length * 100) : 0;
   const attPct = Math.round((att || 0) * 100);
-  const kpiPct = Math.round((kpi || 0) * 100);
+  const kpiPct = kpiInfo.score == null ? null : Math.round((kpiInfo.score || 0) * 100);
   const monthLabel = new Date(month + '-01T12:00:00').toLocaleString('en-PH', { month: 'long', year: 'numeric' });
 
   const hist = histSnap.docs.map(d => d.data()).slice().reverse();   // oldest → newest
@@ -3115,8 +3144,8 @@ window.renderPersonalAnalytics = async function(host, uid) {
       </div>
       <div class="kpi-card accent">
         <div class="kpi-label">KPI Composite</div>
-        <div class="kpi-value">${kpiPct}%</div>
-        <div class="kpi-sub">70% tasks · 30% deliverables</div>
+        <div class="kpi-value">${kpiPct == null ? '—' : kpiPct + '%'}</div>
+        <div class="kpi-sub">${kpiInfo.source === 'sales' ? '70% confirmed sales · 30% client rating' : kpiInfo.source === 'unavailable' ? 'KPI unavailable' : '70% tasks · 30% deliverables'}</div>
       </div>
       <div class="kpi-card${overdueTasks.length ? ' warn' : ''}">
         <div class="kpi-label">Overdue Now</div>

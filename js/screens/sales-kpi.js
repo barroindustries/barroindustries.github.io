@@ -11,8 +11,9 @@
        person whose own sales_kpi document is switched on. Nothing at all for anyone else.
      • A delivered-or-later job, President only    (js/screens/production.js, openJobProjectDetail)  SalesKpiUI.renderJobRating — the "Client rating" row.
 
-   DISPLAY ONLY. Rollout step 5: every scorecard is labelled "Preview — not yet used for pay". Nothing here touches payroll, pay runs, kpi_targets or the
-   task KPI. The only collections this file WRITES are sales_kpi/{uid} (the card) and client_ratings/{projectId} (a rating), both President-only in
+   DISPLAY ONLY. A month that has not reached the card's startMonth is labelled "Preview — not yet used for pay"; from startMonth on (rollout step 6,
+   js/departments.js resolveSalesKpi — the pay switch lives THERE, not here) the badge says "Used for pay". Nothing here touches payroll, pay runs,
+   kpi_targets or the task KPI. The only collections this file WRITES are sales_kpi/{uid} (the card) and client_ratings/{projectId} (a rating), both President-only in
    firestore.rules (plus the shared audit trail window.logAudit writes); everything else it reads (sales_orders, payment_claims, job_projects, users) it only
    reads. tests/sales-kpi-screens.test.mjs pins that.
 
@@ -46,6 +47,7 @@
   const starTone = (on) => 'color:' + (on ? GOLD : 'var(--text-muted)') + ';opacity:' + (on ? '1' : '.4');
 
   const PREVIEW = 'Preview — not yet used for pay';
+  const USED = 'Used for pay';                              // step 6: a month on or after the first month paid on the Sales KPI is the one payroll uses (SalesKpi.compute's `active`)
   const DEFAULT_START = '2027-01';                         // owner answer Q12: December 2026 is the preview month, January 2027 the first paid month
   const DONE_STAGES = ['delivered', 'completed', 'paid'];  // "delivered or later" (JOB_STAGES, js/screens/production.js; cancelled is not later)
   const STAGE_LABEL = { delivered: 'Delivered', completed: 'Completed', paid: 'Paid / Closed' };
@@ -247,13 +249,25 @@
         (r.items.length ? r.items.map(commentRowHtml).join('') : '<div style="padding:8px 0;font-size:12px;color:var(--text-muted)">No client ratings yet.</div>') +
       '</div>';
     return '<div class="card" id="sk-card" style="margin-bottom:12px">' +
-      '<div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 style="margin:0;display:flex;align-items:center;gap:6px"><i data-lucide="target" style="width:16px;height:16px"></i> ' + esc(m.title) + ' — ' + esc(label) + '</h3><span class="badge badge-orange" style="font-size:10px">' + esc(PREVIEW) + '</span></div>' +
+      '<div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 style="margin:0;display:flex;align-items:center;gap:6px"><i data-lucide="target" style="width:16px;height:16px"></i> ' + esc(m.title) + ' — ' + esc(label) + '</h3>' + (b.active ? '<span class="badge badge-green" style="font-size:10px">' + esc(USED) + '</span>' : '<span class="badge badge-orange" style="font-size:10px">' + esc(PREVIEW) + '</span>') + '</div>' +
       '<div class="card-body"><div id="sk-headline" style="' + (noTarget ? 'font-size:17px;font-weight:700;color:var(--warning)' : 'font-size:30px;font-weight:700;line-height:1.1') + '">' + esc(sn.headline) + '</div>' + lines + details +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
         '<button type="button" class="btn-secondary btn-sm" id="sk-prev" style="' + BTN + '"><i data-lucide="chevron-left" style="width:14px;height:14px"></i> Earlier month</button>' +
         '<button type="button" class="btn-secondary btn-sm" id="sk-next" style="' + BTN + '"' + (m.isCurrent ? ' disabled' : '') + '>Later month <i data-lucide="chevron-right" style="width:14px;height:14px"></i></button>' +
         '<button type="button" class="btn-secondary btn-sm" id="sk-more" style="' + BTN + '" aria-expanded="' + (m.open ? 'true' : 'false') + '">' + (m.open ? 'Hide payments and comments' : 'Show payments and comments') + '</button>' +
       '</div></div></div>';
+  }
+  // The compact scorecard, for a page that already has its own card around it (My Finance, js/screens/dashboards.js): the headline, the sales line and the
+  // rating line (or the no-ratings note) in the one set of words. m = { words: { headline, sales, rating, note } (SalesKpi.sentence / js/pay-policy.js
+  // salesKpiWords), label?: a small badge such as 'Used for pay' }. No client name, no payment list, no controls.
+  function compactHtml(m) {
+    const w = (m && m.words) || {};
+    return '<div id="skc">' +
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap"><div id="skc-headline" style="font-size:28px;font-weight:700;line-height:1.1">' + esc(w.headline) + '</div>' +
+      (m && m.label ? '<span class="badge badge-green" style="font-size:10px">' + esc(m.label) + '</span>' : '') + '</div>' +
+      '<div style="font-size:13px;margin-top:8px;line-height:1.55"><div id="skc-sales">' + esc(w.sales) + '</div>' +
+      (w.rating ? '<div id="skc-rating">' + esc(w.rating) + '</div>' : '') +
+      (w.note ? '<div id="skc-note" style="color:var(--text-muted)">' + esc(w.note) + '</div>' : '') + '</div></div>';
   }
   const loadingCardHtml = (title) => '<div class="card" style="margin-bottom:12px"><div class="card-header"><h3 style="margin:0">' + esc(title) + '</h3></div><div class="card-body" style="font-size:12px;color:var(--text-muted)">Loading the scorecard…</div></div>';
   const errorCardHtml = (title, ex) => '<div class="card" style="margin-bottom:12px"><div class="card-header"><h3 style="margin:0">' + esc(title) + '</h3></div><div class="card-body" style="font-size:13px"><div style="color:var(--danger);margin-bottom:8px">Could not load the scorecard' + (ex && (ex.code || ex.message) ? ' (' + esc(ex.code || ex.message) + ')' : '') + '. Check your connection and try again.</div><button type="button" class="btn-secondary btn-sm" id="sk-retry" style="' + BTN + '">Try again</button></div></div>';
@@ -381,7 +395,7 @@
 
     container.innerHTML =
       '<div style="margin-bottom:12px"><h3 style="margin:0;display:flex;align-items:center;gap:6px"><i data-lucide="target" style="width:18px;height:18px"></i> Sales KPI</h3>' +
-      '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">KPI = 70% confirmed sales + 30% client rating. <strong>' + esc(PREVIEW) + '</strong>: payroll still uses the task KPI.</div></div>' +
+      '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">KPI = 70% confirmed sales + 30% client rating. Payroll uses it from the first month paid on it (set below); until then payroll still uses the task KPI and a month\'s scorecard says <strong>' + esc(PREVIEW) + '</strong>.</div></div>' +
       '<div id="sk-staff-wrap"></div><div id="sk-config"></div><div id="sk-scorecard"></div>' + (president ? '<div id="sk-waiting"></div>' : '');
     icons(container);
     const $ = (id) => container.querySelector('#' + id);
@@ -574,7 +588,7 @@
     PREVIEW: PREVIEW,
     renderScreen: renderScreen, renderMyScorecard: renderMyScorecard, renderJobRating: renderJobRating, openRatingSheet: openRatingSheet,
     loadData: loadData, resolveSalesUid: resolveSalesUid,
-    html: { scorecard: scorecardHtml, config: configHtml, ratingRow: ratingRowHtml, waiting: waitingHtml, stars: starsHtml, staffPicker: staffPickerHtml },
+    html: { scorecard: scorecardHtml, compact: compactHtml, config: configHtml, ratingRow: ratingRowHtml, waiting: waitingHtml, stars: starsHtml, staffPicker: staffPickerHtml },
     draftOf: draftOf, buildKpiDoc: buildKpiDoc, refundsOf: refundsOf, staffOptions: staffOptions, preselect: preselect, waitingRows: waitingRows,
   };
   window.renderSalesKpi = renderScreen;

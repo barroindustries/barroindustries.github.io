@@ -1976,7 +1976,11 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               ? window.dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000)
               : db.collection('tasks').get()).catch(()=>({docs:[]})),
             db.collection('kpi_targets').doc(uid).get().catch(()=>null),
-            window.getAttendanceScore ? window.getAttendanceScore(uid, month) : Promise.resolve(1)
+            window.getAttendanceScore ? window.getAttendanceScore(uid, month) : Promise.resolve(1),
+            // SALES MANAGER KPI (rollout step 6) — whose KPI is it this month? Never rejects: {state:'sales'|'tasks'|'unavailable'} (js/departments.js
+            // salesKpiState, an eager script: no "if it is missing, assume tasks" guard — a missing resolver is a bug and must be loud). A failed read
+            // shows "KPI unavailable" below, never the task KPI.
+            window.salesKpiState(uid, month)
           ]);
           // ── Existing cash advance (owner feature — read-only section below).
           // Type-A (this uid's own cash_advances docs) is already `plan`/
@@ -2003,17 +2007,42 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         }
         // CLOSED MID-FLIGHT — Back can be pressed before either read lands.
         if (!panel.isConnected) return;
-        const [kpiTasksSnap, kpiTargetSnap, attScore] = _kpiReads;
+        const [kpiTasksSnap, kpiTargetSnap, attScore, skState] = _kpiReads;
         const kpiUserTasks = kpiTasksSnap.docs.map(d=>d.data())
           .filter(t => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid);
         const kpiDeliverableRaw = (kpiTargetSnap && kpiTargetSnap.exists) ? kpiTargetSnap.data().deliverableScore : undefined;
-        const kpiScore = window.computeKpiForMonth
-          ? window.computeKpiForMonth(kpiUserTasks, month, kpiDeliverableRaw, window.taskDoneMonth, window.taskCreatedMonth)
-          : 1;
+        // SALES MANAGER KPI (rollout step 6): one person, one KPI. A person whose Sales KPI is in force this month shows THAT (the same score the pay run
+        // uses, js/departments.js resolveSalesKpi); if it cannot be read, "KPI unavailable" — the task KPI is never shown in its place.
+        const kpiSrc = skState.state;
+        const kpiScore = kpiSrc === 'sales' ? skState.kpi.kpiScore
+          : kpiSrc === 'unavailable' ? null
+          : (window.computeKpiForMonth
+              ? window.computeKpiForMonth(kpiUserTasks, month, kpiDeliverableRaw, window.taskDoneMonth, window.taskCreatedMonth)
+              : 1);
         const { doneInM, inScopeCount } = _kpiMonthBreakdown(kpiUserTasks, month);
         const taskPct = inScopeCount > 0 ? Math.round(doneInM/inScopeCount*100) : 100; // D2 floor — no in-scope work ≠ bad KPI
         const attScoreNum = typeof attScore === 'number' ? attScore : 1;
-        const perfFactor = Math.min(1, Math.max(0, kpiScore*0.7 + attScoreNum*0.3)); // same formula as computePayLine
+        const perfFactor = kpiScore == null ? null : Math.min(1, Math.max(0, kpiScore*0.7 + attScoreNum*0.3)); // same formula as computePayLine
+        const _skWords = kpiSrc === 'sales' && typeof window.salesKpiWords === 'function'
+          ? window.salesKpiWords({ kpiSource: 'sales', salesKpi: skState.kpi.salesKpi }, kpiScore, month) : null;
+        // The KPI block's body: the task working exactly as it always was, or the Sales KPI's two lines, or the plain "unavailable".
+        const kpiGridHtml = kpiSrc === 'sales' ? `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px">
+              ${_skWords ? `<div style="grid-column:1/-1">${escHtml(_skWords.sales)}</div><div style="grid-column:1/-1">${escHtml(_skWords.rating || _skWords.note)}</div>` : ''}
+              <div>Attendance score: <strong>${Math.round(attScoreNum*100)}%</strong></div>
+              <div>KPI score (confirmed sales 70% + client rating 30%): <strong>${Math.round(kpiScore*100)}%</strong></div>
+            </div>
+            <div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);font-size:12px">perfFactor = 0.7×KPI + 0.3×attendance = <strong>${(perfFactor*100).toFixed(1)}%</strong></div>`
+          : kpiSrc === 'unavailable' ? `
+            <div style="font-size:12px;color:var(--danger)"><strong>KPI unavailable</strong> — the Sales KPI could not be read just now, so no KPI is shown. Close this and try again.</div>`
+          : `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px">
+              <div>Task completion: <strong>${doneInM} of ${inScopeCount}</strong> in-scope task${inScopeCount===1?'':'s'} done${inScopeCount>0?` <span style="color:var(--text-muted)">(${taskPct}%)</span>`:` <span style="color:var(--text-muted)">(no in-scope tasks — floors at 100%)</span>`}</div>
+              <div>Deliverable score: <strong>${typeof kpiDeliverableRaw==='number' ? kpiDeliverableRaw+'/100' : 'not set'}</strong>${typeof kpiDeliverableRaw!=='number'?' <span style="color:var(--text-muted)">(defaults to 100%)</span>':''}</div>
+              <div>Attendance score: <strong>${Math.round(attScoreNum*100)}%</strong></div>
+              <div>KPI score (70% task + 30% deliverable): <strong>${Math.round(kpiScore*100)}%</strong></div>
+            </div>
+            <div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);font-size:12px">perfFactor = 0.7×KPI + 0.3×attendance = <strong>${(perfFactor*100).toFixed(1)}%</strong></div>`;
         // No pay_runs doc has been Computed for THIS month in this branch
         // (that's exactly when the frozen-run early-return at the top of
         // loadPayrollTable takes over instead), so there is no committed
@@ -2039,13 +2068,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               ? `This month's pay policy is <strong>Performance</strong>: the perfFactor below <em>scales the allowance</em> (base wage is never docked).`
               : `This month's pay policy is <strong>Flat</strong> (the default): KPI and attendance are informational only here — they do <strong>not</strong> change this employee's pay unless a Compute Payroll run is switched to the Performance policy.`}
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px">
-              <div>Task completion: <strong>${doneInM} of ${inScopeCount}</strong> in-scope task${inScopeCount===1?'':'s'} done${inScopeCount>0?` <span style="color:var(--text-muted)">(${taskPct}%)</span>`:` <span style="color:var(--text-muted)">(no in-scope tasks — floors at 100%)</span>`}</div>
-              <div>Deliverable score: <strong>${typeof kpiDeliverableRaw==='number' ? kpiDeliverableRaw+'/100' : 'not set'}</strong>${typeof kpiDeliverableRaw!=='number'?' <span style="color:var(--text-muted)">(defaults to 100%)</span>':''}</div>
-              <div>Attendance score: <strong>${Math.round(attScoreNum*100)}%</strong></div>
-              <div>KPI score (70% task + 30% deliverable): <strong>${Math.round(kpiScore*100)}%</strong></div>
-            </div>
-            <div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);font-size:12px">perfFactor = 0.7×KPI + 0.3×attendance = <strong>${(perfFactor*100).toFixed(1)}%</strong></div>
+            ${kpiGridHtml}
           </div>
           <div class="form-row">
             <div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label>
@@ -5336,7 +5359,15 @@ window.toPayslipModel = function(source, kind) {
               kpiFactor: source.kpiFactor ?? Math.min(1, Math.max(0, Number(source.kpiScore)||0)),
               incentiveFull: source.incentiveFull ?? allowance,
               incentiveEarned: source.incentiveEarned ?? null,
-            } : {}) } : null,
+            } : {}),
+            // SALES MANAGER KPI (rollout step 6) — display only: a line whose KPI came from the Sales KPI carries its numbers-only working here
+            // (a frozen pay_runs line holds it on kpiBreakdown, the salary_history mirror holds it at the top level — js/departments.js
+            // disbursePayRun). The spread is {} for every other line, so every other payslip model is what it was.
+            ...(() => {
+              const _skb = (source.kpiBreakdown && source.kpiBreakdown.kpiSource === 'sales') ? source.kpiBreakdown
+                : (source.kpiSource === 'sales' ? source : null);
+              return _skb ? { kpiSource: 'sales', salesKpi: _skb.salesKpi || null } : {};
+            })() } : null,
       timeLog:null,
       signatures:[{label:'Prepared by',name:'',title:'Finance'},{label:'Verified by',name:'',title:'HR'},{label:'Approved by',name:(window.BRAND&&window.BRAND.legal.signatory.name)||'',title:'President'}],
       proofUrl:''
@@ -5507,8 +5538,16 @@ window.buildPayslipHTML = function(model) {
         kpiScore: m.performance.kpi, attScore: m.performance.att,
         preMultiplierNet: m.performance.preMultiplierNet, netBeforeCA: m.performance.netBeforeCA,
         kpiFactor: m.performance.kpiFactor, incentiveFull: m.performance.incentiveFull,
-        incentiveEarned: m.performance.incentiveEarned
+        incentiveEarned: m.performance.incentiveEarned,
+        kpiSource: m.performance.kpiSource
       })
+    : '';
+  // SALES MANAGER KPI (rollout step 6; spec §5.4) — the two working lines of a Sales-KPI payslip, in the one set of words (js/pay-policy.js
+  // salesKpiWords), read off the frozen figures. '' for every other payslip.
+  const _psSales = (m.performance && m.performance.kpiSource === 'sales' && typeof window.salesKpiWords === 'function')
+    ? window.salesKpiWords({ kpiSource: 'sales', salesKpi: m.performance.salesKpi }, m.performance.kpi) : null;
+  const _psSalesHtml = _psSales
+    ? `<div style="font-size:10.5px;color:#333;margin-top:4px;line-height:1.5">${escHtml(_psSales.sales)}<br>${escHtml(_psSales.rating || _psSales.note)}</div>`
     : '';
   // OFFICE-KPI-PAY-SPEC-2026-08-25 §3 — a 'basekpi' line shows the KPI factor
   // and the two incentive lines (full / earned) instead of the old Task
@@ -5525,13 +5564,15 @@ window.buildPayslipHTML = function(model) {
       <tr><td>Incentive (full)</td><td class="num">${f(m.performance.incentiveFull||0)}</td></tr>
       <tr class="ps-sub"><td>Incentive earned at KPI ${Math.round((m.performance.kpiFactor||0)*100)}%</td><td class="num">${f(m.performance.incentiveEarned||0)}</td></tr>
     </table>
+    ${_psSalesHtml}
     ${_psBasisSentence ? `<div style="font-size:10.5px;color:#555;margin-top:4px;line-height:1.4">${escHtml(_psBasisSentence)}</div>` : ''}` : `
     <div class="ps-sec-h">Performance</div>
     <table class="ps-t">
-      <tr><td>Task KPI (70%)</td><td class="num">${Math.round(m.performance.kpi*100)}%</td></tr>
+      <tr><td>${m.performance.kpiSource === 'sales' ? 'Sales KPI' : 'Task KPI (70%)'}</td><td class="num">${Math.round(m.performance.kpi*100)}%</td></tr>
       <tr><td>Attendance (30%)</td><td class="num">${Math.round(m.performance.att*100)}%</td></tr>
       <tr class="ps-sub"><td>Performance factor (policy: ${escHtml(m.performance.policy)})</td><td class="num">${m.performance.perfFactor.toFixed(2)}×</td></tr>
     </table>
+    ${_psSalesHtml}
     ${_psBasisSentence ? `<div style="font-size:10.5px;color:#555;margin-top:4px;line-height:1.4">${escHtml(_psBasisSentence)}</div>` : ''}`) : '';
   // v14 HR remediation P2 — provenance column (source: kiosk-verified/kiosk-
   // manual/manual, set by openPayslipGenerator's Load Kiosk Hours flow).

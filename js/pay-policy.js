@@ -120,8 +120,12 @@ window.payBasisSentence = function (line) {
   if (l.policy === 'basekpi') {
     const baseAmt = Number(l.base) || 0;
     const incentiveFull = (l.incentiveFull != null) ? Number(l.incentiveFull) : (Number(l.allowance) || 0);
+    // SALES MANAGER KPI (SALES-MANAGER-KPI-SPEC-2026-11-20 §5.3, rollout step 6) — additive: a line whose KPI came from the Sales KPI
+    // (`kpiSource === 'sales'`, frozen on kpiBreakdown by js/departments.js) names its own two parts. Every other line — kpiSource absent
+    // or anything else — gets the sentence it always had, character for character.
+    const kpiParts = (l.kpiSource === 'sales') ? 'confirmed sales 70%, client rating 30%' : 'tasks 70%, deliverables 30%';
     return _ppPeso(baseAmt) + ' base paid in full; the remaining ' + _ppPeso(incentiveFull) +
-      ' is multiplied by this month\'s KPI score (tasks 70%, deliverables 30%). Attendance does not affect pay.';
+      ' is multiplied by this month\'s KPI score (' + kpiParts + '). Attendance does not affect pay.';
   }
   if (l.policy !== 'taskbased') return '';
   const F = Math.round((Number(l.perfFactor) || 0) * 100);
@@ -138,6 +142,27 @@ window.payBasisSentence = function (line) {
     _ppPeso(l.netBeforeCA) + '. The ' + F + '% comes from task results (' + K +
     '%) counted at 70% and on-time morning check-ins (' + A +
     '%) counted at 30%. Check-ins count as on time when every notification is read before 9:00 AM.';
+};
+
+// SALES MANAGER KPI (SALES-MANAGER-KPI-SPEC-2026-11-20 §5.4, rollout step 6) — the Sales KPI's working in the ONE set of words, wherever a pay line
+// shows it (the payroll roster card, the phone card's breakdown, the payslip, My Finance). `kb` is a line's kpiBreakdown — read straight off the FROZEN
+// line (or the salary_history mirror of it), never worked out again: { kpiSource: 'sales', salesKpi: { target, collected, salesScore, avgStars,
+// ratingCount, satScore, weights, mode[, ratingWindow] } }. `kpiScore` is the score the pay actually used (the line's own kpiScore, so an Adjust
+// override is the number shown). The words themselves come from js/sales-kpi-core.js SalesKpi.sentence — the same function the scorecard prints — so
+// a pay line and the scorecard can never describe the same month two ways. Returns null for a line that is not a Sales-KPI line (the caller keeps
+// its task wording) or when the engine is not loaded; otherwise { headline, sales, rating, note, lines } exactly as SalesKpi.sentence returns it.
+window.salesKpiWords = function (kb, kpiScore, month) {
+  var sk = (kb && kb.kpiSource === 'sales' && kb.salesKpi && typeof kb.salesKpi === 'object') ? kb.salesKpi : null;
+  var K = window.SalesKpi;
+  if (!sk || !K || typeof K.sentence !== 'function') return null;
+  var n = Number(sk.ratingCount) || 0;
+  return K.sentence({
+    month: month || '',
+    target: sk.target,
+    collected: { total: sk.collected },
+    rating: { n: n, avg: sk.avgStars == null ? null : Number(sk.avgStars), source: sk.ratingWindow === 'previous' ? 'previous' : (n > 0 ? 'month' : 'none') },
+    score: { mode: sk.mode, kpiScore: kpiScore, salesScore: sk.salesScore, satScore: sk.satScore, weights: sk.weights }
+  });
 };
 
 // PAYROLL-SYNC-FIX-2026-08-13 — the ONE explanation for "nobody has set this
@@ -567,6 +592,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     wageFloorCheck: window.wageFloorCheck,
     payBasisSentence: window.payBasisSentence,
+    salesKpiWords: window.salesKpiWords,
     noPayRateWords: window.noPayRateWords,
     PAY_POLICY_VALUES: window.PAY_POLICY_VALUES,
     accruedTakeHomeSoFar: window.accruedTakeHomeSoFar,

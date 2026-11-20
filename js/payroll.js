@@ -621,8 +621,14 @@ if (typeof window === 'undefined') {
     // fields" — the contract this file's own tests pin (see
     // tests/payroll-unified.test.mjs, "ONE normalised line").
     row.kpiBreakdown = (kind !== 'week' && l.kpiBreakdown && typeof l.kpiBreakdown === 'object')
-      ? { doneInM: l.kpiBreakdown.doneInM, inScopeCount: l.kpiBreakdown.inScopeCount,
-          deliverableScore: l.kpiBreakdown.deliverableScore }
+      ? Object.assign({ doneInM: l.kpiBreakdown.doneInM, inScopeCount: l.kpiBreakdown.inScopeCount,
+          deliverableScore: l.kpiBreakdown.deliverableScore },
+          // SALES MANAGER KPI (rollout step 6) — a line whose KPI came from the Sales KPI carries `kpiSource: 'sales'` and its numbers-only
+          // working (`salesKpi`, frozen by js/departments.js buildPayRunLines). Copied through ONLY then: every other line keeps exactly the three
+          // keys above (no extra key, not even an undefined one), so its normalised row is what it always was.
+          l.kpiBreakdown.kpiSource === 'sales'
+            ? { kpiSource: 'sales', salesKpi: (l.kpiBreakdown.salesKpi && typeof l.kpiBreakdown.salesKpi === 'object') ? l.kpiBreakdown.salesKpi : null }
+            : null)
       : null;
 
     row.held = !!heldReason;
@@ -661,6 +667,17 @@ if (typeof window === 'undefined') {
       out.push(money('Salary', 'earning', row.earnings));
       out.push(money('Allowance', 'earning', row.allowances));
       if (d.kpiScore != null) out.push(info('KPI score', String(Math.round(d.kpiScore * 100)) + '%'));
+      // SALES MANAGER KPI (rollout step 6; spec §5.4) — a line whose KPI came from the Sales KPI shows its two lines straight under the score, read
+      // off the FROZEN working (row.kpiBreakdown.salesKpi, via window.salesKpiWords in js/pay-policy.js) — never worked out again here. Every other
+      // line adds no row, so its breakdown is what it always was.
+      const _kb = row.kpiBreakdown;
+      if (_kb && _kb.kpiSource === 'sales' && typeof window.salesKpiWords === 'function') {
+        const _sw = window.salesKpiWords(_kb, d.kpiScore);
+        if (_sw) {
+          out.push(info('KPI working', _sw.sales));
+          out.push(info('KPI working', _sw.rating || _sw.note));
+        }
+      }
       // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — relabelled from 'Attendance
       // score'. That label is exactly the "days worked" misreading §1 of the
       // spec warns about: this score is punctuality/notification-read, not
@@ -701,7 +718,8 @@ if (typeof window === 'undefined') {
           policy: d.policy, perfFactor: d.perfFactor, kpiScore: d.kpiScore, attScore: d.attendanceScore,
           preMultiplierNet: d.preMultiplierNet, netBeforeCA: d.netBeforeCA,
           base: row.earnings, allowance: row.allowances,
-          kpiFactor: d.kpiFactor, incentiveFull: d.incentiveFull, incentiveEarned: d.incentiveEarned
+          kpiFactor: d.kpiFactor, incentiveFull: d.incentiveFull, incentiveEarned: d.incentiveEarned,
+          kpiSource: row.kpiBreakdown ? row.kpiBreakdown.kpiSource : undefined
         });
         if (sentence) out.push(info('How this was worked out', sentence));
       }
@@ -1110,6 +1128,12 @@ if (typeof window === 'undefined') {
     async preview(periodId) {
       const kind = PC.kindOf(periodId);
       const d = await readRun(periodId, kind);      // throws on denial, by design
+
+      // SALES MANAGER KPI (rollout step 6) — "a finalised or paid month always shows its frozen line, never recomputed": a MONTH that is already
+      // checked or paid (a Finance-approved early release of a month that is still running) is read back from its stored run, not worked out again, so
+      // a refusal from the builder (no sales target for the month, a failed read) can never hide a line that is already frozen. The screen reloads such
+      // a period through load() anyway (js/screens/payroll.js paint), so nothing it shows changes. A month that can still be prepared is previewed as ever.
+      if (kind !== 'week' && d && !PC.canPrepare(PC.stateOf(d.state))) return Payroll.load(periodId);
 
       let built;
       if (kind === 'week') {
