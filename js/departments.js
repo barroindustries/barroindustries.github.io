@@ -632,8 +632,33 @@ async function financeDeleteCascade(collection, docId, batch) {
     const refs = [`${prefix}-${docId}`, `${prefix}-${docId}-AR`, `${prefix}-${docId}-AP`];
     for (const r of refs) await stageLedgerDelete(r);
   } else if (collection === 'cash_advances') {
+    // 2026-11-20 review (F2). A payroll-collected repayment is booked in the month's SHARED
+    // CADEDUCT-<month> / CAINT-<month> legs, not per advance, so it cannot be taken back out here:
+    // deleting the advance would leave those credits behind and drive 'Advances to Employees'
+    // negative. Refuse — before anything is staged, so nothing is written.
+    const payrollPaid = (Array.isArray(d.payments) ? d.payments : []).filter(p => p && p.source === 'payroll');
+    if (payrollPaid.length) {
+      const months = [...new Set(payrollPaid.map(p => p.month).filter(Boolean))].join(', ');
+      throw new Error(`This cash advance was partly repaid through payroll${months ? ' (' + months + ')' : ''}. Those repayments sit in the payroll's ledger entries, so deleting the advance would leave the books wrong. Correct it through the payroll run instead.`);
+    }
     // v12 WS36 — remove the mirrored cash-release ledger row (CA-<id>).
     await stageLedgerDelete(`CA-${docId}`);
+    // …and every manual repayment CashAdvance.recordPayment mirrored: CA-<id>-REPAY-<paymentId>
+    // (principal, credits the Advances asset) and its CA-<id>-REPAY-<paymentId>-INT twin (interest,
+    // Other Income). Before this fix only the release row went, so a half-repaid advance left the
+    // repayment credits standing: the Advances asset went negative and the interest stayed in income.
+    // One range query on refNumber (single-field, no composite index). NOT swallowed: if it fails,
+    // the delete fails with it rather than committing a half cascade.
+    const pfx = `CA-${docId}-REPAY-`;
+    const legs = await db.collection('ledger').where('refNumber', '>=', pfx).where('refNumber', '<', pfx + '\uf8ff').get();
+    for (const leg of legs.docs) {
+      batch.delete(leg.ref);
+      const row = leg.data();
+      // The -INT rows are posted with a raw add and never reach finance_rollup (review item F3), so
+      // subtracting them here would push the rollup BELOW the ledger. Only the principal rows go to
+      // the post-commit rollup sync (asset rows, a zero income/expense delta either way).
+      if (!/-INT$/.test(row.refNumber || '')) staleLedgerRows.push(row);
+    }
   }
   return staleLedgerRows;
 }

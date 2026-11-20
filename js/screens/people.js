@@ -2149,12 +2149,33 @@ function renderCAList(advances, container, isAdmin) {
     });
   }));
 
+  // 2026-11-20 review (F1). This used to delete the cash_advances doc directly, skipping the ledger
+  // cascade: the CA-<id> release row and its bank 'out' tag stayed in the books for good. It now goes
+  // through financeExecuteDelete, the same atomic cascade + delete the Finance CA tab and the Approvals
+  // screen use (and which also refuses a payroll-repaid advance — see financeDeleteCascade).
   container.querySelectorAll('.ca-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
-    const id = e.currentTarget.dataset.id;
-    if (!(await confirmDialog({ message: 'Permanently delete this cash advance record? This cannot be undone.', danger: true }))) return;
-    await db.collection('cash_advances').doc(id).delete();
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending'); // cascades ca-mine-* (PERF-WAVE1)
-    Notifs.success('Record deleted.');
+    const b = e.currentTarget;
+    const id = b.dataset.id;
+    let a = null;
+    try { const s = await db.collection('cash_advances').doc(id).get(); a = s.exists ? s.data() : null; } catch (_) {}
+    const pays = (a && Array.isArray(a.payments)) ? a.payments.filter(Boolean) : [];
+    if (pays.some(p => p.source === 'payroll')) {
+      Notifs.showToast('This cash advance was partly repaid through payroll, so it cannot be deleted here — correct it through the payroll run.', 'error');
+      return;
+    }
+    const released = a && (a.status === 'approved' || a.status === 'paid');
+    const repaid = pays.reduce((s, p) => s + (+p.amount || 0), 0);
+    const books = released
+      ? ` Its ledger entries go with it: the ₱${fmtN(a.amount || 0)} release${pays.length ? ` and ${pays.length} repayment${pays.length > 1 ? 's' : ''} totalling ₱${fmtN(repaid)}` : ''}. Only do this for a record entered by mistake.`
+      : '';
+    if (!(await confirmDialog({ message: `Permanently delete this cash advance record?${books} This cannot be undone.`, danger: true }))) return;
+    b.disabled = true;
+    try {
+      await window.financeExecuteDelete('cash_advances', id);   // invalidates 'ledger' + 'ca-pending' (cascades ca-mine-*)
+      Notifs.success('Record deleted.');
+    } catch (err) {
+      Notifs.showToast('Could not delete: ' + (err.message || err), 'error');
+    }
     window.renderCashAdvancePage();
   }));
 }
