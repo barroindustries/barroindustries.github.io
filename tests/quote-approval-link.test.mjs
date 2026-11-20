@@ -1629,3 +1629,16 @@ describe('8 · static pins', () => {
     }
   });
 });
+
+describe('9 · the Cost and margin grid keeps labels and values in their columns (owner preview 2026-11-20)', () => {
+  it('a full-width note or warning row carries no empty <dd>, so the rows after it stay label | value', () => {
+    for (const ks of [KCSUM({ costKnown: false }), KCSUM({ net: 800, standardTotal: 900 })]) {
+      const { html } = view(quote(), { sidecar: SIDECAR({ kcSummary: ks }) });
+      const kv = (html.match(/<section class="qa-card qa-cost">[\s\S]*?<\/section>/) || [''])[0];
+      assert.ok(/qa-(note|bad)/.test(kv), 'the case has a full-width row');
+      assert.equal(/<dt class="qa-(note|bad)">[^<]*<\/dt><dd><\/dd>/.test(kv), false, 'no empty value cell after a full-width row');
+      const dts = (kv.match(/<dt class="">/g) || []).length, dds = (kv.match(/<dd>/g) || []).length;
+      assert.equal(dds, dts, 'every ordinary label has exactly one value');
+    }
+  });
+});

@@ -717,7 +717,9 @@
     if (!vm.cost) return '';
     return '<section class="qa-card qa-cost"><h4 class="qa-h">Cost and margin' + (vm.cost.label ? ' <span class="qa-note">' + e(vm.cost.label) + '</span>' : '') + '</h4>'
       + (vm.cost.none ? '<div class="qa-thread-note">No cost record was saved with this quote.</div>'
-        : '<dl class="qa-kv">' + vm.cost.rows.map((r) => '<dt class="' + (r.tone ? 'qa-' + e(r.tone) : '') + '">' + e(r.label) + '</dt><dd>' + e(r.value) + '</dd>').join('') + '</dl>')
+        : '<dl class="qa-kv">' + vm.cost.rows.map((r) => '<dt class="' + (r.tone ? 'qa-' + e(r.tone) : '') + '">' + e(r.label) + '</dt>'
+          // a full-width note / warning row has no value: an empty <dd> would take the next grid cell and push every later label into the value column
+          + ((r.tone && !r.value) ? '' : '<dd>' + e(r.value) + '</dd>')).join('') + '</dl>')
       + '</section>';
   }
   function html(vm, esc) {

@@ -280,6 +280,10 @@ input[type="checkbox"],input[type="radio"]{
 .pres-fig-bar .pf-btns{display:flex;gap:8px;flex-wrap:wrap;}
 .pres-fig-bar .pf-lost{margin-top:5px;font-size:12px;color:#9c2b2b;}
 .pres-fig-bar .pf-hint{margin-top:4px;font-size:11.5px;color:#8a6a2a;}
+/* owner preview 2026-11-20: .btn-outline is styled for the dark top bar (white text); on this pale banner it vanished */
+.pres-fig-bar .btn-outline{border-color:#c98a2b;color:#6b4300;background:#fff;}
+.pres-fig-bar .btn-outline:hover{background:#fff1d6;}
+.pres-fig-bar .btn-primary{background:var(--navy,#1F3864);color:#fff;border-color:var(--navy,#1F3864);}
 .pf-row{margin-top:3px;font-size:11.5px;color:#6b4300;line-height:1.4;overflow-wrap:anywhere;}
 body.body-terms-view #handoffBar{display:none!important;}
 
@@ -10148,6 +10152,8 @@ function presidentFiguresArrived(p){
     m.matched.forEach(function(x){ items[x.idx]._pf={ to:(x.row.to===null||x.row.to===undefined)?null:Number(x.row.to), from:x.row.from, note:String(x.row.note||''), byName:String(p.byName||''), at:String(p.at||'') }; });
     _presFig={ by:String(p.by||''), byName:String(p.byName||''), at:String(p.at||''), ref:String(p.ref||''), rows:rows, unmatched:m.unmatched, applied:0, undo:null };
     renderItems(); renderPresFigBar();
+    // owner preview 2026-11-20: a returned quote opens on the Client tab, where the banner (above the line items) is out of sight on a phone. Open on the items, where his prices and notes sit.
+    if((rows.length||m.unmatched.length) && currentView!=='internal' && typeof setView==='function') setView('internal');
     if(p.autoApply) qbUiReady(function(){ applyPresidentFigures(); });   // "Apply President's figures" from the review page / the Quotes list: after the load AND the prices have settled
   });
 }
