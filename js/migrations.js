@@ -639,3 +639,27 @@ window._importCrmSeedRun = async function () {
   if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('aec_contacts'); dbCacheInvalidate('roc_leads'); }
   return { aecCreated, aecSkipped, aecScanned: aecRecords.length, rocCreated, rocSkipped, rocScanned: rocRecords.length };
 };
+
+// ── One-time: move CA deduction requests out of approval_requests (owner ruling 2026-11-20) ──
+// CA deduction requests now live in ca_deduct_requests (employee + President + Finance only).
+// This copies every legacy approval_requests doc with type 'ca_deduct' into ca_deduct_requests/{sameId}
+// (same fields, minus `type`), THEN deletes the original. Copy first, delete second, per doc, so a
+// failure part-way never loses a request and a re-run is safe (set() is idempotent). President only.
+window.migrateCaDeductRequests = async function () {
+  if (typeof isPresident === 'function' && !isPresident()) throw new Error('President only');
+  const snap = await db.collection('approval_requests').where('type', '==', 'ca_deduct').get();
+  let moved = 0;
+  for (const d of snap.docs) {
+    const data = { ...d.data() };
+    delete data.type;
+    await db.collection('ca_deduct_requests').doc(d.id).set(data);
+    await db.collection('approval_requests').doc(d.id).delete();
+    moved++;
+  }
+  if (typeof dbCacheInvalidate === 'function') {
+    dbCacheInvalidate('approvals-pending:ca_deduct_requests-pending');
+    dbCacheInvalidate('approvals-pending:approval_requests-pending');
+    dbCacheInvalidate('ca-pending');
+  }
+  return { moved };
+};

@@ -25,6 +25,13 @@ service cloud.firestore {
     // True when the caller has a users/{uid} doc. It stands where the old external-partner exclusion stood, in every expression that had it: a signed-in
     // identity with NO users doc errors here, exactly as getRole() does, so it is refused as before. get() (not exists()) on purpose — see docs/firestore-rules-notes.md#rn-1.
     function hasProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data != null; }
+    // Office staff (owner ruling 2026-11-20): a profile that is neither a commission sales agent nor an HR-managed
+    // worker login. Client and quote data is for office staff only. Always written AFTER hasProfile(), so the users
+    // doc exists, and the get() is the same cached read hasProfile() already made: no extra billed read.
+    function isOfficeStaff() {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return u.get('role', '') != 'agent' && u.get('hrManagedAccount', false) != true;
+    }
     function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
     function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
 
@@ -352,7 +359,7 @@ service cloud.firestore {
     // cir_drafts / cir_ratelimit / cir_abuse have NO match block (Admin SDK only). Secretary = view-only.
     function cirWriter() { return isSeniorAdmin() || (!isSecretary() && inDept('Sales')); }
     match /client_info_requests/{ref} {
-      allow read: if isAuth() && hasProfile();
+      allow read: if isAuth() && hasProfile() && isOfficeStaff();   // office staff only (2026-11-20)
       allow create, delete: if false;
       allow update: if isAuth() && cirWriter()
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -364,7 +371,7 @@ service cloud.firestore {
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['convertedBy']) || request.resource.data.convertedBy == request.auth.uid);
     }
     match /client_info_requests/{ref}/notes/{nid} {
-      allow read: if isAuth() && hasProfile();
+      allow read: if isAuth() && hasProfile() && isOfficeStaff();   // office staff only (2026-11-20)
       allow create: if isAuth() && cirWriter()
         && request.resource.data.get('authorUid','') == request.auth.uid
         && request.resource.data.get('at', null) == request.time
@@ -375,7 +382,7 @@ service cloud.firestore {
     // Public quote requests (specs/PUBLIC-QUOTE-REQUEST-SPEC.md) — created/deleted by callables only;
     // qr_sessions / qr_ratelimit / qr_abuse have NO match block (Admin SDK only). Secretary = view-only.
     match /quote_requests/{ref} {
-      allow read: if isAuth() && hasProfile();
+      allow read: if isAuth() && hasProfile() && isOfficeStaff();   // office staff only (2026-11-20)
       allow create, delete: if false;
       allow update: if isAuth() && cirWriter()
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -387,7 +394,7 @@ service cloud.firestore {
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['convertedBy']) || request.resource.data.convertedBy == request.auth.uid);
     }
     match /quote_requests/{ref}/notes/{nid} {
-      allow read: if isAuth() && hasProfile();
+      allow read: if isAuth() && hasProfile() && isOfficeStaff();   // office staff only (2026-11-20)
       allow create: if isAuth() && cirWriter()
         && request.resource.data.get('authorUid','') == request.auth.uid
         && request.resource.data.get('at', null) == request.time
@@ -1370,7 +1377,7 @@ service cloud.firestore {
       // reads DENY the whole rule) so create/update/delete of one's own
       // draft always works; drafts carry draftBy, not createdBy.
       allow read: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || hasProfile()
+        resource.data.createdBy == request.auth.uid || (hasProfile() && isOfficeStaff())   // an agent reads only their own (2026-11-20)
         || docId == 'draft_' + request.auth.uid
       );
       allow create: if isAuth() && (
@@ -1436,15 +1443,39 @@ service cloud.firestore {
     }
 
     // ── Approval requests ─
+    // CA deduction requests (owner ruling 2026-11-20): only the employee who filed it, the
+    // President and Finance. Kept out of approval_requests, whose office-staff list queries
+    // cannot be narrowed per document.
+    match /ca_deduct_requests/{docId} {
+      function cadReader() { return isPresident() || getRole() == 'finance'; }
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || cadReader());
+      // the employee files their own; the President-only arm is the one-time migration (any status)
+      allow create: if isAuth() && (
+        (hasProfile()
+          && request.resource.data.get('userId', '') == request.auth.uid
+          && request.resource.data.get('status', '') == 'pending'
+          && request.resource.data.keys().hasOnly(['userId','userName','month','amount','reason','status','createdAt'])
+          && request.resource.data.get('amount', 0) is number && request.resource.data.get('amount', 0) > 0
+          && request.resource.data.get('month', '') is string && request.resource.data.get('month', '').matches('^[0-9]{4}-[0-9]{2}$')
+          && isBoundedString(request.resource.data.get('reason', ''), 1000))
+        || isPresident());
+      // approve / reject: President or Finance, pending -> approved|rejected, resolution fields only
+      allow update: if isAuth() && cadReader()
+        && resource.data.get('status', '') == 'pending'
+        && request.resource.data.get('status', '') in ['approved', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','approvedBy','approvedAt','rejectedBy','rejectedAt']);
+      allow delete: if isAuth() && isPresident();
+    }
+
     match /approval_requests/{docId} {
-      allow read: if isAuth() && hasProfile();
+      allow read: if isAuth() && hasProfile() && isOfficeStaff();   // office staff only (2026-11-20)
       // [RN-94] v13 Phase 21: the ONLY two client write sites into this co -> docs/firestore-rules-notes.md#rn-94
       allow create: if isAuth() &&
         (request.resource.data.get('userId', '') == request.auth.uid ||
          request.resource.data.get('agentId', '') == request.auth.uid ||
          isOpsAdmin()) &&
         request.resource.data.get('status', '') == 'pending' &&
-        request.resource.data.get('type', '') in ['ca_deduct', 'bs_quote'] &&
+        request.resource.data.get('type', '') in ['bs_quote'] &&
         request.resource.data.keys().hasOnly([
           'type','status','createdAt','userId','userName','month','amount','reason',
           'quoteId','quoteColl','quoteNumber','clientName','total','agentName','agentId'
@@ -2497,7 +2528,7 @@ service cloud.firestore {
 
     // [RN-154] Client CRM — UNIFIED (v12 WS32) ─ -> docs/firestore-rules-notes.md#rn-154
     match /clients/{docId} {
-      allow read:   if isAuth() && hasProfile();
+      allow read:   if isAuth() && hasProfile() && isOfficeStaff();   // office staff only (2026-11-20)
       allow create, update: if isAuth() && hasProfile()
         && request.resource.data.get('name', '') is string
         && request.resource.data.get('name', '') != '';
