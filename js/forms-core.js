@@ -138,7 +138,8 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
       : `<img class="fh-logo" src="${esc(asset(FC.HEADER_LOGO))}" alt="Barro Industries OPC" width="168" height="56" onerror="this.style.display='none'">` +
         `<div class="fh-co">${coLine(FC.HEADER_PARTS)}</div>`;
     return `<div class="fh-header"><div class="fh-id">${left}</div>` +
-      `<div class="fh-doc"><div class="fh-title">${esc(prep.title)}</div><div class="fh-no">${esc(prep.numberText)}</div><div class="fh-date">${esc(prep.dateLabel)}</div>` +
+      // a LONG title (SITE VISIT REQUEST AND FEE ACKNOWLEDGEMENT) wraps inside the right column instead of running into the company name on its left; every earlier title is shorter
+      `<div class="fh-doc"><div class="fh-title"${String(prep.title).length > 30 ? ' style="white-space:normal;max-width:330px"' : ''}>${esc(prep.title)}</div><div class="fh-no">${esc(prep.numberText)}</div><div class="fh-date">${esc(prep.dateLabel)}</div>` +
       arr(prep.extraMeta).map((m) => `<div class="fh-meta">${esc(m)}</div>`).join('') + `</div></div>`;
   };
 
@@ -336,7 +337,7 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     if (!FC.canOpen(entry, ctx.viewer)) return fail('not-allowed', 'You do not have access to this document.');
     if (typeof entry.guard === 'function') { const msg = entry.guard(ctx); if (msg) return fail('refused', msg); }
 
-    const company = FC.formCompany(ctx.company ? FC.companyOf({ company: ctx.company }) : FC.companyOf(ctx.order, ctx.project, ctx.claim, ctx.quote));
+    const company = FC.formCompany(ctx.company ? FC.companyOf({ company: ctx.company }) : FC.companyOf(ctx.order, ctx.project, ctx.claim, ctx.quote, ctx.visit));
     const co = FC.COMPANIES[company];
     const num = FC.resolveNumber(entry, ctx);
     let rev = num.currentRev;
@@ -412,7 +413,8 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
       return `<table class="${esc(o.cls || 'items-table')}"><colgroup>${cols.map((c) => `<col style="width:${esc(c.w)}">`).join('')}</colgroup>${head}<tbody>${body}</tbody></table>`;
     };
     // The 2-column totals box: [{label, amt, cls:'grand'|'discount'}]
-    h.totals = (rows, note) => `<div class="totals-box" data-pdf-cut><table class="totals-tbl">` + arr(rows).map((r) =>
+    // o.firstCol (optional, e.g. '66%'): the label column's width, for a long label such as NEW CONTRACT AMOUNT that would otherwise wrap in the half-width box
+    h.totals = (rows, note, o) => `<div class="totals-box" data-pdf-cut><table class="totals-tbl">${o && o.firstCol ? `<colgroup><col style="width:${esc(o.firstCol)}"><col></colgroup>` : ''}` + arr(rows).map((r) =>
       `<tr${r.cls ? ' class="' + esc(r.cls) + '"' : ''}><td>${esc(r.label)}</td><td>${esc(r.amt)}</td></tr>`).join('') +
       (note ? `<tr class="cur-note"><td colspan="2">${esc(note)}</td></tr>` : '') + `</table></div>`;
     // .terms-grid: two-column grey cards. card: {title, text, full?}
@@ -556,6 +558,21 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
     const get = async (coll, id) => { if (!id) return null; const s = await db.collection(coll).doc(String(id)).get(); return s.exists ? Object.assign({ id: s.id }, s.data()) : null; };
     const soft = async (coll, id) => { try { return await get(coll, id); } catch (_) { return null; } };
     const src = entry.source && entry.source.coll;
+    // PHASE 5: a form whose own record is a doc of its own collection (a site visit, a change order) — entry.docKey names it in ctx (ctx.visit, ctx.changeOrder).
+    // ref.record is that doc preloaded, else ref.docId names it (REQUIRED: not-found when it is missing). entry.related(doc) lists what hangs off it, each read
+    // SOFTLY ([{ key, coll, id }]; key 'order' / 'project' / 'claim' fills those slots, any other key lands in `extra`). Entries without docKey are untouched.
+    if (entry.docKey) {
+      const own = ref.record || ref[entry.docKey] || (ref.docId ? await get(src, ref.docId) : null);
+      if (!own) throw makeError('not-found', 'We could not find that record.');
+      const got = { order: ref.order || null, project: ref.project || null, claim: ref.claim || null, extra: { [entry.docKey]: own } };
+      for (const r of (typeof entry.related === 'function' ? entry.related(own) : [])) {
+        if (!r || !r.id) continue;
+        const pre = ref[r.key] || null;
+        const doc = pre || (db ? await soft(r.coll, r.id) : null);
+        if (r.key === 'order' || r.key === 'project' || r.key === 'claim') got[r.key] = got[r.key] || doc; else got.extra[r.key] = doc;
+      }
+      return got;
+    }
     let order = ref.order || null, project = ref.project || null, claim = ref.claim || null;
     if (ref.record) {
       if (src === 'job_projects') project = project || ref.record;
@@ -1154,6 +1171,144 @@ if (typeof window === 'undefined') { globalThis.window = globalThis; }
       { key: 'punchCount', label: 'Punch-list items', from: (c) => arr(punchOf(c).items).filter((x) => x && str(x.text || x.note)).length },
     ]),
   }));
+
+
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+  //  PHASE 5 ENTRIES (specs/SALES-FLOW-SPEC-2026-11-19.md §5.6, §5.7, §9.9 — tests/forms-set-5.test.mjs)
+  //    site_visit_request  SITE VISIT REQUEST AND FEE ACKNOWLEDGEMENT   sales   pesos (the tariff; the fee received once its claim is recorded)   body js/forms-set-5.js
+  //    change_order        CHANGE ORDER                                 sales   pesos (line prices, price difference, added down payment, new contract amount)   body js/forms-set-5.js
+  //    site_visit_report   SITE VISIT REPORT                            ops     NO PESOS at all (an ops entry cannot register a money field; assertNoPesos scans the data)   body js/forms-set-2.js
+  //  The record of each is its OWN doc, named by ref.docId and found in ctx.visit / ctx.changeOrder (entry.docKey + entry.related, see loadRecords).
+  //  They need js/flow-core.js: the tariff, the area words and the change-order totals live there (one source, tested), never copied here.
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+  const FLOWCORE = 'js/flow-core.js';
+  const flow = () => W().FlowCore || {};
+  const visitOf = (c) => c.visit || {};
+  const svSpec = { series: 'SV', coll: 'site_visits', field: 'svNumber', label: 'SV No.', record: (c) => c.visit, fallback: (r) => 'SV-' + FC.last6(r && r.id) };
+  const visitMeta = (c) => [str(visitOf(c).quoteNumber) ? 'Quotation ref: ' + str(visitOf(c).quoteNumber) : '', FC.toIsoDate(visitOf(c).visitDate || visitOf(c).requestedDate) ? 'Visit date: ' + FC.longDate(FC.toIsoDate(visitOf(c).visitDate || visitOf(c).requestedDate)) : ''];
+  const visitGuard = (c) => (c.visit ? '' : 'We could not find that site visit.');
+  const visitClientFields = () => [
+    { key: 'clientName', label: 'Client', from: (c) => first(visitOf(c).clientName, c.client && c.client.name) },
+    { key: 'clientCompany', label: 'Company', from: (c) => clientParty(c).company },
+    { key: 'clientAddress', label: 'Address', from: (c) => clientParty(c).address },
+    { key: 'clientPhone', label: 'Phone', from: (c) => clientParty(c).phone },
+    { key: 'clientEmail', label: 'E-mail', from: (c) => clientParty(c).email },
+    { key: 'svRef', label: 'Site visit', from: (c) => first(visitOf(c).svNumber, 'SV-' + FC.last6(visitOf(c).id)) },
+    { key: 'quoteRef', label: 'Quotation ref', from: (c) => str(visitOf(c).quoteNumber) },
+    { key: 'areaLabel', label: 'Area', from: (c) => (flow().areaLabel ? flow().areaLabel(visitOf(c).area) : '') },
+    { key: 'requestedDate', label: 'Requested date', from: (c) => FC.toIsoDate(visitOf(c).requestedDate) },
+    { key: 'visitDate', label: 'Visit date', from: (c) => FC.toIsoDate(visitOf(c).visitDate || visitOf(c).requestedDate) },
+    { key: 'siteAddress', label: 'Site address', from: (c) => str(visitOf(c).address) },
+    { key: 'contactPerson', label: 'Contact at the site', from: (c) => str(visitOf(c).contactPerson) },
+    { key: 'contactPhone', label: 'Contact phone', from: (c) => str(visitOf(c).contactPhone) },
+  ];
+  // the fee claim hangs off the visit (visit.feeClaimId); it only speaks once it is RECORDED (confirmed)
+  const feeClaim = (c) => (c.claim && str(c.claim.siteVisitId) === str(visitOf(c).id) ? c.claim : null);
+  const feeRecorded = (c) => !!feeClaim(c) && str(feeClaim(c).status) === 'recorded';
+  const feeConfirm = (c) => (feeClaim(c) && feeClaim(c).paymentConfirm) || {};
+  const visitRelated = (v) => [{ key: 'claim', coll: 'payment_claims', id: v.feeClaimId }];
+
+  FC.register({
+    id: 'site_visit_request', title: 'SITE VISIT REQUEST AND FEE ACKNOWLEDGEMENT', audience: 'sales', orientation: 'portrait', bodySet: 'js/forms-set-5.js',
+    source: { coll: 'site_visits', via: 'docId' }, docKey: 'visit', related: visitRelated, records: { visit: 'required' }, needs: [FLOWCORE],
+    number: svSpec,
+    signatures: ['prepared', 'approved', 'conforme'],
+    date: (c) => visitOf(c).requestedAt || visitOf(c).requestedDate || '',
+    extraMeta: visitMeta, guard: visitGuard,
+    sign: (c, d) => {
+      const sigs = [{ role: 'Prepared by', name: first(visitOf(c).requestedByName), lines: ['Sales'] }];
+      if (feeRecorded(c)) {
+        const cf = feeConfirm(c);
+        sigs.push({ role: 'Confirmed by', name: first(cf.decidedByName, feeClaim(c).recordedBy),
+          lines: [cf.onBehalf ? roleText(cf.decidedByRole || 'finance') + ', for the President' : roleText(cf.decidedByRole || 'finance'), cf.decidedAt ? 'Confirmed ' + FC.longDate(FC.toIsoDate(cf.decidedAt)) : ''] });
+      }
+      sigs.push({ role: 'Client conforme', name: d.clientName || 'CLIENT NAME', lines: ['Signature over printed name', 'Date: ___________________'] });
+      return sigs;
+    },
+    fields: visitClientFields().concat([
+      { key: 'notes', label: 'Notes', freeText: true, from: (c) => str(visitOf(c).notes) },
+      { key: 'statusWord', label: 'Status', from: (c) => (flow().visitStatusWord ? flow().visitStatusWord(visitOf(c).status) : str(visitOf(c).status)) },
+      { key: 'feeTariff', label: 'Site-visit fee (tariff)', money: true, from: (c) => (flow().siteVisitFee ? flow().siteVisitFee(visitOf(c).area) : null) },
+      { key: 'feeRecorded', label: 'Fee confirmed', from: feeRecorded },
+      { key: 'feeAmount', label: 'Fee received', money: true, from: (c) => (feeRecorded(c) ? fin(feeClaim(c).recordedAmount) : null) },
+      { key: 'feeMethod', label: 'Payment method', from: (c) => (feeRecorded(c) ? str(feeClaim(c).paymentMethod) : '') },
+      { key: 'feeReference', label: 'Reference no.', from: (c) => (feeRecorded(c) ? str(feeClaim(c).orRef) : '') },
+      { key: 'feePaidOn', label: 'Date received', from: (c) => (feeRecorded(c) ? FC.toIsoDate(feeClaim(c).paymentDate) : '') },
+      { key: 'paRef', label: 'PA No.', from: (c) => (feeRecorded(c) ? str(feeClaim(c).paNumber) : '') },
+      { key: 'notice', label: 'Notice', from: () => FC.NOT_RECEIPT_NOTE },
+    ]),
+  });
+
+  // site_visit_report: Operations. The report is what Rene recorded (visit.report); a visit with no report yet prints as a fillable paper form.
+  const reportOf = (c) => (visitOf(c).report && typeof visitOf(c).report === 'object' ? visitOf(c).report : {});
+  FC.register({
+    id: 'site_visit_report', title: 'SITE VISIT REPORT', audience: 'ops', orientation: 'portrait', bodySet: 'js/forms-set-2.js',
+    source: { coll: 'site_visits', via: 'docId' }, docKey: 'visit', records: { visit: 'required' }, needs: [FLOWCORE],
+    number: svSpec,
+    signatures: ['prepared', 'checked'],
+    date: (c) => reportOf(c).at || visitOf(c).visitDate || visitOf(c).requestedDate || '',
+    extraMeta: visitMeta, guard: visitGuard,
+    sign: (c) => [
+      { role: 'Prepared by', name: first(reportOf(c).byName), lines: ['Production'] },
+      { role: 'Checked by', name: '', lines: ['Production'] },
+    ],
+    fields: visitClientFields().concat([
+      { key: 'measurements', label: 'Measurements', freeText: true, from: (c) => str(reportOf(c).measurements) },
+      { key: 'constraints', label: 'Site constraints', freeText: true, from: (c) => str(reportOf(c).constraints) },
+      { key: 'layoutNotes', label: 'Layout notes', freeText: true, from: (c) => str(reportOf(c).layoutNotes) },
+      { key: 'photoCount', label: 'Photos on file', from: (c) => arr(reportOf(c).photos).filter((p) => p && str(p.url)).length },
+      { key: 'attachments', label: 'Attachments', list: true, from: (c) => arr(reportOf(c).attachments).filter((a) => a && str(a.url)).map((a) => first(a.name, 'File')) },
+      { key: 'reportBy', label: 'Written by', from: (c) => str(reportOf(c).byName) },
+      { key: 'reportOn', label: 'Written on', from: (c) => FC.toIsoDate(reportOf(c).at) },
+    ]),
+  });
+
+  // change_order (pesos). The record is change_orders/{id}; the request it prices has the same id. The contract figure is the sales order's.
+  const coOf = (c) => c.changeOrder || {};
+  const coPricing = (c) => (coOf(c).pricing && typeof coOf(c).pricing === 'object' ? coOf(c).pricing : {});
+  const coSigned = (c) => (coOf(c).signed && typeof coOf(c).signed === 'object' ? coOf(c).signed : {});
+  const coApplied = (c) => arr(c.order && c.order.revisions).filter((r) => r && str(r.changeOrderId) === str(coOf(c).id) && str(coOf(c).id))[0] || null;
+  const coTotals = (c) => (flow().changeOrderTotals ? flow().changeOrderTotals({ contractNow: fin(c.order && c.order.contractAmount), price: fin(coPricing(c).price), appliedRevision: coApplied(c) }) : { before: null, price: null, after: null, applied: false });
+  const coLines = (c) => arr(coPricing(c).lines).map((l) => ({ kind: str(l && l.kind) === 'removed' ? 'removed' : 'added', name: str(l && l.name), qty: fin(l && l.qty), unit: str(l && l.unit) || 'pc',
+    unitPrice: fin(l && l.unitPrice), amount: flow().lineAmount ? flow().lineAmount(l) : null }));
+  FC.register({
+    id: 'change_order', title: 'CHANGE ORDER', audience: 'sales', orientation: 'portrait', bodySet: 'js/forms-set-5.js',
+    source: { coll: 'change_orders', via: 'docId' }, docKey: 'changeOrder', records: { changeOrder: 'required' }, needs: [FLOWCORE],
+    related: (co) => [{ key: 'order', coll: 'sales_orders', id: co.orderId }, { key: 'project', coll: 'job_projects', id: co.projectId }, { key: 'changeRequest', coll: 'change_requests', id: co.id }],
+    number: { series: 'CO', coll: 'change_orders', field: 'coNumber', label: 'CO No.', record: (c) => c.changeOrder, fallback: (r) => 'CO-' + FC.last6(r && r.id) },
+    signatures: ['prepared', 'approved', 'conforme'],
+    date: (c) => coOf(c).pricedAt || '',
+    extraMeta: (c) => [metaQuoteRef(c), metaSoRef(c, false)],
+    guard: (c) => (c.changeOrder ? '' : 'We could not find that change order.'),
+    sign: (c, d) => {
+      const sg = coSigned(c);
+      return [
+        { role: 'Prepared by', name: first(coOf(c).pricedByName), lines: ['Sales'] },
+        { role: FC.LABELS.approvedBy, name: first(sg.signedForBarroBy), lines: [first(sg.signedForBarroRole, 'For Barro Industries OPC')] },
+        { role: 'Client conforme', name: first(sg.clientSignedBy) || d.clientName || 'CLIENT NAME', lines: ['Signature over printed name', 'Date: ' + (str(sg.date) ? FC.longDate(FC.toIsoDate(sg.date)) : '___________________')] },
+      ];
+    },
+    fields: [
+      { key: 'clientName', label: 'Client', from: (c) => first(c.order && c.order.clientName, c.project && c.project.clientName, c.changeRequest && c.changeRequest.clientName, c.client && c.client.name) },
+      { key: 'clientCompany', label: 'Company', from: (c) => clientParty(c).company },
+      { key: 'clientAddress', label: 'Address', from: (c) => clientParty(c).address },
+      { key: 'clientPhone', label: 'Phone', from: (c) => clientParty(c).phone },
+      { key: 'clientEmail', label: 'E-mail', from: (c) => clientParty(c).email },
+      { key: 'subject', label: 'Subject', from: subjectOf },
+      { key: 'quoteRef', label: 'Quotation ref', from: quoteNo },
+      { key: 'soRef', label: 'Sales order ref', from: (c) => { const i = soInfo(c); return i.source === 'fallback' ? '' : i.number; } },
+      { key: 'details', label: 'Change requested', freeText: true, from: (c) => str(c.changeRequest && c.changeRequest.details) },
+      { key: 'deadlineDays', label: 'Effect on the deadline (days)', from: (c) => fin(c.changeRequest && c.changeRequest.effectOnDeadlineDays) },
+      { key: 'lines', label: 'Change order items', money: true, list: true, from: coLines },
+      { key: 'price', label: 'Price difference', money: true, from: (c) => fin(coPricing(c).price) },
+      { key: 'addedDownPayment', label: 'Added down payment', money: true, from: (c) => fin(coPricing(c).addedDownPayment) },
+      { key: 'contractBefore', label: 'Contract amount before', money: true, from: (c) => coTotals(c).before },
+      { key: 'contractAfter', label: 'New contract amount', money: true, from: (c) => coTotals(c).after },
+      { key: 'appliedRev', label: 'Applied as revision', from: (c) => (coApplied(c) ? Math.max(0, Math.floor(Number(coApplied(c).revNo) || 0)) : 0) },
+      { key: 'signedOn', label: 'Signed on', from: (c) => FC.toIsoDate(coSigned(c).date) },
+      { key: 'status', label: 'Status', from: (c) => str(coOf(c).status) },
+    ],
+  });
 
   W().FormsCore = FC;
   if (typeof module !== 'undefined' && module.exports) module.exports = FC;

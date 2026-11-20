@@ -265,6 +265,8 @@ window.Notifs = (() => {
     payment_rejected:{icon:'↩️',accent:'#E8590C'}, quote_lost:{icon:'✖️',accent:'#868E96'},
     // F3 Revise contract amount (SALES-FLOW-SPEC-2026-11-19 §12)
     contract_change:{icon:'📝',accent:'#F76707'}, contract_applied:{icon:'✅',accent:'#2F9E44'}, contract_rejected:{icon:'↩️',accent:'#E8590C'},
+    // Site visits and change orders (SALES-FLOW-SPEC-2026-11-19 §12, Phase 5): booked → Production, request → Sales, signed → Production (never an amount)
+    site_visit_booked:{icon:'📍',accent:'#1C7ED6'}, change_request:{icon:'📝',accent:'#F76707'}, change_order_signed:{icon:'✍️',accent:'#2F9E44'},
     // Purchasing / inventory
     po_approval:{icon:'🧮',accent:'#F76707'}, po_approval_result:{icon:'🧮',accent:'#2F9E44'},
     purchase_submitted:{icon:'🧮',accent:'#F76707'}, low_stock:{icon:'📦',accent:'#E8590C'},

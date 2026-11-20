@@ -1457,6 +1457,8 @@ window.reopenLostQuote = async function(coll, q, onDone) {
 };
 
 async function renderBKQuotationsSummary(container, currentUser, currentRole) {
+  // SITE-VISIT-HOOK (Phase 5, §5.6 V1): "Request site visit" is for Sales and the President (js/screens/site-visits.js enforces it again).
+  const canSiteVisit = typeof canEditDept === 'function' && canEditDept('Sales') && currentRole !== 'secretary';
   const isPrivileged = ['president','manager','finance'].includes(currentRole);
   const isAdmin = ['president','manager','secretary'].includes(currentRole);
   container.innerHTML = window.skeletonHtml('rows');
@@ -1560,10 +1562,12 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           ${window.QUOTE_SHAREABLE_STATUSES.includes(q.status)?`<button class="btn-secondary btn-sm bk-share-btn" data-id="${q.id}" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}
           ${window.SalesFlow.canMarkSent(q, superseded)?`<button class="btn-secondary btn-sm bk-sent-btn" data-id="${q.id}" title="Record that this quotation went out to the client">${emojiIcon('📨',16)} Mark sent</button>`:''}
           ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="${escHtml(qco)}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('💵',16)} Record payment`}</button>`:''}
+          ${(canSiteVisit && !superseded && !['lost','draft'].includes(q.status))?`<button class="btn-secondary btn-sm bk-sv-btn" data-id="${q.id}" title="Book a paid site visit for this client">${emojiIcon('📍',16)} Request site visit</button>`:''}
           ${window.SalesFlow.canMarkLost(q, superseded)?`<button class="btn-secondary btn-sm bk-lost-btn" data-id="${q.id}" style="color:var(--danger)" title="The client said no — choose the reason">Lost</button>`:''}
           ${window.SalesFlow.canReopenLost(q)?`<button class="btn-secondary btn-sm bk-unlost-btn" data-id="${q.id}" title="Put this quote back where it was">Reopen quote</button>`:''}
           ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">${emojiIcon('🗑',16)} Delete</button>`:''}
         </div>
+        <div class="sv-slot" data-quote-id="${q.id}" style="width:100%"></div>
       </div>`;
   };
 
@@ -1618,6 +1622,13 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       const d=e.currentTarget.dataset;
       window.requestQuoteDelete('bk_quotes', d.id, d.label, d.by, ()=>renderBKQuotationsSummary(container, currentUser, currentRole));
     }));
+    // SITE-VISIT-HOOK (Phase 5, §5.6 V1): Request site visit, and each visit's status under its quote. Lazy (js/screens/site-visits.js); a failure never breaks the list.
+    container.querySelectorAll('.bk-sv-btn').forEach(b=>b.addEventListener('click', e=>{
+      const q = allDocs.find(x => x.id === e.currentTarget.dataset.id); if (!q) return;
+      window.ensureScript('js/screens/site-visits.js').then(()=>window.SiteVisits.openRequestSheet({ quote: { id:q.id, coll:'bk_quotes', quoteNumber:q.quoteNumber, clientId:q.clientId, clientName:q.clientName, clientAddress:q.clientAddress, clientPhone:q.clientPhone, company:q.company||'BK' } }, ()=>window.SiteVisits.fillSlots(container)))
+        .catch(()=>Notifs.showToast('Could not open the site visit screen.','error'));
+    }));
+    try { if (container.querySelector('.sv-slot')) window.ensureScript('js/screens/site-visits.js').then(()=>window.SiteVisits.fillSlots(container)).catch(()=>{}); } catch (_) {}
   };
 
   // Wave 7 Pass 2 — chain-aware card: the newest revision renders exactly

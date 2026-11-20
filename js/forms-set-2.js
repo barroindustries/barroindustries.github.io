@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════
    BARRO INDUSTRIES — Forms bodies, set 2
    js/forms-set-2.js — the sections of qc_checklist, delivery_receipt, installation_checklist, punch_list and client_acceptance
-   (specs/SALES-FLOW-SPEC-2026-11-19.md §9.9, Phase 4 WP 4B), same style as js/forms-set-1.js.
+   (specs/SALES-FLOW-SPEC-2026-11-19.md §9.9, Phase 4 WP 4B), and of site_visit_report (Phase 5), same style as js/forms-set-1.js.
    ═══════════════════════════════════════════════════
    Lazy (js/forms.js loads it with the first of these forms; never in index.html). Each body is a pure function (data, h) → string[] of page
    sections; `data` is only what FormsCore.build() copied from the entry's DECLARED fields, `h` is FormsCore.makeHelpers(). The header, signature
@@ -109,6 +109,26 @@
       ? `Punch list cleared on ${h.date(d.clearedOn)}${has(d.clearedBy) ? ' by ' + d.clearedBy : ''}.`
       : (d.items || []).length ? `${open} of ${d.items.length} item(s) still open.` : 'All items cleared:  ☐ Yes   Date: ____________________';
     out.push(h.section('Status', h.text(status)));
+    return out;
+  };
+
+  // ═══════════════════════════════════════════════════
+  //  site_visit_report (Phase 5, §5.6 V4) — what Rene found at the site: measurements, constraints, layout notes, how many photos and files.
+  //  Blank-first like the others: a visit with no report yet prints as a fillable paper form. No money exists on this form for any login.
+  // ═══════════════════════════════════════════════════
+  bodies.site_visit_report = function (d, h) {
+    const out = [clientStrip(d, h)];
+    const visit = [{ head: true, label: 'Site Visit', value: dash(d.svRef) }, { head: false, label: 'Area', value: dash(d.areaLabel) },
+      { head: true, label: 'Visit Date', value: has(d.visitDate) ? h.date(d.visitDate) : '—' }, { head: false, label: 'Site Address', value: dash(d.siteAddress) },
+      { head: true, label: 'Contact at the Site', value: [d.contactPerson, d.contactPhone].filter(has).join(' · ') || '—' }];
+    out.push(h.section('Site Visit', h.infoTable(visit)));
+    const block = (title, text) => h.section(title, has(text) ? h.text(text) : ruled(h, 4));
+    out.push(block('Measurements', d.measurements));
+    out.push(block('Site Constraints', d.constraints));
+    out.push(block('Layout Notes', d.layoutNotes));
+    const files = (d.attachments || []).length ? 'Attachments: ' + d.attachments.join(', ') + '.' : 'No attachments.';
+    out.push(h.section('Photos & Files', h.text((d.photoCount > 0 ? d.photoCount + ' photo' + (d.photoCount === 1 ? '' : 's') + ' on file. ' : 'No photos on file. ') + files)));
+    if (has(d.reportBy)) out.push(h.section('Written By', h.text(d.reportBy + (has(d.reportOn) ? ' on ' + h.date(d.reportOn) : ''))));
     return out;
   };
 

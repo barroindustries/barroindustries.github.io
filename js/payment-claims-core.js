@@ -18,7 +18,9 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
 //      stops at the plan, a retry after the claim patch failed lands in the repair branch which never re-sends job fields;
 //    • collected ADDS to the fresh job's figure; the amount is checked against the FRESH balance (not for site-visit);
 //    • never closes a job: no `stage` key in the plan;
-//    • a credited site-visit fee is a payments entry only — the money is already in the books under its own PAY- row.
+//    • a credited site-visit fee is a payments entry only — the money is already in the books under its own PAY- row;
+//    • a change-order down payment (§5.7 C4) is asked BEFORE the contract is revised, so the job's balance does not yet hold the change order's price:
+//      its ceiling is the balance due PLUS that price when the price is positive (dueFor). Without a change order, nothing differs from any other claim.
 //  paNumber is supplied by the caller (Forms.nextNumber('PA') before the post); this file allocates no numbers.
 // ═══════════════════════════════════════════════════════════════════════════
 (function () {
@@ -60,14 +62,28 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     return Math.max(0, r2(ar - f));
   }
 
+  // What a payment of this kind may reach (the "balance due" the form shows and the confirmation enforces). A change-order down payment (§5.7 C4) is taken
+  // before the contract is revised, so the signed change order's price (when positive) is owed on top of the contract: what is still owed is
+  // contract + price − collected − the fees not yet credited, worked from the CONTRACT and what was COLLECTED (the stored balance is floored at 0 and would
+  // forget an earlier down payment on a prepaid job, letting two payments each reach the whole price). Never below the plain balance due.
+  // changeOrder = { price } of a change order that is NOT applied yet (once applied, the contract already holds the price: pass nothing).
+  function dueFor(kind, project, fees, changeOrder) {
+    const due = balanceDue(project, fees);
+    const price = changeOrder ? num(changeOrder.price) : 0;
+    if (kind !== 'change_order' || !(price > 0) || !project) return due;
+    if (project.contractAmount === undefined || project.contractAmount === null || project.contractAmount === '') return r2(due + price);
+    const credited = uncredited(project, fees).reduce(function (s, x) { return s + num(x.recordedAmount); }, 0);
+    return Math.max(due, r2(num(project.contractAmount) + price - num(project.amountCollected) - credited));
+  }
+
   // ── record form (§8.1, P-1) ────────────────────────────────────────────────────────────────────────────────────
-  // a = { kind, entered, vatTreatment, hasReceipt, project, fees? } → { ok, error, recorded, net, vat, balanceDue }.
+  // a = { kind, entered, vatTreatment, hasReceipt, project, fees?, changeOrder? } → { ok, error, recorded, net, vat, balanceDue }.
   // "No more than the balance due (+₱0.50)" is not applied to a site-visit fee. Numbers are returned even when invalid.
   function validateRecord(a) {
     a = a || {};
     const e = num(a.entered);
     const split = window.vatSplit(e > 0 ? e : 0, a.vatTreatment || 'inclusive');
-    const due = isFee(a) ? null : balanceDue(a.project, a.fees);
+    const due = isFee(a) ? null : dueFor(a.kind, a.project, a.fees, a.changeOrder);
     const out = function (error) {
       return { ok: !error, error: error || '', recorded: split.recorded, net: split.net, vat: split.vat, balanceDue: due };
     };
@@ -100,7 +116,7 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
   }
 
   // ── §8.3 plan — pure ───────────────────────────────────────────────────────────────────────────────────────────
-  // ctx = { today, nowIso, who, viewer, paNumber, acct:{bankAccountId,bankAccountName}, bankTag:{}, sanitize?, fees? }
+  // ctx = { today, nowIso, who, viewer, paNumber, acct:{bankAccountId,bankAccountName}, bankTag:{}, sanitize?, fees?, changeOrder?:{price} }
   // Returns { ok:false, code[, error] } or the plan. Refusal order: not-allowed (FIRST, so a stale screen cannot post),
   // already-confirmed, not-pending, invalid-kind, invalid-amount, missing-pa-number, no-project, over-balance.
   function planConfirmation(claim, project, ctx) {
@@ -127,7 +143,7 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     // job's balance and would otherwise refuse its own retry. Nothing is posted in that case; only the claim is patched.
     const credit = fee || !project ? { entries: [], total: 0 } : planFeeCredit(project, ctx.fees, ctx);
     if (!fee && !ctx.repair) {
-      const due = balanceDue(project, ctx.fees);
+      const due = dueFor(claim.kind, project, ctx.fees, ctx.changeOrder);
       if (amount > +(due + 0.5).toFixed(2)) return { ok: false, code: 'over-balance', balanceDue: due };
     }
 
@@ -184,7 +200,7 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
   }
 
   // ── §8.3 orchestration — posts exactly once ────────────────────────────────────────────────────────────────────
-  // deps = { getClaim(id), getProject(id), getUncreditedFees?(claim, project), ledgerPost(entry), ledgerAmount(ref),
+  // deps = { getClaim(id), getProject(id), getUncreditedFees?(claim, project), getChangeOrder?(id), ledgerPost(entry), ledgerAmount(ref),
   //          updateClaim(id, patch), afterPost?(claim, plan), ctx, sanitize(ref), union(x), serverTime() }
   // Same exactly-once argument as SalesFlow.runConfirmation: the ledger id is a pure function of the claim id, the job's
   // figures ride the same transaction as the ledger create, and a second call stops at the plan or lands in 6b, which
@@ -200,8 +216,15 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     // guard must not judge a balance the first post already reduced.
     const already = await deps.ledgerAmount('PAY-' + claim.id);
     const repair = already != null;
+    // 2c. A change-order down payment is checked against the balance PLUS its change order's price (dueFor). No reader injected → the old behaviour.
+    let changeOrder = null;
+    if (claim.kind === 'change_order' && claim.changeOrderId && typeof deps.getChangeOrder === 'function') {
+      const co = await deps.getChangeOrder(claim.changeOrderId);
+      // an APPLIED change order is already in the contract: its price is not owed a second time
+      if (co && co.status !== 'applied' && !co.appliedContractRev) changeOrder = { price: co.pricing && co.pricing.price };
+    }
     // 3. Nothing is written when the plan refuses.
-    const plan = planConfirmation(claim, project, Object.assign({}, deps.ctx, { sanitize: deps.sanitize, fees: fees, repair: repair }));
+    const plan = planConfirmation(claim, project, Object.assign({}, deps.ctx, { sanitize: deps.sanitize, fees: fees, repair: repair, changeOrder: changeOrder }));
     if (!plan.ok) return plan;
     if (repair) {
       // 6b. Patch the claim only; never post and never touch the job again.
@@ -237,6 +260,7 @@ if (typeof window === 'undefined') globalThis.window = globalThis;
     KINDS: KINDS,
     kindLabel: kindLabel,
     balanceDue: balanceDue,
+    dueFor: dueFor,
     validateRecord: validateRecord,
     planFeeCredit: planFeeCredit,
     planConfirmation: planConfirmation,
