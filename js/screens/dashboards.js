@@ -976,7 +976,7 @@ async function renderPresidentDashboard() {
     const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList, caDedReqSnap] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
-      dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
+      dbCachedGet('approvals-pending:submissions-pending', () => db.collection('submissions').where('status','==','pending').get(), 30000)   /* pending only (2026-11-20): the whole collection was read just to count these */,
       dbCachedGet('all-quotes',    getAllQuotes,                                                          30000),
       dbCachedGet('approvals-pending',   () => safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'),     30000),
       dbCachedGet('ca-pending',          () => safeGet(window.caScope(db.collection('cash_advances').where('status','==','pending')), 'cash_advances'),         30000),
@@ -1244,7 +1244,7 @@ async function renderManagerDashboard() {
     const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, leaveSnap, poSnap] = await Promise.all([
       dbCachedGet('users',     () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
-      dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
+      dbCachedGet('approvals-pending:submissions-pending', () => db.collection('submissions').where('status','==','pending').get(), 30000)   /* pending only (2026-11-20): the whole collection was read just to count these */,
       dbCachedGet('approvals-pending', () => safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'), 30000),
       dbCachedGet('ca-pending',        () => safeGet(window.caScope(db.collection('cash_advances').where('status','==','pending')), 'cash_advances'),     30000),
       // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item4 — attendance_extensions pending
@@ -1378,7 +1378,7 @@ async function renderSecretaryDashboard() {
     const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap] = await Promise.all([
       dbCachedGet('users',       () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all',   () => db.collection('tasks').get(), 30000),
-      dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
+      dbCachedGet('approvals-pending:submissions-pending', () => db.collection('submissions').where('status','==','pending').get(), 30000)   /* pending only (2026-11-20): the whole collection was read just to count these */,
       safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'),
       safeGet(window.caScope(db.collection('cash_advances').where('status','==','pending')), 'cash_advances'),
       safeGet(db.collection('signup_requests').where('status','==','pending'), 'signup_requests'),
