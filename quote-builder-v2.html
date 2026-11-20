@@ -9643,7 +9643,9 @@ async function fileQuotation(){
     window.parent.postMessage({ type:'QUOTE_UPDATE', docId:reopenSourceDocId, collection:reopenSourceCollection, payload:quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar }, window.location.origin);
   } else {
     // Notify parent app to save to Firestore (new copy / new revision)
-    window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar }, window.location.origin);
+    // P1 (flow spec §6.6): the builder's own verdict — does the President's earlier approval still cover this revision (KCRules.approvalCovers via D7.flow)? Rides the ENVELOPE, KC quotes
+    // only (a legacy quote sends nothing and the bridge decides alone). The bridge (js/app.js _qbChainGate) re-checks with PriceGate; false (they disagree) sends the quote to the President.
+    window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar, ...(d7On() ? { approvalCovered: !!approvalCoversNow() } : {}) }, window.location.origin);
   }
   setSavedDraft(null); // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
 
