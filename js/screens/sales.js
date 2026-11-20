@@ -863,7 +863,7 @@ const DEFAULT_SALES_SOP = {
         'Open **Sales → Quotes → ＋ New Quotation**, or **Open in Quote Builder** on a quote request. Always open it from inside the app: the standalone page is preview only and cannot file.',
         'In **Add items**, pick the tab for the area. Each product card shows a "from" price. Tap **Configure**: the recommended options are already selected, so change only what the client asked for, then tap **Add to Quote**. A standard item takes three taps or fewer.',
         'Prices come from the Standard Price List, so do not retype them. For grilling and bakery items use the catalogue search; for anything else use **Add custom item**.',
-        'Terms start at 65% down payment and 35% on delivery, a 6-month service warranty and a hairline finish. The discount starts at none: give one only from the discount list, 30% at most. The "offer up to n%" line in the calculator is only a hint.',
+        'Terms start at 65% down payment and 35% on delivery, a 12-month service warranty and a hairline finish. The discount starts at none: give one only from the discount list, 30% at most. The "offer up to n%" line in the calculator is only a hint.',
         'The quote number is automatic and unique: never type one. If you see "The configurators did not load", tap **Reload DB**. If it stays, tell the President.'
       ], out:'A complete quote, ready to send for approval.' },
     { short:'Approve', title:'President Approves', owner:'President (Neil)', tab:'Quote Builder · Approvals',

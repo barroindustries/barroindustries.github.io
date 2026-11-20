@@ -1050,7 +1050,7 @@ async function renderPresidentDashboard() {
       + pendingReview + pendingLeave + pendingFinDel + pendingPayDel + pendingBsDel + pendingBkDel + pendingClientDel + pendingPO + pendingRaises;
 
     // Total payroll burn (sum of net pay of all employees)
-    const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);
+    const payrollBurn = users.filter(window.onMonthlyPayroll).reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);   // not removed / production (2026-11-20)
 
     // Month-to-date financials (ledger: credit = income, debit = expense) for remote oversight
     const mtdLedger  = ledgerSnap.docs.map(d=>d.data());     // already this-month-bounded
@@ -1062,10 +1062,11 @@ async function renderPresidentDashboard() {
     // Inventory low-stock count
     const lowStock = invSnap.docs.map(d=>d.data()).filter(i=>(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0)).length;
     // Receivables outstanding (+ 90+ day overdue) — owner cash-flow visibility.
-    const _dS = ts => { try { const t = ts && ts.toDate ? ts.toDate() : (ts && ts.seconds ? new Date(ts.seconds*1000) : null); return t?Math.floor((Date.now()-t.getTime())/86400000):0; } catch(_) { return 0; } };
     const _openAR = (projList||[]).filter(p=>(p.arBalance||0)>0 && !['paid','cancelled','lost'].includes(String(p.stage||'').toLowerCase()));
     const arOutstanding = _openAR.reduce((s,p)=>s+(p.arBalance||0),0);
-    const arOverdue = _openAR.filter(p=>_dS(p.createdAt)>90).reduce((s,p)=>s+(p.arBalance||0),0);
+    // 90+ days by the ONE shared aging engine (invoice due date, else project age), so this matches the Finance
+    // dashboard's figure — it used to be project age only (2026-11-20 review).
+    const arOverdue = window.arAging(_openAR).d90;
 
     // Sort open tasks: overdue first, then by priority (high→medium→low), then by dueDate
     const priorityOrder = { high:0, medium:1, low:2 };
@@ -1117,7 +1118,7 @@ async function renderPresidentDashboard() {
         <div class="kpi-card">
           <div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div>
           <div class="kpi-label">Team</div>
-          <div class="kpi-value">${users.length}</div>
+          <div class="kpi-value">${users.filter(window.isCurrentStaff).length}</div>
         </div>
         <div class="kpi-card ${openTasks.length>0?'accent':''}">
           <div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="check-square" style="stroke:var(--primary);width:18px"></i></div>
@@ -1258,7 +1259,7 @@ async function renderManagerDashboard() {
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const inDept = (u) => { const ud = Array.isArray(u.departments)?u.departments:(u.department?[u.department]:[]); return depts.some(d=>ud.includes(d)); };
-    const team = users.filter(inDept);
+    const team = users.filter(u => window.isCurrentStaff(u) && inDept(u));   // removed people are not on the team (2026-11-20)
     const teamIds = new Set(team.map(u=>u.id));
     const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
     const deptTasks = allTasks.filter(t => depts.includes(t.department) ||
@@ -1274,8 +1275,13 @@ async function renderManagerDashboard() {
     const reviewPending = deptTasks.filter(t=>t.status==='review').length;
     const leavePending  = leaveSnap.docs.filter(d=>teamIds.has(d.data().userId)).length;
     const poPending     = poSnap.docs.filter(d=>{ const p=d.data(); return depts.includes(p.requestingDept) || teamIds.has(p.createdBy); }).length;
+    // 2026-11-20 review: quote approvals and cash advances were counted company-wide while everything else here is
+    // team-scoped, so the total meant nothing. Now every source is the team's; legacy CA-deduction requests (still in
+    // approval_requests until the President's one-time move) are excluded — managers no longer see them (owner).
+    const teamQuoteApprovals = approvalsSnap.docs.filter(d=>{ const x=d.data(); return x.type!=='ca_deduct' && (teamIds.has(x.userId)||teamIds.has(x.agentId)); }).length;
+    const teamCAs = caSnap.docs.filter(d=>teamIds.has(d.data().userId)).length;
     const deptPending = subs.filter(s=>s.status==='pending' && (depts.includes(s.department)||teamIds.has(s.createdBy)||teamIds.has(s.uid))).length
-      + (approvalsSnap.size||0) + (caSnap.size||0) + reviewPending + leavePending + poPending;
+      + teamQuoteApprovals + teamCAs + reviewPending + leavePending + poPending;
 
     // OFFICE-KPI-PAY-SPEC-2026-08-25 R9 — the "Today's attendance for the
     // team" tile (present/half/not-in derived from a live per-employee read
@@ -1297,7 +1303,7 @@ async function renderManagerDashboard() {
       <div class="page-header"><h2>Manager Dashboard</h2><span class="badge badge-purple">${escHtml(depts.join(' · ')||'Manager')}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
       ${overdueT.length?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>${emojiIcon('⚠️',16)} <strong>${overdueT.length} overdue</strong> in your ${depts.length>1?'departments':'department'}</span><span class="alert-chevron">›</span></div>`:''}
-      ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''}</span><span class="alert-chevron">›</span></div>`:''}
+      ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''} from your team</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div><div class="kpi-label">Team</div><div class="kpi-value">${team.length}</div></div>
         <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="check-square" style="stroke:var(--primary);width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div><div class="kpi-sub">${doneT.length} done</div></div>
@@ -1401,7 +1407,7 @@ async function renderSecretaryDashboard() {
     const pendingPO = poSnap.size||0;
     const pendingRaises = raiseSnap.size||0;
     const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes+pendingPO+pendingRaises;
-    const activeStaff = users.length;
+    const activeStaff = users.filter(window.isCurrentStaff).length;   // removed people are not staff (2026-11-20)
     const rows = [
       ['Sign-ups', signupSnap.size||0, `${emojiIcon('👤',16)}`],
       ['Cash Advances', caSnap.size||0, `${emojiIcon('💸',16)}`],
@@ -1498,8 +1504,9 @@ async function renderFinanceDashboard() {
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(e => { _dashWarnOnce('projects', e); return []; }),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
-    const payrollGross = users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0),0);
-    const payrollDeduct = users.reduce((s,u)=>s+(u.deductions||0),0);
+    const payStaff = users.filter(window.onMonthlyPayroll);   // not removed / production (2026-11-20)
+    const payrollGross = payStaff.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0),0);
+    const payrollDeduct = payStaff.reduce((s,u)=>s+(u.deductions||0),0);
     const payrollNet = payrollGross - payrollDeduct;
 
     const periodLedger = ledgerSnap.docs.map(d=>d.data());   // already period-bounded — no re-filter
@@ -1672,9 +1679,16 @@ async function renderEmployeeDashboard() {
     const u = userProfile;
     const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
 
-    // KPI computation
-    const taskScore = myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 0;
+    // KPI — the SAME score the payslip uses (window.computeKpiForMonth, money-core.js: this month's tasks, 70% task
+    // completion + 30% deliverable score, no work in scope = 100%). It used to be completed ÷ every task ever assigned,
+    // which disagreed with the payslip and showed 0% to someone with no tasks (2026-11-20 review).
     const kpiTarget  = kpiProfile?.exists ? kpiProfile.data() : {};
+    const kpiMonth   = bizDate().slice(0, 7);
+    const taskScore  = Math.round(window.computeKpiForMonth(myTasks, kpiMonth, kpiTarget.deliverableScore, window.taskDoneMonth, window.taskCreatedMonth) * 100);
+    // "x of y tasks this month" — from the payroll's own breakdown helper when it is loaded (js/pay-policy.js is lazy);
+    // never re-derived here, so the counts can't drift from the score.
+    const _kb = window.kpiMonthBreakdown ? window.kpiMonthBreakdown(myTasks, kpiMonth) : null;
+    const kpiCountTxt = _kb ? `${_kb.doneInM}/${_kb.inScopeCount} tasks this month` : 'this month, as on your payslip';
     const targetScore = kpiTarget.targetScore || 80;
     const kpiColor = taskScore >= targetScore ? 'var(--success)' : taskScore >= 60 ? 'var(--warning)' : 'var(--danger)';
 
@@ -1724,14 +1738,14 @@ async function renderEmployeeDashboard() {
           <div class="kpi-sub">${doneTasks.length} done · ${overdue.length} overdue</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-card-top"><div class="kpi-label">Task KPI</div>${window.iconTile('target',kpiColor,null,28)}</div>
+          <div class="kpi-card-top"><div class="kpi-label">KPI this month</div>${window.iconTile('target',kpiColor,null,28)}</div>
           <div class="kpi-value" style="color:${kpiColor}">${taskScore}%</div>
           <div class="kpi-sub">${taskOutcomeMet?`${emojiIcon('✅',16)} Target met`:`${emojiIcon('❌',16)} Below target`} (${targetScore}%)</div>
         </div>
         <div class="kpi-card green">
-          <div class="kpi-card-top"><div class="kpi-label">Net Pay</div>${window.iconTile('wallet','var(--success)',null,28)}</div>
+          <div class="kpi-card-top"><div class="kpi-label">Base pay</div>${window.iconTile('wallet','var(--success)',null,28)}</div>
           <div class="kpi-value" style="font-size:15px">₱${formatNum(net)}</div>
-          <div class="kpi-sub">Base ₱${formatNum(u.salary)}</div>
+          <div class="kpi-sub">Salary + allowance − other deductions. Your payslip shows take-home after tax and contributions.</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-card-top"><div class="kpi-label">Department</div>${window.iconTile('building-2','var(--primary)',null,28)}</div>
@@ -1746,9 +1760,9 @@ async function renderEmployeeDashboard() {
         </div>
         <div class="card-body" style="display:flex;gap:16px;flex-wrap:wrap;padding:12px 16px">
           <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(10,132,255,0.08);border-radius:10px">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">Task KPI</div>
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">KPI</div>
             <div style="font-size:22px;font-weight:800;color:${kpiColor}">${taskScore}%</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${doneTasks.length}/${myTasks.length} tasks done</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${kpiCountTxt}</div>
           </div>
           <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(255,100,0,0.08);border-radius:10px">
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">CA Balance</div>
@@ -1789,7 +1803,7 @@ async function renderEmployeeDashboard() {
             <div class="card-body">
               <div style="margin-bottom:10px">
                 <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px">
-                  <span>Task Completion</span><strong style="color:${kpiColor}">${doneTasks.length}/${myTasks.length} (${taskScore}%)</strong>
+                  <span>KPI (${kpiCountTxt})</span><strong style="color:${kpiColor}">${taskScore}%</strong>
                 </div>
                 <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${taskScore}%;background:${kpiColor}"></div></div>
               </div>
@@ -2375,8 +2389,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
 
   const DONE_TASK_STATUSES_PR = ['done','approved','archived'];
   const myTasks  = myTasksSnap.docs.map(d=>d.data());
-  const doneTasks= myTasks.filter(t=>DONE_TASK_STATUSES_PR.includes(t.status));
-  const taskPct  = myTasks.length ? Math.round(doneTasks.length/myTasks.length*100) : 0;
+  // 2026-11-20 review: this month's in-scope tasks, from the payroll's own breakdown (window.kpiMonthBreakdown,
+  // pay-policy.js — loaded with this page), not every task ever assigned; the text below always said "this month".
+  const _kbPF    = window.kpiMonthBreakdown ? window.kpiMonthBreakdown(myTasks, _bz.slice(0, 7)) : null;
+  const doneTasks= _kbPF ? { length: _kbPF.doneInM } : myTasks.filter(t=>DONE_TASK_STATUSES_PR.includes(t.status));
+  const taskBase = _kbPF ? _kbPF.inScopeCount : myTasks.length;
+  const taskPct  = taskBase ? Math.round(doneTasks.length/taskBase*100) : (_kbPF ? 100 : 0);
   // kpiTargetSnap (fetched in the Promise.all above) IS this same
   // kpi_targets/{uid} doc — re-reading it here cost a second, fully sequential
   // round trip after the parallel batch had already resolved.
@@ -2674,7 +2692,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
           <p style="margin:0 0 10px"><strong>Base + KPI incentive.</strong> Your role on the Office Team pays a protected base plus a KPI-dependent incentive — not a fixed 9-to-5 schedule, and not tied to attendance.</p>
           <p style="margin:0 0 10px">${factorLine}</p>
-          <p style="margin:0 0 10px">Your KPI score comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${myTasks.length} this month) — plus any deliverable score your manager sets.</p>
+          <p style="margin:0 0 10px">Your KPI score comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${taskBase} this month) — plus any deliverable score your manager sets.</p>
           <p style="margin:0">If you have questions about a specific month's pay, the Payroll Breakdown below shows the same figures and the same working Finance sees for you.</p>
           ${legalRow}
         </div>
@@ -2703,7 +2721,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
           <p style="margin:0 0 10px"><strong>No work, no pay.</strong> Your role on the Office Team is task-based, not a fixed 9-to-5 schedule — pay follows what you deliver, not hours spent at a desk.</p>
           <p style="margin:0 0 10px">${factorLine}</p>
-          <p style="margin:0 0 10px">Task KPI comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${myTasks.length} this month), plus any deliverable score your manager sets.${attKnown ? ' Attendance comes from the Attendance screen — your on-time morning check-ins, counted as on time when you time in and read your notifications before 9:00 AM.' : ' Office attendance has been retired and no longer affects pay.'}</p>
+          <p style="margin:0 0 10px">Task KPI comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${taskBase} this month), plus any deliverable score your manager sets.${attKnown ? ' Attendance comes from the Attendance screen — your on-time morning check-ins, counted as on time when you time in and read your notifications before 9:00 AM.' : ' Office attendance has been retired and no longer affects pay.'}</p>
           <p style="margin:0 0 10px">Finishing your assigned tasks raises your task KPI.${attKnown ? ' Timing in and reading your notifications before 9:00 AM raises your attendance score.' : ''}</p>
           <p style="margin:0">If you have questions about a specific month's pay, the Payroll Breakdown below shows the same figures and the same working Finance sees for you.</p>
           ${legalRow}
@@ -2743,7 +2761,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       <div class="kpi-card">
         <div class="kpi-label">Task KPI</div>
         <div class="kpi-value" style="color:${kpiColor}">${taskPct}%</div>
-        <div class="kpi-sub">${doneTasks.length}/${myTasks.length} done</div>
+        <div class="kpi-sub">${doneTasks.length}/${taskBase} done this month</div>
       </div>`}
       ${dispAtt!=null ? `
       <div class="kpi-card accent">
@@ -2777,7 +2795,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div style="margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px">
             <span style="font-weight:600">Tasks Completed</span>
-            <strong style="color:${kpiColor}">${doneTasks.length} of ${myTasks.length}</strong>
+            <strong style="color:${kpiColor}">${doneTasks.length} of ${taskBase}</strong>
           </div>
           <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${taskPct}%;background:${kpiColor}"></div></div>
           <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-muted)">
@@ -3267,9 +3285,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
 // time. Callers that omit them keep the original behavior — same two
 // Firestore reads, same math, unchanged.
 async function getKpiScore(uid, preTasks, preKpiSnap) {
+  // 2026-11-20 review: this is now the payroll's OWN score — window.computeKpiForMonth (money-core.js) for the current
+  // Manila month: this month's tasks, 70% completion + 30% deliverable score, no work in scope = 100%. It used to be
+  // completed ÷ every task ever assigned with a 0.5 default, so My Finance, Personal Analytics and the worker panel
+  // showed a different KPI from the payslip. Every caller is a display-only estimate; pay itself is computed in
+  // departments.js with the same function.
   try {
-    // Task completion score (70% weight)
-    const DONE_STATUSES = ['done','approved','archived'];
     let tasks;
     if (Array.isArray(preTasks)) {
       tasks = preTasks;
@@ -3278,19 +3299,12 @@ async function getKpiScore(uid, preTasks, preKpiSnap) {
         .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get());
       tasks = taskSnap.docs.map(d=>d.data());
     }
-    const taskScore = tasks.length ? Math.min(1, tasks.filter(t=>DONE_STATUSES.includes(t.status)).length / tasks.length) : 0.5;
-
-    // Deliverable quality score (30% weight) — read from kpi_targets collection
-    let delivScore = 0.5;
+    let deliv;   // undefined -> the payroll's own default
     try {
       const kpiDoc = preKpiSnap !== undefined ? preKpiSnap : await db.collection('kpi_targets').doc(uid).get();
-      if (kpiDoc && kpiDoc.exists) {
-        const d = kpiDoc.data();
-        delivScore = typeof d.deliverableScore === 'number' ? Math.min(1, d.deliverableScore / 100) : 0.5;
-      }
+      if (kpiDoc && kpiDoc.exists && typeof kpiDoc.data().deliverableScore === 'number') deliv = kpiDoc.data().deliverableScore;
     } catch {}
-
-    return taskScore * 0.7 + delivScore * 0.3;
+    return window.computeKpiForMonth(tasks, bizDate().slice(0, 7), deliv, window.taskDoneMonth, window.taskCreatedMonth);
   } catch { return 0.5; }
 }
 
@@ -5815,7 +5829,7 @@ async function renderAnalytics() {
     const wonQuotesP = sum(chainAllQuotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
     const revP = ledInP || wonQuotesP;
     const netP = revP - ledOutP;
-    const payrollTotal = sum(users, u=>(+u.salary||0)+(+u.allowance||0)-(+u.deductions||0));
+    const payrollTotal = sum(users.filter(window.onMonthlyPayroll), u=>(+u.salary||0)+(+u.allowance||0)-(+u.deductions||0));   // not removed / production (2026-11-20)
     // "this period vs previous same-type period" (WS32 wonMTD/wonPrev ymOf pattern) —
     // scoped to calendar month regardless of the Overview picker, mirroring the
     // existing wonMTD/wonPrev revenue-delta convention elsewhere on this page.

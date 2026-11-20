@@ -382,7 +382,7 @@
     if (n0(tl.leadDays) > 0) timeline.push({ label: 'Lead time', value: tl.leadDays + ' days' });
     if (trim(tl.completionDate)) timeline.push({ label: 'Completion', value: trim(tl.completionDate) });
     const plan = isObj(q.editableState) && isObj(q.editableState.pricing) ? q.editableState.pricing.warrantyPlan : '';
-    const warranty = plan === 'service6' ? '6-month service warranty' : plan === 'kitchenshield12' ? '6-month service warranty + 12-month PMS with KitchenShield' : '';
+    const warranty = plan === 'service6' ? '12-month service warranty' : plan === 'kitchenshield12' ? '12-month service warranty · KitchenShield PMS at a discount' : '';   // owner 2026-11-20: 12 months; Full kitchen = the same warranty + PMS at a discount
     const terms = { payment: payRows, timeline, validUntil: trim(q.validUntil), warranty, remarks: trim(q.remarks) };
 
     // header

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '15.0.30';
+window.APP_VERSION = '15.0.32';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1233,6 +1233,14 @@ window.bidWinStats = function(bids){       // Government — ALWAYS labeled "(Go
 window.payrollRatio = function(totalPayroll, revenue){
   return revenue > 0 ? Math.round(totalPayroll / revenue * 100) : null;
 };
+// ONE staff filter for dashboard head-counts and payroll figures (2026-11-20 system review). Team counts and
+// "Monthly Payroll" used to sum EVERY users doc, so an offboarded person stayed in both until someone deleted the
+// doc. isCurrentStaff = not removed (People → Remove). onMonthlyPayroll additionally drops production-class staff,
+// who are paid by the weekly worker payroll — the same two person-level skips as the payroll engine
+// (window.monthlyRunSkipReason, departments.js). Period exclusions and linked worker profiles need the run's own
+// data, so dashboard payroll stays an estimate of the monthly run.
+window.isCurrentStaff = function(u){ return !!u && u.removed !== true; };
+window.onMonthlyPayroll = function(u){ return window.isCurrentStaff(u) && u.payClass !== 'production'; };
 // ONE aging engine. Anchor = earliest invoices[].due, else project createdAt
 // (today's Finance-Dashboard proxy IS the fallback). projects = Projects.normalize shapes.
 window.arAging = function(projects, asOf){
@@ -2914,8 +2922,8 @@ window.QB_STANDARD_PAGE = Object.freeze({
   headings: Object.freeze({ materials: 'Materials & finishes', construction: 'Standard construction', warranty: 'Warranty & after-sales', process: 'How we work', references: 'References', registrations: 'Registrations' }),
   materials: 'Our standard material is SS304 food-grade stainless steel. SS316 laboratory grade is available on request. Standard finish: hairline. Brushed, mirror or satin on request.',
   warranty: Object.freeze({
-    service6: '6-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.',
-    kitchenshield12: 'This project includes 12 months of preventive maintenance service (PMS) with KitchenShield™.'
+    service6: '12-month service warranty on our equipment and work. Warranty does not cover misuse, physical damage, or failure to maintain the equipment.',
+    kitchenshield12: 'KitchenShield™ preventive maintenance service (PMS) for 12 months is offered with this project at a discounted rate.'
   }),
   process: Object.freeze(['Site measurement and design', 'Fabrication in our Quezon City shop', 'Delivery', 'Installation and commissioning', 'Turnover and after-sales service']),
   references: 'Institutional clients include DMMMSU and ISPSC.',

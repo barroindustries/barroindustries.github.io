@@ -703,11 +703,11 @@ describe('5b · photos, escaping, sections, legacy quotes, options', () => {
     assert.ok(html.includes('<div class="qa-grand"><span>Grand total</span><strong>₱3,641.82</strong>'));
     assert.deepEqual(plain(vm.terms.payment), [{ label: 'Down payment (50%)', value: '₱1,820.91' }, { label: 'Balance (lump)', value: '₱1,820.91' }]);
     assert.deepEqual(plain(vm.terms.timeline), [{ label: 'Start', value: '2026-12-10' }, { label: 'Lead time', value: '25 days' }, { label: 'Completion', value: '2027-01-04' }]);
-    assert.equal(vm.terms.warranty, '6-month service warranty'); assert.equal(vm.terms.validUntil, '2026-12-05'); assert.equal(vm.terms.remarks, 'Remark line');
+    assert.equal(vm.terms.warranty, '12-month service warranty'); assert.equal(vm.terms.validUntil, '2026-12-05'); assert.equal(vm.terms.remarks, 'Remark line');
     const bare = view(quote({ discountAmount: 0, vatAmount: 0, deliveryInstall: { amount: 0, free: false }, payment: { milestones: [{ pct: 40, label: 'Down payment', date: '2026-12-01', amount: 100 }, { pct: 60, label: 'Balance', date: '', amount: 150 }] }, editableState: { pricing: { warrantyPlan: 'kitchenshield12' } }, timeline: {}, remarks: '', validUntil: '', grandTotal: 0, total: 77 }));
     assert.deepEqual(plain(bare.vm.totals.map((t) => t.label)), ['Subtotal'], 'no discount, VAT or delivery rows when there is nothing in them');
     assert.deepEqual(plain(bare.vm.terms.payment), [{ label: '40% — Down payment (2026-12-01)', value: '₱100.00' }, { label: '60% — Balance', value: '₱150.00' }]);
-    assert.equal(bare.vm.terms.warranty, '6-month service warranty + 12-month PMS with KitchenShield'); assert.equal(bare.vm.grand, '₱77.00', 'grandTotal, else total');
+    assert.equal(bare.vm.terms.warranty, '12-month service warranty · KitchenShield PMS at a discount'); assert.equal(bare.vm.grand, '₱77.00', 'grandTotal, else total');
     assert.equal(view(quote({ editableState: { pricing: { warrantyPlan: '' } } })).vm.terms.warranty, '', 'a quote issued under the old terms prints no warranty row');
     assert.equal(view(quote({ deliveryInstall: { amount: 0, free: true } })).vm.totals.find((t) => /Delivery/.test(t.label)).value, 'Free');
     assert.equal(view(quote({ vatIncluded: false })).vm.totals.find((t) => /^VAT/.test(t.label)).label, 'VAT');
