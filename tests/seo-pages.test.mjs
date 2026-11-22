@@ -45,7 +45,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
+import { GTM, ADS_SCRIPT, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -303,7 +303,7 @@ describe('<head>: title, description, canonical, Open Graph, Twitter, CSP, fonts
       const csp = p.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
       const dir = Object.fromEntries(csp.split(';').map((x) => x.trim()).filter(Boolean).map((x) => [x.split(/\s+/)[0], x.split(/\s+/).slice(1)]));
       assert.deepEqual(dir['default-src'], ["'self'"]);
-      assert.deepEqual(dir['script-src'], ["'self'", GTM]);
+      assert.deepEqual(dir['script-src'], ["'self'", ...ADS_SCRIPT]);
       assert.deepEqual(dir['style-src'], ["'self'", `'${sha256(p.html.match(STYLE_RE)[1])}'`, 'https://fonts.googleapis.com'], `${p.path}: style-src must carry the hash of the inline block`);
       assert.deepEqual(dir['font-src'], ['https://fonts.gstatic.com']);
       assert.deepEqual(dir['img-src'], ["'self'", 'data:', ...ADS_IMG]);
@@ -1340,7 +1340,7 @@ describe('"Message us": the Messenger chat is linked from every public footer, t
   it('adds nothing to the CSP or the page weight: no Facebook / Meta / Messenger host in any CSP, no script, no image and no stylesheet from them, the icon is inline', () => {
     for (const [p, html] of ALL) {
       const csp = (html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
-      assert.ok(csp && !/facebook|messenger|meta\.com|m\.me|fbcdn|fbsbx/i.test(csp), `${p}: the CSP names Messenger`);
+      assert.ok(csp && !/facebook|messenger|meta\.com|m\.me|fbcdn|fbsbx/i.test(csp.replace(/ https:\/\/www\.facebook\.com| https:\/\/connect\.facebook\.net/g, '')), `${p}: the CSP names Messenger (only the Meta pixel's two hosts are allowed, owner 2026-11-22)`);
       const S = scan(html);
       for (const e of S.elements.filter((x) => ['script', 'img', 'link', 'iframe', 'source'].includes(x.tag))) assert.ok(!/facebook|messenger|meta\.com|m\.me|fbcdn|fbsbx/i.test((e.attrs.src || '') + (e.attrs.href || '') + (e.attrs.srcset || '')), `${p}: a <${e.tag}> loads from Facebook / Messenger`);
     }

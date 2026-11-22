@@ -237,7 +237,7 @@ describe('Products and Catalogue are one list (owner ruling 2026-11-19)', () => 
     assert.ok(h.includes('<link rel="canonical" href="https://barroindustries.com/catalogue/">'));
     assert.ok(h.includes('<meta name="robots" content="noindex, follow">'));
     assert.ok(/<a class="site-btn site-btn-primary" href="\/catalogue\/">Open the catalogue<\/a>/.test(h), 'a visible link');
-    assert.match(h, /<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https:\/\/www\.googletagmanager\.com; style-src 'self' 'sha256-[A-Za-z0-9+\/=]+' https:\/\/fonts\.googleapis\.com;/);
+    assert.match(h, /<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https:\/\/www\.googletagmanager\.com https:\/\/connect\.facebook\.net; style-src 'self' 'sha256-[A-Za-z0-9+\/=]+' https:\/\/fonts\.googleapis\.com;/);
     assert.ok(!/application\/ld\+json/.test(h) && !/og:title/.test(h), 'a retired page carries no structured data');
     const map = read('sitemap.xml');
     assert.ok(!map.includes('<loc>https://barroindustries.com/products/</loc>'), 'the sitemap still lists the retired hub');

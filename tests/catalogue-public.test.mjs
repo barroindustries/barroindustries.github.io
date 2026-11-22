@@ -32,7 +32,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
+import { GTM, ADS_SCRIPT, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1159,7 +1159,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(!/pricing-core/i.test(cat), 'the page names the pricing engine, even in a comment');
     const csp = catHead.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
     const dir = Object.fromEntries(csp.split(';').map(x => x.trim()).filter(Boolean).map(x => [x.split(/\s+/)[0], x.split(/\s+/).slice(1)]));
-    assert.deepEqual(dir['script-src'], ["'self'", 'https://www.gstatic.com', GTM]);   // + the Google Ads conversion tag (js/ads-tag.js, 2026-11-22)
+    assert.deepEqual(dir['script-src'], ["'self'", 'https://www.gstatic.com', ...ADS_SCRIPT]);   // + the Google Ads conversion tag (js/ads-tag.js, 2026-11-22)
     assert.deepEqual(dir['connect-src'], ["'self'", 'https://asia-east1-barro-industries.cloudfunctions.net', ...ADS_CONNECT]);
     assert.equal(dir['style-src'].length, 3);
     assert.deepEqual([dir['style-src'][0], dir['style-src'][2]], ["'self'", 'https://fonts.googleapis.com']);   // 'self', the hash of the one inline block, the fonts host: still no unsafe-inline

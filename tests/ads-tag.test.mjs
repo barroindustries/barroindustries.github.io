@@ -61,7 +61,7 @@ describe('js/ads-tag.js', () => {
     assert.deepEqual(log.scripts, [], 'nothing is loaded before the window load event');
     log.listeners['win:load']();
     log.idle[0]();
-    assert.deepEqual(log.scripts, ['https://www.googletagmanager.com/gtag/js?id=AW-17909483388']);
+    assert.deepEqual(log.scripts, ['https://www.googletagmanager.com/gtag/js?id=AW-17909483388', 'https://connect.facebook.net/en_US/fbevents.js']);   // + the Meta pixel (owner, 2026-11-22)
     assert.deepEqual(Array.from(win.dataLayer, (a) => a[0]), ['event', 'js', 'config']);
     assert.equal(win.dataLayer[2][1], 'AW-17909483388');
     assert.ok(!('bkConversion' in {}) && win.bkConversion('nope') === undefined && win.dataLayer.length === 3, 'an unknown kind sends nothing');
@@ -153,5 +153,18 @@ describe('scripts/add-ads-tag.js', () => {
     assert.deepEqual(d['connect-src'], ["'self'", ...ADS_CONNECT]);
     assert.deepEqual(d['frame-src'], ADS_FRAME);
     assert.equal(GEN.fix(once, false), once);
+  });
+});
+
+describe('Meta pixel in js/ads-tag.js (owner, 2026-11-22)', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'js/ads-tag.js'), 'utf8');
+  it('initialises the Barro Kitchens website dataset and loads fbevents.js from connect.facebook.net', () => {
+    assert.ok(src.includes("META_PIXEL = '1178407724523928'"));
+    assert.ok(src.includes("'https://connect.facebook.net/en_US/fbevents.js'"));
+    assert.ok(src.includes("window.fbq('track', 'PageView')"));
+  });
+  it('maps a sent quote to Lead and phone/Messenger taps to Contact', () => {
+    assert.ok(src.includes("{ quote: 'Lead', phone: 'Contact', messenger: 'Contact' }"));
+    assert.ok(src.includes("window.fbq('track', META_EVENTS[kind])"));
   });
 });

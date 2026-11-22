@@ -39,7 +39,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
+import { GTM, ADS_SCRIPT, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -519,7 +519,7 @@ describe('guides: <head> — title, description, canonical, robots, Open Graph, 
       assert.equal(p.html.match(/<meta http-equiv="Content-Security-Policy"/g).length, 1);
       const csp = p.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
       const block = p.html.match(STYLE_RE)[1];
-      assert.equal(csp, `default-src 'self'; script-src 'self' ${GTM}; style-src 'self' '${sha256(block)}' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${ADS_IMG.join(' ')}; connect-src 'self' ${ADS_CONNECT.join(' ')}; frame-src ${ADS_FRAME.join(' ')}; object-src 'none'; base-uri 'self'; form-action 'self'`);
+      assert.equal(csp, `default-src 'self'; script-src 'self' ${ADS_SCRIPT.join(' ')}; style-src 'self' '${sha256(block)}' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${ADS_IMG.join(' ')}; connect-src 'self' ${ADS_CONNECT.join(' ')}; frame-src ${ADS_FRAME.join(' ')}; object-src 'none'; base-uri 'self'; form-action 'self'`);
       assert.ok(!/unsafe-inline|unsafe-eval/.test(csp));
       const blocking = p.S.elements.filter((e) => e.tag === 'link' && e.attrs.rel === 'stylesheet' && !e.chain.some((x) => x.tag === 'noscript'));
       assert.deepEqual(blocking.map((e) => e.attrs.href), [], `${p.path}: a render-blocking stylesheet link`);

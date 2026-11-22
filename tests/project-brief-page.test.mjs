@@ -25,7 +25,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
+import { GTM, ADS_SCRIPT, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -137,13 +137,13 @@ describe('the head: a noindex intake page on the site\'s own card', () => {
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('the CSP stays strict: no inline script, style or handler — in the page or in anything its script builds', () => {
   it('allows the Firebase compat scripts from gstatic, the one functions host, fonts, the visitor\'s own photo thumbnails — and nothing else', () => {
-    assert.equal(csp, `default-src 'self'; script-src 'self' https://www.gstatic.com ${GTM}; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: ${ADS_IMG.join(' ')}; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net ${ADS_CONNECT.join(' ')}; frame-src ${ADS_FRAME.join(' ')}; object-src 'none'; base-uri 'self'; form-action 'self'`);
-    assert.deepEqual(directive('script-src'), ["'self'", 'https://www.gstatic.com', GTM]);   // + the Google Ads conversion tag (js/ads-tag.js, 2026-11-22)
+    assert.equal(csp, `default-src 'self'; script-src 'self' https://www.gstatic.com ${ADS_SCRIPT.join(' ')}; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: ${ADS_IMG.join(' ')}; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net ${ADS_CONNECT.join(' ')}; frame-src ${ADS_FRAME.join(' ')}; object-src 'none'; base-uri 'self'; form-action 'self'`);
+    assert.deepEqual(directive('script-src'), ["'self'", 'https://www.gstatic.com', ...ADS_SCRIPT]);   // + the Google Ads conversion tag (js/ads-tag.js, 2026-11-22)
     assert.deepEqual(directive('connect-src'), ["'self'", 'https://asia-east1-barro-industries.cloudfunctions.net', ...ADS_CONNECT]);
     assert.deepEqual(directive('style-src'), ["'self'", 'https://fonts.googleapis.com']);
     assert.deepEqual(directive('img-src'), ["'self'", 'data:', 'blob:', ...ADS_IMG]);
     assert.deepEqual(['frame-src', 'object-src'].map((d) => directive(d)), [ADS_FRAME, ["'none'"]]);
-    assert.ok(!/unsafe-inline|unsafe-eval|facebook|messenger|meta\.com|m\.me|fbcdn/i.test(csp), 'a loosened or Meta-related CSP');
+    assert.ok(!/unsafe-inline|unsafe-eval|facebook|messenger|meta\.com|m\.me|fbcdn/i.test(csp.replace(/ https:\/\/www\.facebook\.com| https:\/\/connect\.facebook\.net/g, '')), 'a loosened or Meta-related CSP (beyond the two Meta pixel hosts the owner approved 2026-11-22)');
   });
 
   it('is the catalogue\'s policy plus blob: images and nothing more (the same approach as the other public pages)', () => {
@@ -346,7 +346,7 @@ describe('"Message us": the Messenger chat is linked from the footer and from th
   });
 
   it('adds no Meta logo, image, script, widget or CSP host: the icon is an inline <svg> with one <path>', () => {
-    assert.ok(!/facebook|fbcdn|connect\.facebook|messenger\.com|meta\.com/i.test(csp));
+    assert.ok(!/facebook|fbcdn|connect\.facebook|messenger\.com|meta\.com/i.test(csp.replace(/ https:\/\/www\.facebook\.com| https:\/\/connect\.facebook\.net/g, '')));   // only the Meta pixel's two hosts (owner, 2026-11-22)
     for (const m of body.matchAll(/<(script|img|iframe|link|source)\b[^>]*>/g)) assert.ok(!/facebook\.net|fbcdn|m\.me|messenger/i.test(m[0]), m[0]);
     assert.ok(!/<img\b[^>]*(facebook|messenger|meta)/i.test(html));
     assert.ok(!/facebook|messenger|fbcdn/i.test(css.replace(/\/\*[\s\S]*?\*\//g, '')));

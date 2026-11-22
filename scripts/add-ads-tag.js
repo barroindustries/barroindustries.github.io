@@ -26,8 +26,10 @@ const TAG_LINE = '<script src="/js/ads-tag.js" defer></script>';
 const CSP_RE = /(<meta http-equiv="Content-Security-Policy" content=")([^"]*)("\s*\/?>)/;
 const DIRS = ['products', 'services', 'work', 'areas-we-serve', 'faq', 'guides', 'catalogue', 'sales/clientinformationrequest'];
 const GTM = 'https://www.googletagmanager.com';
-const CONNECT = ['https://www.google.com', 'https://googleads.g.doubleclick.net', 'https://www.googleadservices.com', 'https://*.google.com'];
-const IMG = ['https://www.google.com', 'https://googleads.g.doubleclick.net', 'https://www.googleadservices.com'];
+const META_JS = 'https://connect.facebook.net';   // Meta pixel (js/ads-tag.js, owner-approved 2026-11-22)
+const META = 'https://www.facebook.com';
+const CONNECT = ['https://www.google.com', 'https://googleads.g.doubleclick.net', 'https://www.googleadservices.com', 'https://*.google.com', META, META_JS];
+const IMG = ['https://www.google.com', 'https://googleads.g.doubleclick.net', 'https://www.googleadservices.com', META];
 const FRAME = ['https://td.doubleclick.net', GTM];
 
 function walk(dir, out) {
@@ -51,7 +53,7 @@ function widenCsp(csp) {
   const get = (n) => dirs.find((d) => d[0] === n);
   const addTo = (d, toks) => { for (const t of toks) if (!d.includes(t)) d.push(t); };
   const script = get('script-src');
-  if (script) addTo(script, [GTM]); else dirs.push(['script-src', "'self'", GTM]);
+  if (script) addTo(script, [GTM, META_JS]); else dirs.push(['script-src', "'self'", GTM, META_JS]);
   const conn = get('connect-src');
   if (conn) addTo(conn, CONNECT);
   else { const at = dirs.findIndex((d) => d[0] === 'frame-src'); dirs.splice(at < 0 ? dirs.length : at, 0, ['connect-src', "'self'", ...CONNECT]); }
