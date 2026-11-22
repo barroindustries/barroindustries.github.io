@@ -1579,6 +1579,7 @@
     return notes;
   }
   function onSubmitted(res, snap) {
+    try { window.bkConversion && window.bkConversion('quote'); } catch (_) { /* tracking never breaks the receipt */ }   // Google Ads conversion (js/ads-tag.js), once, on a successful send only
     var rcpt = { refNo: res.refNo, submittedOnManila: res.submittedOnManila, estimate: res.estimate || null, items: snap.items, intake: snap.intake, contact: snap.contact, entity: snap.entity, notes: res.estimate ? receiptNotes(snap) : null };
     receipt = rcpt;
     clearTimeout(estTimer); estSeq++;                        // a pending or in-flight estimate must not outlive the quote it belonged to

@@ -10,7 +10,7 @@
      data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu, project photo lightbox, map highlight) and /js/late-fonts.js.
      Not in the service worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD and visible breadcrumb
      in step: tests/seo-pages.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-ksa7muZ81iU12SZw3prT/zGR1kJm6qjuH8vntevJLbw=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'sha256-ksa7muZ81iU12SZw3prT/zGR1kJm6qjuH8vntevJLbw=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>ISPSC Kitchen and Laboratory Equipment, 2026 | Barro Kitchens</title>
 <meta name="description" content="Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed by Barro Kitchens at ISPSC.">
 <link rel="canonical" href="https://barroindustries.com/work/ispsc-2026/">
@@ -1153,6 +1153,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
 </div><!-- /#site -->
 <script defer src="/js/site.js"></script>
+<script src="/js/ads-tag.js" defer></script>
 <script defer src="/js/late-fonts.js"></script>
 </body>
 </html>

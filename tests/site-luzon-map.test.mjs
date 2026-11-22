@@ -455,7 +455,7 @@ describe('The Google listing: Contact links, JSON-LD, and no iframe', () => {
   it('embeds nothing from Google: no iframe in the site or head, no maps embed anywhere, and the CSP still says frame-src \'self\'', () => {
     assert.ok(!/<iframe\b/i.test(homeSite + homeHead));
     assert.ok(!/maps\/embed|output=embed|<embed\b|<object\b/i.test(home));
-    assert.match(home, /<meta http-equiv="Content-Security-Policy" content="[^"]*frame-src 'self';/);
+    assert.match(home, /<meta http-equiv="Content-Security-Policy" content="[^"]*frame-src 'self'[ ;]/);
   });
 });
 

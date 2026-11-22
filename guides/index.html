@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>The Kitchen Guide for Commercial Kitchens | Barro Kitchens</title>
 <meta name="description" content="Practical guides from Barro Kitchens (Barro Industries): kitchen layout, equipment, exhaust hoods, LPG gas lines, stainless steel care and SS304 vs SS316.">
 <link rel="canonical" href="https://barroindustries.com/guides/">
@@ -693,6 +693,36 @@
             "position": 102,
             "name": "Restaurant Kitchen Fit-Outs in Makati and BGC: Building Rules, Exhaust and Tight Spaces",
             "url": "https://barroindustries.com/guides/commercial-kitchen-makati-bgc/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 103,
+            "name": "Commercial Range Hood Quotation: What Shapes the Total and What to Send for an Accurate One",
+            "url": "https://barroindustries.com/guides/commercial-range-hood-quotation-guide/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 104,
+            "name": "Commercial Kitchen Manila: Equipment and Fabrication for Binondo, Sampaloc, Malate, Tondo and Ermita",
+            "url": "https://barroindustries.com/guides/commercial-kitchen-manila-city/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 105,
+            "name": "Commercial Kitchen Pasig: Restaurants, Commissaries and BPO Canteens in Ortigas and Kapitolyo",
+            "url": "https://barroindustries.com/guides/commercial-kitchen-pasig-ortigas/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 106,
+            "name": "Commercial Kitchen Alabang: Planning in Muntinlupa, Parañaque and Las Piñas",
+            "url": "https://barroindustries.com/guides/commercial-kitchen-alabang-south-metro/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 107,
+            "name": "Commercial Kitchen Antipolo: Planning in Rizal, from Cainta and Taytay to the Hills",
+            "url": "https://barroindustries.com/guides/commercial-kitchen-antipolo-rizal/"
           }
         ]
       }
@@ -1663,7 +1693,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <p class="eyebrow">Barro Kitchens</p>
       <h1>The Kitchen Guide</h1>
       <p class="site-lead">Practical guides from the team that designs, fabricates and installs stainless-steel kitchens: planning a project, choosing equipment, ventilation and gas, what each kind of food business needs, and the places we work.</p>
-      <p class="kg-count">102 guides · five sections · updated 19 November 2026</p>
+      <p class="kg-count">107 guides · five sections · updated 22 November 2026</p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?quote=1">Get a quote</a><a class="site-btn site-btn-outline" href="/services/">Our services</a></p>
     </div>
   </div>
@@ -1672,9 +1702,9 @@ body{margin:0;background:#fff;color:#0E1116}
 <nav class="kg-nav" aria-label="Sections of the guide">
   <div class="site-wrap">
     <ul>
-      <li><a href="#areas">Areas we serve <span>11</span></a></li>
+      <li><a href="#areas">Areas we serve <span>15</span></a></li>
       <li><a href="#equipment">Equipment guides <span>37</span></a></li>
-      <li><a href="#ventilation-gas">Ventilation and gas <span>13</span></a></li>
+      <li><a href="#ventilation-gas">Ventilation and gas <span>14</span></a></li>
       <li><a href="#business">By type of business <span>26</span></a></li>
       <li><a href="#planning">Planning and operations <span>15</span></a></li>
     </ul>
@@ -1742,7 +1772,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="areas" class="site-sec kg-sec" aria-labelledby="areas-h">
   <div class="site-wrap">
     <header class="kg-sec-head">
-      <p class="eyebrow">11 guides</p>
+      <p class="eyebrow">15 guides</p>
       <h2 id="areas-h">Areas we serve</h2>
       <p>Commercial kitchens and stainless steel near you, from our Quezon City shop across Metro Manila and Luzon.</p>
     </header>
@@ -1836,6 +1866,42 @@ body{margin:0;background:#fff;color:#0E1116}
           <span class="kg-kicker">Areas we serve</span>
           <h3><a href="/guides/kitchen-equipment-batangas/">Commercial Kitchen Equipment for Batangas Restaurants and Resorts</a></h3>
           <p>Stock pots, noodles and grills, a soup and noodle layout, resort holding and salt-air steel: how to plan a restaurant or resort kitchen in Batangas.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card kg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/dmmmsu/02-thumb.webp" srcset="/site/img/projects/dmmmsu/02-thumb.webp 600w, /site/img/projects/dmmmsu/02.webp 1600w" sizes="88px" width="600" height="450" alt="DMMMSU — room installed with stainless-steel tables, racks and shelving" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <span class="kg-kicker">Areas we serve</span>
+          <h3><a href="/guides/commercial-kitchen-manila-city/">Commercial Kitchen Manila: Equipment and Fabrication for Binondo, Sampaloc, Malate, Tondo and Ermita</a></h3>
+          <p>Kitchens in Binondo, Sampaloc, Malate, Tondo and Ermita: older buildings, equipment sized to small units, exhaust on crowded streets and delivery from Quezon City.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card kg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/ispsc/03-thumb.webp" srcset="/site/img/projects/ispsc/03-thumb.webp 600w, /site/img/projects/ispsc/03.webp 1600w" sizes="88px" width="600" height="450" alt="ISPSC 2026 — rows of stainless-steel work tables, wide view" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <span class="kg-kicker">Areas we serve</span>
+          <h3><a href="/guides/commercial-kitchen-pasig-ortigas/">Commercial Kitchen Pasig: Restaurants, Commissaries and BPO Canteens in Ortigas and Kapitolyo</a></h3>
+          <p>Restaurant streets, Ortigas towers, BPO canteens and commissaries: what to settle for a commercial kitchen in Pasig, Ortigas or Kapitolyo.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card kg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/ispsc/01-thumb.webp" srcset="/site/img/projects/ispsc/01-thumb.webp 600w, /site/img/projects/ispsc/01.webp 1600w" sizes="88px" width="600" height="450" alt="ISPSC 2026 — wide view of the cooking stations with range ovens, sinks and overhead hoods" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <span class="kg-kicker">Areas we serve</span>
+          <h3><a href="/guides/commercial-kitchen-alabang-south-metro/">Commercial Kitchen Alabang: Planning in Muntinlupa, Parañaque and Las Piñas</a></h3>
+          <p>Units in malls, subdivision bakeries and caterers, salty bay air and school canteens: what to plan for a commercial kitchen in Alabang, Muntinlupa, Parañaque or Las Piñas.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card kg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/dmmmsu/05-thumb.webp" srcset="/site/img/projects/dmmmsu/05-thumb.webp 600w, /site/img/projects/dmmmsu/05.webp 1600w" sizes="88px" width="600" height="450" alt="DMMMSU — installed stainless-steel tables and racks, wide view" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <span class="kg-kicker">Areas we serve</span>
+          <h3><a href="/guides/commercial-kitchen-antipolo-rizal/">Commercial Kitchen Antipolo: Planning in Rizal, from Cainta and Taytay to the Hills</a></h3>
+          <p>Hillside restaurants, event venues, roadside bakeries and canteens: what to plan for a commercial kitchen in Antipolo, Cainta, Taytay and the rest of Rizal.</p>
           <span class="link-arrow" aria-hidden="true">Read the guide</span>
         </div>
       </article>
@@ -2200,7 +2266,7 @@ body{margin:0;background:#fff;color:#0E1116}
 <section id="ventilation-gas" class="site-sec kg-sec" aria-labelledby="ventilation-gas-h">
   <div class="site-wrap">
     <header class="kg-sec-head">
-      <p class="eyebrow">13 guides</p>
+      <p class="eyebrow">14 guides</p>
       <h2 id="ventilation-gas-h">Ventilation and gas</h2>
       <p>Hoods, exhaust, fresh air and LPG lines: what keeps a cooking line safe and the air clear.</p>
     </header>
@@ -2285,6 +2351,15 @@ body{margin:0;background:#fff;color:#0E1116}
           <span class="kg-kicker">Ventilation and gas</span>
           <h3><a href="/guides/kitchen-exhaust-cleaning-schedule/">Kitchen Exhaust Cleaning Schedule: How Often to Clean Filters, Hoods, Ducts and Blowers</a></h3>
           <p>A cleaning schedule for filters, hood, duct and blower by type of cooking, the signs it is overdue, and the log to keep.</p>
+          <span class="link-arrow" aria-hidden="true">Read the guide</span>
+        </div>
+      </article>
+      <article class="pg-card kg-card">
+        <div class="pg-card-media"><img src="/site/img/projects/ispsc/01-thumb.webp" srcset="/site/img/projects/ispsc/01-thumb.webp 600w, /site/img/projects/ispsc/01.webp 1600w" sizes="88px" width="600" height="450" alt="ISPSC 2026 — wide view of the cooking stations with range ovens, sinks and overhead hoods" loading="lazy" decoding="async"></div>
+        <div class="pg-card-body">
+          <span class="kg-kicker">Ventilation and gas</span>
+          <h3><a href="/guides/commercial-range-hood-quotation-guide/">Commercial Range Hood Quotation: What Shapes the Total and What to Send for an Accurate One</a></h3>
+          <p>What shapes a commercial range hood quotation: length, type, steel grade, filters, the duct run, the blower, fresh air and access, and what to send for an accurate one.</p>
           <span class="link-arrow" aria-hidden="true">Read the guide</span>
         </div>
       </article>
@@ -2766,6 +2841,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
 </div><!-- /#site -->
 <script defer src="/js/site.js"></script>
+<script src="/js/ads-tag.js" defer></script>
 <script defer src="/js/late-fonts.js"></script>
 </body>
 </html>

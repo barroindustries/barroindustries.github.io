@@ -32,6 +32,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1145,7 +1146,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.deepEqual(scripts, [
       '<script type="application/ld+json">',                                                              // the JSON-LD ItemList in the <head>: data, never executed
       '<script type="application/json" id="qr-catalogue">',                                               // the data island: JSON, never executed
-      '<script defer src="/js/site.js">', '<script defer src="/js/catalogue.js">',
+      '<script defer src="/js/site.js">', '<script src="/js/ads-tag.js" defer>', '<script defer src="/js/catalogue.js">',
       '<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js">',           // the two pinned compat scripts that carry the callables
       '<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js">',
       '<script defer src="/js/qr-def.js">',
@@ -1158,13 +1159,14 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(!/pricing-core/i.test(cat), 'the page names the pricing engine, even in a comment');
     const csp = catHead.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
     const dir = Object.fromEntries(csp.split(';').map(x => x.trim()).filter(Boolean).map(x => [x.split(/\s+/)[0], x.split(/\s+/).slice(1)]));
-    assert.deepEqual(dir['script-src'], ["'self'", 'https://www.gstatic.com']);
-    assert.deepEqual(dir['connect-src'], ["'self'", 'https://asia-east1-barro-industries.cloudfunctions.net']);
+    assert.deepEqual(dir['script-src'], ["'self'", 'https://www.gstatic.com', GTM]);   // + the Google Ads conversion tag (js/ads-tag.js, 2026-11-22)
+    assert.deepEqual(dir['connect-src'], ["'self'", 'https://asia-east1-barro-industries.cloudfunctions.net', ...ADS_CONNECT]);
     assert.equal(dir['style-src'].length, 3);
     assert.deepEqual([dir['style-src'][0], dir['style-src'][2]], ["'self'", 'https://fonts.googleapis.com']);   // 'self', the hash of the one inline block, the fonts host: still no unsafe-inline
     assert.match(dir['style-src'][1], /^'sha256-[A-Za-z0-9+\/]{43}='$/);
     assert.deepEqual(dir['default-src'], ["'self'"]);
     assert.ok(!/unsafe-inline|unsafe-eval|\*/.test(csp.replace(/https:\/\/[^ ;]+/g, '')), 'the CSP is wider than the spec allows');
+    assert.deepEqual(dir['frame-src'], ADS_FRAME);
     assert.ok(exists('css/catalogue.css') && exists('js/catalogue.js') && exists('css/quote-request.css') && exists('js/quote-request.js') && exists('js/qr-def.js') && exists('js/product-families.js') && exists('js/qr-families.js') && exists('js/qr-preview.js'));
   });
 

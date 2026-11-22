@@ -11,7 +11,7 @@
      shell for /catalogue/). <html data-view="site"> is static: it is what lets css/site.css show #site without the
      app's head script. No inline script; the one inline stylesheet is the generated PAGE-CSS block (scripts/inline-page-css.js, its sha256 in the CSP) and the Google Fonts are requested after the load (js/late-fonts.js; the <noscript> link is the same URL), so the CSP below needs neither 'unsafe-inline': it allows the Firebase
      SDK from gstatic and calls to the one functions host, and nothing more. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self' 'sha256-vkcRxs3sYL8ytrw27gk7rR8cw9C9i8xCD/OjA7U0NoI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.googletagmanager.com; style-src 'self' 'sha256-vkcRxs3sYL8ytrw27gk7rR8cw9C9i8xCD/OjA7U0NoI=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- PERMANENT (owner ruling, 2026-10-22): "Barro Kitchens" is a permanent, historic name of the business, not only a swappable brand: it stays in this title and description (and in the homepage's alternateName) even after a rebrand. -->
 <title>Commercial Kitchen Equipment | Barro Kitchens</title>
 <meta name="description" content="Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: sinks, work tables, gas stoves, range hoods and shelving.">
@@ -1245,6 +1245,7 @@ html.qr-kb-open #qr-root .qr-preview{margin-bottom:8px}
 <!-- QR:DATA:END -->
 </div><!-- /#site -->
 <script defer src="/js/site.js"></script>
+<script src="/js/ads-tag.js" defer></script>
 <script defer src="/js/catalogue.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>

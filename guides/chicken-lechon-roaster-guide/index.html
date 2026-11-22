@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Lechon Manok Roaster Guide: Spits and Safety | Barro Kitchens</title>
 <meta name="description" content="How a charcoal lechon manok roaster works: capacity, motorised spits, charcoal tray, display and smoke safety. A guide from Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/chicken-lechon-roaster-guide/">
@@ -1349,6 +1349,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
 </div><!-- /#site -->
 <script defer src="/js/site.js"></script>
+<script src="/js/ads-tag.js" defer></script>
 <script defer src="/js/late-fonts.js"></script>
 </body>
 </html>

@@ -39,6 +39,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -209,7 +210,7 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
     for (const p of PLACES) assert.ok(txt.includes(p), `llms.txt lacks ${p}`);
     assert.deepEqual([...new Set([...txt.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
     assert.deepEqual([...new Set([...txt.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map((m) => m[0].replace(/\D/g, '').replace(/^63/, '0')))], ['09276836300']);
-    assert.ok(!/\b(Barangay|Brgy|Makati|Pasig|Taguig|Cebu|Davao)\b/.test(txt.replace(/Makati and BGC/g, '')), 'another address');   // "Makati and BGC" is the name of an area guide (2026-11-19), not an address
+    assert.ok(!/\b(Barangay|Brgy|Makati|Pasig|Taguig|Cebu|Davao)\b/.test(txt.replace(/Makati and BGC/g, '').replace(/\bPasig\b/g, '')), 'another address');   // llms.txt lists the "Pasig and Ortigas" area guide (2026-11-22): a place name, never an address   // "Makati and BGC" is the name of an area guide (2026-11-19), not an address
   });
 
   it('states the standard construction as a key fact, right after Materials: made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving 1.2 mm; square-tube posts with adjustable bullet feet — scoped to made-to-order pieces, as on the website', () => {
@@ -356,6 +357,11 @@ const GUIDES = [
   { path: '/guides/kitchen-equipment-tarlac/', kind: 'article', h1: 'Commercial Kitchen Equipment in Tarlac: Planning Schools, Hospitals and Restaurants', ogImage: 'og-work.webp', published: '2026-11-19' },
   { path: '/guides/commercial-kitchen-zambales-subic/', kind: 'article', h1: 'Commercial Kitchen Equipment in Zambales and Subic: Planning for the Coast', ogImage: 'og-faq.webp', published: '2026-11-19' },
   { path: '/guides/commercial-kitchen-makati-bgc/', kind: 'article', h1: 'Restaurant Kitchen Fit-Outs in Makati and BGC: Building Rules, Exhaust and Tight Spaces', ogImage: 'og-lpg.webp', published: '2026-11-19' },
+  { path: '/guides/commercial-range-hood-quotation-guide/', kind: 'article', h1: 'Commercial Range Hood Quotation: What Shapes the Total and What to Send for an Accurate One', ogImage: 'og-exhaust.webp', published: '2026-11-22' },
+  { path: '/guides/commercial-kitchen-manila-city/', kind: 'article', h1: 'Commercial Kitchen Manila: Equipment and Fabrication for Binondo, Sampaloc, Malate, Tondo and Ermita', ogImage: 'og-areas.webp', published: '2026-11-22' },
+  { path: '/guides/commercial-kitchen-pasig-ortigas/', kind: 'article', h1: 'Commercial Kitchen Pasig: Restaurants, Commissaries and BPO Canteens in Ortigas and Kapitolyo', ogImage: 'og-areas.webp', published: '2026-11-22' },
+  { path: '/guides/commercial-kitchen-alabang-south-metro/', kind: 'article', h1: 'Commercial Kitchen Alabang: Planning in Muntinlupa, Parañaque and Las Piñas', ogImage: 'og-areas.webp', published: '2026-11-22' },
+  { path: '/guides/commercial-kitchen-antipolo-rizal/', kind: 'article', h1: 'Commercial Kitchen Antipolo: Planning in Rizal, from Cainta and Taytay to the Hills', ogImage: 'og-areas.webp', published: '2026-11-22' },
 ];
 // the owner's own sentence, the one answer to the price question that the product pages give (CHECK 9 takes it out of the product pages and of the equipment list before it scans for the word "price")
 const PRICE_SENTENCE = 'Prices depend on size and options.';
@@ -513,8 +519,8 @@ describe('guides: <head> — title, description, canonical, robots, Open Graph, 
       assert.equal(p.html.match(/<meta http-equiv="Content-Security-Policy"/g).length, 1);
       const csp = p.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
       const block = p.html.match(STYLE_RE)[1];
-      assert.equal(csp, `default-src 'self'; script-src 'self'; style-src 'self' '${sha256(block)}' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'`);
-      assert.ok(!/unsafe-inline|unsafe-eval|\*|connect-src/.test(csp));
+      assert.equal(csp, `default-src 'self'; script-src 'self' ${GTM}; style-src 'self' '${sha256(block)}' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${ADS_IMG.join(' ')}; connect-src 'self' ${ADS_CONNECT.join(' ')}; frame-src ${ADS_FRAME.join(' ')}; object-src 'none'; base-uri 'self'; form-action 'self'`);
+      assert.ok(!/unsafe-inline|unsafe-eval/.test(csp));
       const blocking = p.S.elements.filter((e) => e.tag === 'link' && e.attrs.rel === 'stylesheet' && !e.chain.some((x) => x.tag === 'noscript'));
       assert.deepEqual(blocking.map((e) => e.attrs.href), [], `${p.path}: a render-blocking stylesheet link`);
       assert.deepEqual(p.S.elements.filter((e) => e.tag === 'noscript' || e.chain.some((x) => x.tag === 'noscript')).map((e) => [e.tag, e.attrs.rel, e.attrs.href]), [['noscript', undefined, undefined], ['link', 'stylesheet', FONTS_URL]], `${p.path}: <noscript>`);
@@ -523,7 +529,7 @@ describe('guides: <head> — title, description, canonical, robots, Open Graph, 
       assert.equal(block, '\n' + css.map((f) => read(f).replace(/\s+$/, '')).join('\n') + '\n', `${p.path}: the inline stylesheet is stale — run  node scripts/inline-page-css.js`);
       assert.deepEqual(p.S.elements.filter((e) => e.tag === 'style').map((e) => e.attrs), [{ id: 'page-css' }], `${p.path}: <style> elements`);
       assert.ok(!p.S.attrs.some((a) => a.name === 'style' || /^on[a-z]+$/.test(a.name)), `${p.path}: an inline style or handler`);
-      assert.deepEqual(p.S.scripts.map((s) => s.attrs.src || s.attrs.type), ['application/ld+json', '/js/site.js', '/js/late-fonts.js']);
+      assert.deepEqual(p.S.scripts.map((s) => s.attrs.src || s.attrs.type), ['application/ld+json', '/js/site.js', '/js/ads-tag.js', '/js/late-fonts.js']);
     });
   });
 });
@@ -767,7 +773,7 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
       assert.ok(digits.length >= 1 && digits.every((d) => d === '09276836300' || d === '09208018475'), `${p.path}: phone numbers ${digits}`);
       assert.deepEqual([...new Set([...p.html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
       assert.equal((p.body.match(/Capricorn/g) || []).length, 1, `${p.path}: the street address appears once (the footer)`);
-      assert.ok(!/\b(Barangay|Brgy|Poblacion|Makati|Pasig|Taguig|Cebu|Davao)\b/.test((p.path === '/guides/commercial-kitchen-makati-bgc/' ? p.body.replace(/\bMakati\b/g, '') : p.body).replace(/Makati and BGC/g, '')), `${p.path}: another address`);   // the Makati/BGC area guide (owner's 100-guide plan, 2026-11-19) names the place, never an address there
+      assert.ok(!/\b(Barangay|Brgy|Poblacion|Makati|Pasig|Taguig|Cebu|Davao)\b/.test((p.path === '/guides/commercial-kitchen-makati-bgc/' ? p.body.replace(/\bMakati\b/g, '') : ['/guides/', '/guides/commercial-kitchen-pasig-ortigas/'].includes(p.path) ? p.body.replace(/\bPasig\b/g, '') : p.body).replace(/Makati and BGC/g, '')), `${p.path}: another address`);   // the Pasig/Ortigas area guide (2026-11-22) and the hub that lists it name the place, never an address there   // the Makati/BGC area guide (owner's 100-guide plan, 2026-11-19) names the place, never an address there
       assert.ok(!/La\s*Union/i.test(p.footer + p.header), `${p.path}: La Union in the header or footer`);
     });
   });

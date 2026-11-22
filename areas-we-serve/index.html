@@ -10,7 +10,7 @@
      data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu, project photo lightbox, map highlight) and /js/late-fonts.js.
      Not in the service worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD and visible breadcrumb
      in step: tests/seo-pages.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-ksa7muZ81iU12SZw3prT/zGR1kJm6qjuH8vntevJLbw=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'sha256-ksa7muZ81iU12SZw3prT/zGR1kJm6qjuH8vntevJLbw=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Areas We Serve: Projects Across Luzon | Barro Kitchens</title>
 <meta name="description" content="Barro Kitchens is based in Quezon City and has completed projects across Luzon, from Ilocos Sur to Batangas. See the 13 locations.">
 <link rel="canonical" href="https://barroindustries.com/areas-we-serve/">
@@ -1022,7 +1022,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <h2 id="local-guides-h">Guides for your area</h2>
       <p class="site-lead">How a project near you works, from the first site visit to installation. For projects anywhere in Luzon, see <a href="/guides/commercial-kitchen-fabrication-luzon/">how out-of-town projects work</a>.</p>
     </header>
-    <div class="pg-chips"><a href="/guides/commercial-kitchen-equipment-quezon-city/">Kitchen equipment in Quezon City</a><a href="/guides/commercial-kitchen-makati-bgc/">Kitchen fit-outs in Makati and BGC</a><a href="/guides/stainless-steel-fabrication-bulacan/">Stainless steel fabrication in Bulacan</a><a href="/guides/stainless-steel-fabrication-pampanga/">Stainless steel fabrication in Pampanga</a><a href="/guides/kitchen-equipment-tarlac/">Kitchen equipment in Tarlac</a><a href="/guides/commercial-kitchen-zambales-subic/">Kitchen equipment in Zambales and Subic</a><a href="/guides/kitchen-equipment-baguio-la-trinidad/">Kitchen equipment in Baguio and La Trinidad</a><a href="/guides/kitchen-fabrication-la-union-ilocos/">Kitchen fabrication in La Union and Ilocos</a><a href="/guides/commercial-kitchen-cavite-laguna/">Kitchen fit-outs in Cavite and Laguna</a><a href="/guides/kitchen-equipment-batangas/">Kitchen equipment in Batangas</a></div>
+    <div class="pg-chips"><a href="/guides/commercial-kitchen-equipment-quezon-city/">Kitchen equipment in Quezon City</a><a href="/guides/commercial-kitchen-makati-bgc/">Kitchen fit-outs in Makati and BGC</a><a href="/guides/stainless-steel-fabrication-bulacan/">Stainless steel fabrication in Bulacan</a><a href="/guides/stainless-steel-fabrication-pampanga/">Stainless steel fabrication in Pampanga</a><a href="/guides/kitchen-equipment-tarlac/">Kitchen equipment in Tarlac</a><a href="/guides/commercial-kitchen-zambales-subic/">Kitchen equipment in Zambales and Subic</a><a href="/guides/kitchen-equipment-baguio-la-trinidad/">Kitchen equipment in Baguio and La Trinidad</a><a href="/guides/kitchen-fabrication-la-union-ilocos/">Kitchen fabrication in La Union and Ilocos</a><a href="/guides/commercial-kitchen-cavite-laguna/">Kitchen fit-outs in Cavite and Laguna</a><a href="/guides/kitchen-equipment-batangas/">Kitchen equipment in Batangas</a><a href="/guides/commercial-kitchen-manila-city/">Commercial kitchen in Manila</a><a href="/guides/commercial-kitchen-pasig-ortigas/">Commercial kitchen in Pasig and Ortigas</a><a href="/guides/commercial-kitchen-alabang-south-metro/">Commercial kitchen in Alabang and south Metro Manila</a><a href="/guides/commercial-kitchen-antipolo-rizal/">Commercial kitchen in Antipolo and Rizal</a></div>
   </div>
 </section>
 
@@ -1095,6 +1095,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
 </div><!-- /#site -->
 <script defer src="/js/site.js"></script>
+<script src="/js/ads-tag.js" defer></script>
 <script defer src="/js/late-fonts.js"></script>
 </body>
 </html>

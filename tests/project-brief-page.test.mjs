@@ -25,6 +25,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -136,19 +137,19 @@ describe('the head: a noindex intake page on the site\'s own card', () => {
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('the CSP stays strict: no inline script, style or handler — in the page or in anything its script builds', () => {
   it('allows the Firebase compat scripts from gstatic, the one functions host, fonts, the visitor\'s own photo thumbnails — and nothing else', () => {
-    assert.equal(csp, "default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'");
-    assert.deepEqual(directive('script-src'), ["'self'", 'https://www.gstatic.com']);
-    assert.deepEqual(directive('connect-src'), ["'self'", 'https://asia-east1-barro-industries.cloudfunctions.net']);
+    assert.equal(csp, `default-src 'self'; script-src 'self' https://www.gstatic.com ${GTM}; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: ${ADS_IMG.join(' ')}; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net ${ADS_CONNECT.join(' ')}; frame-src ${ADS_FRAME.join(' ')}; object-src 'none'; base-uri 'self'; form-action 'self'`);
+    assert.deepEqual(directive('script-src'), ["'self'", 'https://www.gstatic.com', GTM]);   // + the Google Ads conversion tag (js/ads-tag.js, 2026-11-22)
+    assert.deepEqual(directive('connect-src'), ["'self'", 'https://asia-east1-barro-industries.cloudfunctions.net', ...ADS_CONNECT]);
     assert.deepEqual(directive('style-src'), ["'self'", 'https://fonts.googleapis.com']);
-    assert.deepEqual(directive('img-src'), ["'self'", 'data:', 'blob:']);
-    assert.deepEqual(['frame-src', 'object-src'].map((d) => directive(d)), [["'none'"], ["'none'"]]);
-    assert.ok(!/unsafe-inline|unsafe-eval|\*|facebook|messenger|meta\.com|m\.me|fbcdn/i.test(csp), 'a loosened or Meta-related CSP');
+    assert.deepEqual(directive('img-src'), ["'self'", 'data:', 'blob:', ...ADS_IMG]);
+    assert.deepEqual(['frame-src', 'object-src'].map((d) => directive(d)), [ADS_FRAME, ["'none'"]]);
+    assert.ok(!/unsafe-inline|unsafe-eval|facebook|messenger|meta\.com|m\.me|fbcdn/i.test(csp), 'a loosened or Meta-related CSP');
   });
 
   it('is the catalogue\'s policy plus blob: images and nothing more (the same approach as the other public pages)', () => {
     const cat = read('catalogue/index.html');
     const catCsp = (cat.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1];
-    assert.equal(csp, catCsp.replace(/ 'sha256-[^']*'/, '').replace("img-src 'self' data:;", "img-src 'self' data: blob:;"));   // minus the hash of the catalogue's one inline stylesheet (2026-10-29)
+    assert.equal(csp, catCsp.replace(/ 'sha256-[^']*'/, '').replace("img-src 'self' data: https://www.google.com", "img-src 'self' data: blob: https://www.google.com"));   // minus the hash of the catalogue's one inline stylesheet (2026-10-29)
   });
 
   it('has no inline <script>, no <style>, no style= attribute and no on…= handler in the page', () => {
@@ -161,7 +162,7 @@ describe('the CSP stays strict: no inline script, style or handler — in the pa
 
   it('loads only the shared site.js, the shared definition, the two pinned Firebase compat scripts and its own script — no app script, no Firestore / Auth / Storage SDK', () => {
     const srcs = [...body.matchAll(/<script\b[^>]*\ssrc="([^"]+)"[^>]*>/g)].map((m) => m[1]);
-    assert.deepEqual(srcs, ['/js/site.js', '/js/cir-forms.js', 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js', 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js', '/js/project-brief.js']);
+    assert.deepEqual(srcs, ['/js/site.js', '/js/ads-tag.js', '/js/cir-forms.js', 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js', 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js', '/js/project-brief.js']);
     for (const m of body.matchAll(/<script\b([^>]*)>/g)) assert.match(m[1], /\sdefer\b/, 'a blocking script');
     // the same pinned SDK version as the catalogue's quote flow
     const cat = read('catalogue/index.html');

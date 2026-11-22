@@ -122,7 +122,7 @@ function problems(html, sources, readCss) {
   // 5. the scripts: the JSON-LD data block in the head, then /js/site.js and /js/late-fonts.js, deferred, at the end of the body
   const scripts = tagsOf(live, 'script');
   const runnable = scripts.filter((s) => s.attrs.type !== 'application/ld+json');
-  if (runnable.map((s) => s.attrs.src).join(' ') !== '/js/site.js /js/late-fonts.js') add(`the scripts must be /js/site.js then /js/late-fonts.js (found: ${runnable.map((s) => s.attrs.src || 'an inline script').join(' ') || 'none'})`);
+  if (runnable.map((s) => s.attrs.src).join(' ') !== '/js/site.js /js/ads-tag.js /js/late-fonts.js') add(`the scripts must be /js/site.js, /js/ads-tag.js (Google Ads conversion tag, scripts/add-ads-tag.js) then /js/late-fonts.js (found: ${runnable.map((s) => s.attrs.src || 'an inline script').join(' ') || 'none'})`);
   for (const s of runnable) if (!('defer' in s.attrs) || 'async' in s.attrs || s.attrs.type === 'module') add(`a script that is not a plain deferred one: ${s.raw}`);
   const body = html.indexOf('<body');
   if (runnable.some((s) => live.indexOf(s.raw) < live.indexOf('<body'))) add('a script in the head');
@@ -263,7 +263,7 @@ describe('the guard itself: broken copies of real pages are caught', () => {
       must('late-fonts script removed', p, (h) => h.replace('<script defer src="/js/late-fonts.js"></script>\n', ''));
       must('late-fonts without defer', p, (h) => h.replace('<script defer src="/js/late-fonts.js">', '<script src="/js/late-fonts.js">'));
       must('late-fonts async', p, (h) => h.replace('<script defer src="/js/late-fonts.js">', '<script async src="/js/late-fonts.js">'));
-      must('late-fonts before site.js', p, (h) => h.replace('<script defer src="/js/site.js"></script>\n<script defer src="/js/late-fonts.js"></script>', '<script defer src="/js/late-fonts.js"></script>\n<script defer src="/js/site.js"></script>'));
+      must('late-fonts before site.js', p, (h) => h.replace('<script defer src="/js/site.js"></script>\n<script src="/js/ads-tag.js" defer></script>\n<script defer src="/js/late-fonts.js"></script>', '<script defer src="/js/late-fonts.js"></script>\n<script defer src="/js/site.js"></script>\n<script src="/js/ads-tag.js" defer></script>'));
       must('site.js blocking, in the head', p, (h) => h.replace('</head>', '<script src="/js/site.js"></script>\n</head>').replace('<script defer src="/js/site.js"></script>\n', ''));
       must('an inline script', p, (h) => h.replace('</body>', '<script>document.title="x"</script>\n</body>'));
       must('a module script', p, (h) => h.replace('<script defer src="/js/late-fonts.js">', '<script type="module" defer src="/js/late-fonts.js">'));

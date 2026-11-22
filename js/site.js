@@ -128,6 +128,17 @@
   function init() {
     var site = $('site'), header = $('site-header');
 
+    // Google Ads conversion tag (owner-approved 2026-11-22): a public PAGE carries <script src="/js/ads-tag.js" defer> itself (scripts/add-ads-tag.js);
+    // index.html does not, because it is also the staff app. So the WEBSITE view (and only it) adds the file from here. js/ads-tag.js is itself
+    // idempotent and waits for window load.
+    try {
+      if (d.documentElement.getAttribute('data-view') === 'site') {
+        var have = false, ss = d.getElementsByTagName('script');
+        for (var si = 0; si < ss.length; si++) if ((ss[si].getAttribute('src') || '').indexOf('ads-tag.js') >= 0) have = true;
+        if (!have) { var at = d.createElement('script'); at.defer = true; at.src = '/js/ads-tag.js'; d.head.appendChild(at); }
+      }
+    } catch (_) { /* tracking is optional */ }
+
     // Footer year (the static text is the fallback).
     var yr = $('site-year');
     if (yr) yr.textContent = String(new Date().getFullYear());

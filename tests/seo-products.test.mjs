@@ -364,7 +364,7 @@ describe('<head>: title, description, canonical, Open Graph, Twitter, CSP, fonts
       assert.equal(p.html.match(/<meta http-equiv="Content-Security-Policy"/g).length, 1);
       const csp = p.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
       assert.equal(norm(csp), servicesCsp, `${p.path}: the CSP differs from /services/ (apart from the stylesheet hash)`);
-      assert.ok(!/unsafe-inline|unsafe-eval|\*|connect-src/.test(csp));
+      assert.ok(!/unsafe-inline|unsafe-eval/.test(csp));
       const style = csp.split(';').map((x) => x.trim()).find((x) => x.startsWith('style-src '));
       assert.deepEqual(style.split(/\s+/).slice(1), ["'self'", `'${sha256(styleText(p))}'`, 'https://fonts.googleapis.com'], `${p.path}: style-src must carry the hash of the inline block`);
     });
@@ -1201,7 +1201,7 @@ describe('links: every internal link resolves, the hub lists every product, ever
 describe('scripts and styles: only the shared /js/site.js and /js/late-fonts.js, no inline script, the one generated inline stylesheet, nothing in the service worker\'s PRECACHE, nothing disallowed by robots.txt', () => {
   it('has one data block of JSON-LD and the two deferred scripts /js/site.js and /js/late-fonts.js — no app script, no third-party script, no inline script, style attribute or handler (the generated stylesheet block is the only inline style)', () => {
     each((p) => {
-      assert.deepEqual(p.S.scripts.map((s) => (s.attrs.src ? `src:${s.attrs.src}${'defer' in s.attrs ? ' defer' : ''}` : `type:${s.attrs.type}`)), ['type:application/ld+json', 'src:/js/site.js defer', 'src:/js/late-fonts.js defer']);
+      assert.deepEqual(p.S.scripts.map((s) => (s.attrs.src ? `src:${s.attrs.src}${'defer' in s.attrs ? ' defer' : ''}` : `type:${s.attrs.type}`)), ['type:application/ld+json', 'src:/js/site.js defer', 'src:/js/ads-tag.js defer', 'src:/js/late-fonts.js defer']);
       const rest = p.html.replace(STYLE_RE, '');
       assert.ok(!/<style\b/i.test(rest) && !/\sstyle=/i.test(rest) && !/\son[a-z]+=/i.test(rest), `${p.path}: a second <style>, a style attribute or an event handler`);
       assert.ok(!/<form|<input|<button(?![^>]*id="site-(menu-btn|lightbox-close)")/i.test(p.html));

@@ -45,6 +45,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { GTM, ADS_IMG, ADS_CONNECT, ADS_FRAME } from './helpers/ads-csp.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -302,14 +303,15 @@ describe('<head>: title, description, canonical, Open Graph, Twitter, CSP, fonts
       const csp = p.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
       const dir = Object.fromEntries(csp.split(';').map((x) => x.trim()).filter(Boolean).map((x) => [x.split(/\s+/)[0], x.split(/\s+/).slice(1)]));
       assert.deepEqual(dir['default-src'], ["'self'"]);
-      assert.deepEqual(dir['script-src'], ["'self'"]);
+      assert.deepEqual(dir['script-src'], ["'self'", GTM]);
       assert.deepEqual(dir['style-src'], ["'self'", `'${sha256(p.html.match(STYLE_RE)[1])}'`, 'https://fonts.googleapis.com'], `${p.path}: style-src must carry the hash of the inline block`);
       assert.deepEqual(dir['font-src'], ['https://fonts.gstatic.com']);
-      assert.deepEqual(dir['img-src'], ["'self'", 'data:']);
-      assert.deepEqual(dir['frame-src'], ["'none'"]);
+      assert.deepEqual(dir['img-src'], ["'self'", 'data:', ...ADS_IMG]);
+      assert.deepEqual(dir['connect-src'], ["'self'", ...ADS_CONNECT]);
+      assert.deepEqual(dir['frame-src'], ADS_FRAME);
       assert.deepEqual(dir['object-src'], ["'none'"]);
-      assert.deepEqual(Object.keys(dir).sort(), ['base-uri', 'default-src', 'font-src', 'form-action', 'frame-src', 'img-src', 'object-src', 'script-src', 'style-src']);
-      assert.ok(!/unsafe-inline|unsafe-eval|\*|connect-src/.test(csp));
+      assert.deepEqual(Object.keys(dir).sort(), ['base-uri', 'connect-src', 'default-src', 'font-src', 'form-action', 'frame-src', 'img-src', 'object-src', 'script-src', 'style-src']);
+      assert.ok(!/unsafe-inline|unsafe-eval/.test(csp));
     });
   });
 
@@ -626,7 +628,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
       assert.ok(!/San\s*Fernando|purok|carlatan/i.test(p.html), `${p.path}: an old address`);
       assert.equal((p.body.match(/Capricorn/g) || []).length, p.kind === 'areas' || p.kind === 'faq' ? 2 : 1, `${p.path}: the street address appears the expected number of times`);
       assert.ok(p.footer.includes(`<p>by Barro Industries OPC<br>${ADDRESS}</p>`), `${p.path}: the footer address`);
-      assert.ok(!/\b(Barangay|Brgy|Poblacion|Sampaloc|Makati|Pasig|Taguig|Mandaluyong|Cebu|Davao)\b/.test(p.body.replace(/Makati and BGC/g, '')), `${p.path}: another address`);   // the link to the "Makati and BGC" area guide is a name, not an address
+      assert.ok(!/\b(Barangay|Brgy|Poblacion|Sampaloc|Makati|Pasig|Taguig|Mandaluyong|Cebu|Davao)\b/.test((p.path === '/areas-we-serve/' ? p.body.replace(/\b(Pasig|Sampaloc)\b/g, '') : p.body).replace(/Makati and BGC/g, '')), `${p.path}: another address`);   // the areas page links the Manila and Pasig/Ortigas area guides (2026-11-22): place names, not addresses   // the link to the "Makati and BGC" area guide is a name, not an address
     });
   });
 
@@ -1079,7 +1081,7 @@ describe('links: every internal link resolves, the hubs list every child, every 
 describe('scripts and styles: only the shared /js/site.js and /js/late-fonts.js, no inline script, the one generated inline stylesheet, nothing in the service worker\'s PRECACHE', () => {
   it('has one data block of JSON-LD and the two deferred scripts /js/site.js and /js/late-fonts.js — no app script, no third-party script, no inline script, no style attribute or handler, no inline style but the generated stylesheet, no <noscript> but the fonts link', () => {
     each((p) => {
-      assert.deepEqual(p.S.scripts.map((s) => (s.attrs.src ? `src:${s.attrs.src}${'defer' in s.attrs ? ' defer' : ''}` : `type:${s.attrs.type}`)), ['type:application/ld+json', 'src:/js/site.js defer', 'src:/js/late-fonts.js defer']);
+      assert.deepEqual(p.S.scripts.map((s) => (s.attrs.src ? `src:${s.attrs.src}${'defer' in s.attrs ? ' defer' : ''}` : `type:${s.attrs.type}`)), ['type:application/ld+json', 'src:/js/site.js defer', 'src:/js/ads-tag.js defer', 'src:/js/late-fonts.js defer']);
       const noCss = p.html.replace(STYLE_RE, '');   // the generated block is css text, not markup
       assert.deepEqual(p.S.elements.filter((e) => e.tag === 'style').map((e) => e.attrs), [{ id: 'page-css' }], `${p.path}: <style> elements`);
       assert.ok(!/\sstyle=/i.test(noCss) && !/\son[a-z]+=/i.test(noCss), `${p.path}: inline style or handler`);

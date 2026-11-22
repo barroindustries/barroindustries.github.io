@@ -7,7 +7,7 @@
      so every link and asset here is root-absolute (/css, /js, /site/…) — the page can be shown at any depth. noindex: it must never appear in search.
      Same shell as the content pages (header, footer, inlined css/site.css + css/pages.css via scripts/inline-page-css.js, late fonts). Not in the
      sitemap and not in the service worker's PRECACHE. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-eGvAhFE5hNjt2+he8YrSc6nrS+PbsdmP2J1kcVkhdTA=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'sha256-eGvAhFE5hNjt2+he8YrSc6nrS+PbsdmP2J1kcVkhdTA=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Page not found | Barro Kitchens</title>
 <meta name="description" content="The page you were looking for is not here. Find Barro Kitchens' stainless-steel kitchen equipment, services, guides and contact details.">
 <meta name="robots" content="noindex,follow">
@@ -839,6 +839,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
 </div><!-- /#site -->
 <script defer src="/js/site.js"></script>
+<script src="/js/ads-tag.js" defer></script>
 <script defer src="/js/late-fonts.js"></script>
 </body>
 </html>
