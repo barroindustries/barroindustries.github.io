@@ -269,7 +269,7 @@ function jsonLd(html, ctx, newest) {
   const list = ctx.arts.map((a, i) => ({ '@type': 'ListItem', position: i + 1, name: a.h1, url: BASE + href(a) }));
   cp.mainEntity = { '@type': 'ItemList', numberOfItems: list.length, itemListElement: list };
   const next = {};
-  for (const [k, v] of Object.entries(cp)) { next[k] = v; if (k === 'inLanguage') next.dateModified = `${newest}T08:00:00+08:00`; }
+  for (const [k, v] of Object.entries(cp)) { if (k === 'dateModified') continue; next[k] = v; if (k === 'inLanguage') next.dateModified = `${newest}T08:00:00+08:00`; }
   if (!next.dateModified) next.dateModified = `${newest}T08:00:00+08:00`;
   Object.keys(cp).forEach((k) => delete cp[k]);
   Object.assign(cp, next);
