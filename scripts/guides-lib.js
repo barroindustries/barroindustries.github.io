@@ -28,9 +28,25 @@ const textOf = (html) => unesc(String(html).replace(/<[^>]+>/g, '')).replace(/\s
 const wordCount = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const isoOk = (iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso);
-// '2026-11-19' → '19 Nov 2026' (cards) and '19 November 2026' (masthead, byline)
-const shortDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1].slice(0, 3)} ${y}`; };
-const longDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
+// THE ONE WAY THE JOURNAL SHOWS A DATE (owner ruling 2026-11-23): the month and the year, never the day — '2026-11-19' → 'November 2026' — so the journal does not look as if many
+// articles came out on one day. Every visible date of The Kitchen Guide goes through this function: a card, the masthead dateline, a byline, an "Updated" note. { short: true } writes the month
+// in three letters ('Nov 2026'): the hub's cards use it, because a card's "<date> · 6 min read" must stay on one line in the narrow rows of a phone (the long month wrapped the separator at 375 px
+// and below); the dateline, the bylines and the notes have room and use the full month. The exact date stays in the machine-readable places, which are NOT touched by this:
+// <time datetime="2026-11-19">, the JSON-LD datePublished / dateModified, article:published_time / article:modified_time and the sitemap's lastmod. (A date inside a References entry,
+// or a law's date in the text, is a fact about someone else's document and is not ours to round.)
+const monthYear = (iso, { short = false } = {}) => {
+  if (!isoOk(iso)) throw new GuidesError(`"${iso}" is not a YYYY-MM-DD date`);
+  const [y, m] = iso.split('-').map(Number);
+  if (m < 1 || m > 12) throw new GuidesError(`"${iso}" is not a real date (month ${m})`);
+  return `${short ? MONTHS[m - 1].slice(0, 3) : MONTHS[m - 1]} ${y}`;
+};
+// THE VISIBLE "Updated" NOTE (owner follow-up 2026-11-23): shown only when the article was changed in a LATER MONTH than the one it was published in. "November 2026" beside
+// "Updated November 2026" says nothing, so a change made in the month of publication is kept in the data only: the exact JSON-LD dateModified and <meta article:modified_time> are
+// written for every modified article either way (apply-guide-template.js), and only the visible note is left out. A year boundary counts (December 2026 → January 2027 differ).
+const showsUpdatedNote = (published, modified) => {
+  if (!isoOk(published) || !isoOk(modified)) throw new GuidesError(`"${published}" / "${modified}" are not YYYY-MM-DD dates`);
+  return modified.slice(0, 7) > published.slice(0, 7);
+};
 
 // ── the inputs ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 function loadConfig() { return JSON.parse(read('scripts/guides-hub.json')); }
@@ -185,6 +201,6 @@ function loadRegistry() {
 
 module.exports = {
   GuidesError, RegistryError, MIN_TOPIC, loadRegistry,
-  ROOT, BASE, STANDARDS_PATH, PILLAR_LINK, read, exists, esc, unesc, textOf, wordCount, MONTHS, isoOk, shortDate, longDate,
+  ROOT, BASE, STANDARDS_PATH, PILLAR_LINK, read, exists, esc, unesc, textOf, wordCount, MONTHS, isoOk, monthYear, showsUpdatedNote,
   loadConfig, loadManifests, loadAnswers, articleFile, readArticle, webpSize, dims, sourceName, baseCaption, photoOf, checkPhotoFiles, imgTag, creditSpan, heroFigure,
 };

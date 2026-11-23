@@ -9,8 +9,10 @@
  * IT CHANGES ONLY these regions, idempotently (a second run changes nothing):
  *   1. the kicker above the H1 (link and text)            ← the article's section in scripts/guides-hub.json (a topic with fewer than 3 articles is not shown, so no kicker points at it)
  *   2. the hero <figure> (picture, caption, credit)       ← the photo manifest, only for a slug that has an entry (spec §4.1–4.2)
- *   3. p.art-meta-note under the byline                   ← "Updated <date>" only when the article was modified after it was published, always the Editorial standards link
- *      JSON-LD "dateModified" and <meta property="article:modified_time">  ← "modified" in scripts/guides-hub.json
+ *   3. the date TEXT of the byline <time> in p.art-meta   ← the month and the year only ("November 2026", owner ruling 2026-11-23); the <time datetime="…"> attribute is never touched
+ *      p.art-meta-note under the byline                   ← "Updated <month and year>" only when the article was modified in a LATER MONTH than the one it was published in (a change in the month of
+ *                                                            publication adds no visible note: "November 2026" beside "Updated November 2026" says nothing), always the Editorial standards link
+ *      JSON-LD "dateModified" and <meta property="article:modified_time">  ← "modified" in scripts/guides-hub.json, the exact day, for EVERY modified article whether the note is shown or not (only the VISIBLE dates are rounded or left out)
  *   4. div.art-answer (the Quick answer) and the has-answer class on div.art-wrap   ← scripts/guide-answers.json; an article with no entry gets no block
  *   5. #related: a picture on each card, the kg-related class, and the two links under the cards (Start with the pillar guide, More in <topic>)
  *   6. the copyright sentence p.art-copy
@@ -26,7 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const L = require('./guides-lib.js');
 
-const { ROOT, esc, longDate } = L;
+const { ROOT, esc, monthYear } = L;
 const RELEASE_COPY = '© 2026 Barro Industries OPC. All rights reserved. The text and designs on this page are our own work and may not be copied or reused without written permission. Photographs are credited where they appear.';
 const WORDS = [40, 60];                                   // the Quick answer: 2-3 sentences, 40-60 words, plain text
 const NOT_FIRST = /^(this guide|in this article|barro)/i;
@@ -51,12 +53,18 @@ function hero(html, photo) {
 
 function byline(html, art) {
   const link = `<a href="${L.STANDARDS_PATH}">How we research and cite</a>`;
-  const note = art.modified > art.published
-    ? `<p class="art-meta-note">Updated <time datetime="${art.modified}">${longDate(art.modified)}</time><span aria-hidden="true">·</span>${link}</p>`
+  // the visible "Updated" note only when the change fell in a LATER MONTH than the publication (L.showsUpdatedNote); a change in the month of publication is in the data below, not on the page
+  const note = L.showsUpdatedNote(art.published, art.modified)
+    ? `<p class="art-meta-note">Updated <time datetime="${art.modified}">${monthYear(art.modified)}</time><span aria-hidden="true">·</span>${link}</p>`
     : `<p class="art-meta-note">${link}</p>`;
   let out = html.replace(/\n      <p class="art-meta-note">[\s\S]*?<\/p>/, '');
   if (!/<p class="art-meta">[\s\S]*?<\/p>/.test(out)) throw new TemplateError('the byline (p.art-meta) not found');
-  out = out.replace(/<p class="art-meta">[\s\S]*?<\/p>/, (m0) => `${m0}\n      ${note}`);
+  // the visible date of the byline is the month and the year of the <time>'s own datetime, which is kept byte for byte (it is the exact published date, and readArticle reads it back)
+  out = out.replace(/<p class="art-meta">[\s\S]*?<\/p>/, (m0) => {
+    const t = /(<time datetime="(\d{4}-\d{2}-\d{2})">)[^<]*(<\/time>)/.exec(m0);
+    if (!t) throw new TemplateError('the byline has no <time datetime="YYYY-MM-DD"> (p.art-meta)');
+    return `${m0.replace(t[0], () => `${t[1]}${monthYear(t[2])}${t[3]}`)}\n      ${note}`;
+  });
   // JSON-LD dateModified and the article:modified_time meta take the new date; the published date never moves
   const ld = (out.match(/"dateModified": "[^"]*"/g) || []).length;
   if (ld !== 1) throw new TemplateError(`expected one "dateModified" in the JSON-LD, found ${ld}`);

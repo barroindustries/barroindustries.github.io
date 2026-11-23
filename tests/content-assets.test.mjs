@@ -413,8 +413,12 @@ const allowCost = (p, s) => { let t = String(s).split(COST_SLUG).join('').split(
 const scrub = (p, s) => allowCost(p, noPriceLine(p, s)).replace(/\bBuilding Officials?\b/g, '').replace(/\b(?:gas|water|electric(?:ity)?|energy|flow|pressure) meters?\b/gi, '');   // a gas meter is a device, not the US spelling of a unit of length   // "Building Official" is an office title, not an "official" claim (owner ruling 2026-11-23)
 // the owner's project photographs inside the article (figure.art-fig): since 2026-11-23 the hero may be a credited guide photograph, so "two project images" became "one inline project photograph"
 const inlineProject = (p) => p.S.elements.filter((e) => e.tag === 'img' && /site\/img\/projects\//.test(e.attrs.src) && e.chain.some((c) => c.tag === 'figure' && c.attrs.class === 'art-fig'));
-const shortDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`; };
-const longDate = (iso) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
+// the ONE way The Kitchen Guide shows a date (owner ruling 2026-11-23): the month and the year, never the day, so the journal does not look as if many articles came out on one day.
+// The dateline, the bylines and the "Updated" notes spell the month out ("November 2026"); a hub card abbreviates it ("Nov 2026") so that "<date> · 6 min read" stays on one line in the narrow
+// rows of a phone. Written here independently of scripts/guides-lib.js (Intl for the long form, a table for the short one), so a slip in the generator cannot hide. The exact date stays in
+// <time datetime>, the JSON-LD, article:published_time / article:modified_time and the sitemap's lastmod; the tests of "guides: dates are shown as a month and a year" pin both halves.
+const monthYear = (iso) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', month: 'long', year: 'numeric' });
+const monthYearShort = (iso) => { const [y, m] = iso.split('-').map(Number); return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`; };
 const PAGES = GUIDES.map((g) => {
   const file = g.path.slice(1) + 'index.html';
   const html = exists(file) ? read(file) : '';
@@ -452,6 +456,18 @@ const PAGES = GUIDES.map((g) => {
 const each = (fn) => { for (const p of PAGES) fn(p); };
 const articles = PAGES.filter((p) => p.kind === 'article');
 const byPath = (p) => PAGES.find((x) => x.path === p);
+// a scratch copy of what the two Kitchen Guide generators need (their scripts, the registry and Quick answers, the photo manifests, every guide page; the photo folders are linked, the
+// generators only stat and measure them) in os.tmpdir(): a test that edits a generated part, or moves a date, runs the generators THERE, never in the repository. The caller removes it.
+function kgScratchCopy() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kg-gen-'));
+  try {
+    for (const f of ['scripts/guides-lib.js', 'scripts/apply-guide-template.js', 'scripts/build-guides-hub.js', 'scripts/guides-hub.json', 'scripts/guide-answers.json', ...fs.readdirSync(path.join(ROOT, 'scripts')).filter((x) => /^guide-photos-.*\.json$/.test(x)).map((x) => 'scripts/' + x)]) { fs.mkdirSync(path.dirname(path.join(tmp, f)), { recursive: true }); fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f)); }
+    for (const p of PAGES) { fs.mkdirSync(path.dirname(path.join(tmp, p.file)), { recursive: true }); fs.writeFileSync(path.join(tmp, p.file), p.html); }
+    fs.mkdirSync(path.join(tmp, 'site/img'), { recursive: true });
+    for (const d of ['guides', 'projects', 'pages']) fs.symlinkSync(path.join(ROOT, 'site/img', d), path.join(tmp, 'site/img', d));
+  } catch (e) { fs.rmSync(tmp, { recursive: true, force: true }); throw e; }
+  return tmp;
+}
 // noRefs: the page's own copy only — without the References list and the JSON-LD "citation" array (titles and authors in the sources' own words and spelling). The scans for institutions,
 // US spelling, superlatives and legal words use it (owner-approved 2026-11-23); the scans for money and price words read everything.
 const publicStrings = (p, noRefs = false) => {
@@ -938,7 +954,7 @@ describe('guides: the articles — length, structure, and what each one says (an
       const toc = [...p.html.match(/<nav class="art-toc"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="#([^"]+)">([^<]+)<\/a>/g)].map((m) => m[1]);
       assert.ok(toc.length >= 6);
       for (const id of toc) assert.ok(new RegExp(`<section id="${id}"`).test(p.article), `${p.path}: the contents entry #${id} has no section`);
-      assert.ok(p.html.includes(`<time datetime="${p.published}">${longDate(p.published)}</time>`) && p.html.includes('<span>By Barro Kitchens</span>'), `${p.path}: the byline date`);
+      assert.ok(p.html.includes(`<time datetime="${p.published}">${monthYear(p.published)}</time>`) && p.html.includes('<span>By Barro Kitchens</span>'), `${p.path}: the byline date (the month and year shown, the exact date in datetime)`);
     }
   });
 
@@ -1601,7 +1617,7 @@ describe('guides: the journal — registry, hub structure, photographs and credi
     const mast = (hub.html.match(/<section class="pg-hero pg-hero-plain kg-mast">[\s\S]*?<\/section>/) || [''])[0];
     assert.ok(mast.includes(`<p class="kg-count">${arts.length} articles · 10 topics · <a href="${STANDARDS}">How we research and cite</a></p>`), 'the masthead count line');
     const newest = arts.reduce((m, a) => (a.modified > m ? a.modified : a.published > m ? a.published : m), '0000-00-00');
-    assert.ok(mast.includes(`<span>Updated <time datetime="${newest}">${longDate(newest)}</time></span>`), 'the dateline date');
+    assert.ok(mast.includes(`<span>Updated <time datetime="${newest}">${monthYear(newest)}</time></span>`), 'the dateline date (the month and year shown, the newest exact date in datetime)');
     assert.ok(mast.includes('<span>Quezon City, Philippines</span>'));
     assert.equal(mast.match(/<h1>The Kitchen Guide<\/h1>/g).length, 1);
     const nav = [...hub.html.match(/<nav class="kg-nav" aria-label="Topics">[\s\S]*?<\/nav>/)[0].matchAll(/<li><a href="#([^"]+)">([^<]*?)(?: <span>(\d+)<\/span>)?<\/a><\/li>/g)].map((m) => [m[1], m[2], m[3] ? Number(m[3]) : null]);
@@ -1676,7 +1692,7 @@ describe('guides: the journal — registry, hub structure, photographs and credi
       assert.ok(a, `a card for an unknown article: ${c.slice(0, 120)}`);
       assert.equal((c.match(/<h3>/g) || []).length, 1); assert.equal((c.match(/<img /g) || []).length, 1); assert.equal((c.match(/<a /g) || []).length, 1, 'one link per card');
       assert.ok(c.includes(`<h3><a href="/guides/${a.slug}/">${a.h1}</a></h3>`), `${a.slug}: the headline is the exact H1`);
-      assert.ok(c.includes(`<p class="kg-meta"><time datetime="${a.published}">${shortDate(a.published)}</time><span aria-hidden="true">·</span><span>${a.html.match(/<span>(\d+) min read<\/span>/)[1]} min read</span></p>`), `${a.slug}: date and reading time`);
+      assert.ok(c.includes(`<p class="kg-meta"><time datetime="${a.published}">${monthYearShort(a.published)}</time><span aria-hidden="true">·</span><span>${a.html.match(/<span>(\d+) min read<\/span>/)[1]} min read</span></p>`), `${a.slug}: date (an abbreviated month and the year, the exact date in datetime) and reading time`);
       const cls = cardClass(c);
       assert.equal(/kg-tease/.test(cls), /class="kg-kicker"/.test(c), `${a.slug}: a kicker only on a teaser`);
       if (/kg-entry/.test(cls)) assert.ok(c.includes(`<p>${escHtml(a.cfg.dek)}</p>`), `${a.slug}: the dek`);
@@ -1701,24 +1717,25 @@ describe('guides: the journal — registry, hub structure, photographs and credi
     assert.ok(!/:has\(/.test(css));
   });
 
-  it('writes, on every article, the spec\'s template parts: the kicker (a topic the hub shows), "By Barro Kitchens" and the date as before, then the note — "Updated <date>" only when the article was modified after it was published, always the link to the editorial standards — and the one copyright sentence', () => {
+  it('writes, on every article, the spec\'s template parts: the kicker (a topic the hub shows), "By Barro Kitchens" and the month and year of the exact date in datetime, then the note — "Updated <month and year>" only when the article was modified in a LATER MONTH than the one it was published in (a change in the month of publication shows no note), always the link to the editorial standards — and the one copyright sentence', () => {
     const shownTopics = new Map(renderedSections.map((s) => [s.id, s.title]));
     for (const p of arts) {
       const m = p.html.match(/<p class="eyebrow kg-kicker"><a href="\/guides\/#([a-z-]+)">([^<]+)<\/a><\/p>/);
       assert.ok(m, `${p.path}: kicker`);
       assert.equal(m[1], p.cfg.section, `${p.path}: the kicker names the article's topic`);
       assert.equal(shownTopics.get(m[1]), m[2], `${p.path}: the kicker text is the topic's title, and the hub shows that topic`);
-      const meta = `<p class="art-meta"><span>By Barro Kitchens</span><span aria-hidden="true">·</span><time datetime="${p.published}">${longDate(p.published)}</time><span aria-hidden="true">·</span><span>${p.html.match(/<span>(\d+) min read<\/span>/)[1]} min read</span></p>`;
-      assert.ok(p.html.includes(meta), `${p.path}: the byline is unchanged`);
+      const meta = `<p class="art-meta"><span>By Barro Kitchens</span><span aria-hidden="true">·</span><time datetime="${p.published}">${monthYear(p.published)}</time><span aria-hidden="true">·</span><span>${p.html.match(/<span>(\d+) min read<\/span>/)[1]} min read</span></p>`;
+      assert.ok(p.html.includes(meta), `${p.path}: the byline (the month and year shown, the exact published date in datetime)`);
       const note = p.html.match(/<p class="art-meta-note">([\s\S]*?)<\/p>/);
       assert.ok(note && p.html.indexOf(note[0]) === p.html.indexOf(meta) + meta.length + '\n      '.length, `${p.path}: the note comes right after the byline`);
       const link = `<a href="${STANDARDS}">How we research and cite</a>`;
-      if (p.modified > p.published) assert.equal(note[1], `Updated <time datetime="${p.modified}">${longDate(p.modified)}</time><span aria-hidden="true">·</span>${link}`, `${p.path}: the Updated note`);
-      else assert.equal(note[1], link, `${p.path}: never modified, so no "Updated"`);
+      // owner follow-up 2026-11-23: the visible note only when the change fell in a later month than the publication ("November 2026" beside "Updated November 2026" says nothing)
+      if (p.modified.slice(0, 7) > p.published.slice(0, 7)) assert.equal(note[1], `Updated <time datetime="${p.modified}">${monthYear(p.modified)}</time><span aria-hidden="true">·</span>${link}`, `${p.path}: modified in a later month than it was published, so the Updated note`);
+      else assert.equal(note[1], link, `${p.path}: never modified, or modified in the month of publication, so no "Updated"`);
       assert.equal((p.html.match(/<p class="art-meta-note">/g) || []).length, 1);
     }
     assert.ok(arts.every((p) => p.modified >= p.published));
-    assert.ok(arts.filter((p) => p.modified > p.published).length >= 100, 'in this release the guides that gained References or a Quick answer carry the release date as "Updated"');
+    assert.ok(arts.filter((p) => p.modified > p.published).length >= 100, 'in this release the guides that gained References or a Quick answer carry the release date as their exact dateModified (shown as "Updated" only where it falls in a later month than the publication)');
   });
 
   it('shows, under every hero photograph, the caption, the credit and the disclaimer in that order (a stock photograph: "Photo: <photographer, linked to the source page> / Unsplash or Pexels. Stock photo for illustration — not a Barro Kitchens project."; the owner\'s own photograph: "Photo: Barro Kitchens." and no disclaimer), with the manifest\'s picture, alt text and 70vw sizes', () => {
@@ -1867,7 +1884,7 @@ describe('guides: the journal — registry, hub structure, photographs and credi
     assert.deepEqual(ids, ['about', 'research', 'citations', 'writing', 'photos', 'dates', 'corrections', 'advice']);
     const toc = [...std.html.match(/<nav class="art-toc"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="#([^"]+)">/g)].map((m) => m[1]);
     assert.deepEqual(toc, ids);
-    assert.ok(/<p class="art-meta"><span>By Barro Kitchens<\/span><span aria-hidden="true">·<\/span><time datetime="2026-11-23">23 November 2026<\/time><\/p>/.test(std.html));
+    assert.ok(/<p class="art-meta"><span>By Barro Kitchens<\/span><span aria-hidden="true">·<\/span><time datetime="2026-11-23">November 2026<\/time><\/p>/.test(std.html), 'its byline shows the month and year, with the exact date in datetime');
     assert.ok(!/<a class="site-btn[^>]*>/.test(std.html.match(/<section class="pg-hero pg-hero-plain">[\s\S]*?<\/section>/)[0]), 'no button in its hero');
     const t = visibleText(std.article);
     for (const must of ['APA 7th edition', 'References', 'Unsplash and Pexels', DISCLAIMER, 'Photo: Barro Kitchens', 'hello@barroindustries.com', 'Updated', 'general information, not legal or professional advice', 'metric units and British spelling', 'Quick answer', 'We do not cite a source we have not read']) assert.ok(t.includes(must), `the standards page lacks "${must}"`);
@@ -1928,17 +1945,21 @@ describe('guides: the journal — registry, hub structure, photographs and credi
   it('keeps both generators honest: scripts/apply-guide-template.js --check and scripts/build-guides-hub.js --check pass on the repository, and each fails in a scratch copy where a generated part was edited by hand', () => {
     const run = (cwd, script) => spawnSync('node', [path.join(cwd, 'scripts', script), '--check'], { cwd, encoding: 'utf8' });
     for (const s of ['apply-guide-template.js', 'build-guides-hub.js']) { const r = run(ROOT, s); assert.equal(r.status, 0, `${s} --check:\n${r.stdout}${r.stderr}`); }
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kg-gen-'));
+    const tmp = kgScratchCopy();
     try {
-      for (const f of ['scripts/guides-lib.js', 'scripts/apply-guide-template.js', 'scripts/build-guides-hub.js', 'scripts/guides-hub.json', 'scripts/guide-answers.json', ...fs.readdirSync(path.join(ROOT, 'scripts')).filter((x) => /^guide-photos-.*\.json$/.test(x)).map((x) => 'scripts/' + x)]) { fs.mkdirSync(path.dirname(path.join(tmp, f)), { recursive: true }); fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f)); }
-      for (const p of PAGES) { fs.mkdirSync(path.dirname(path.join(tmp, p.file)), { recursive: true }); fs.writeFileSync(path.join(tmp, p.file), p.html); }
-      // photo files are only stat-ed and measured: link the folders
-      fs.mkdirSync(path.join(tmp, 'site/img'), { recursive: true });
-      for (const d of ['guides', 'projects', 'pages']) fs.symlinkSync(path.join(ROOT, 'site/img', d), path.join(tmp, 'site/img', d));
       const pairs = [
         ['apply-guide-template.js', `guides/${CFG.articles[3].slug}/index.html`, (h) => h.replace('<p class="art-answer-title">Quick answer</p>', '<p class="art-answer-title">Short answer</p>'), 'a Quick answer title edited by hand'],
         ['apply-guide-template.js', `guides/${CFG.articles[4].slug}/index.html`, (h) => h.replace(/<span class="art-credit">Photo:/, '<span class="art-credit">Image:'), 'the photo credit edited by hand'],
         ['build-guides-hub.js', 'guides/index.html', (h) => h.replace('<h2 id="start-here-h">Building a kitchen, step by step</h2>', '<h2 id="start-here-h">Start here</h2>'), 'a generated heading edited by hand'],
+        // owner ruling 2026-11-23: a visible date is a month and a year. A day put back by hand (the datetime stays exact) is stale to the generators
+        ['apply-guide-template.js', `guides/${CFG.articles[5].slug}/index.html`, (h) => h.replace(/(<p class="art-meta">[\s\S]*?<time datetime="\d{4}-\d{2}-\d{2}">)[^<]*(<\/time>)/, (m, a, b) => `${a}19 November 2026${b}`), 'the byline date written with a day by hand'],
+        ['apply-guide-template.js', arts.find((p) => p.modified.slice(0, 7) > p.published.slice(0, 7)).file, (h) => h.replace(/(<p class="art-meta-note">Updated <time datetime="\d{4}-\d{2}-\d{2}">)[^<]*(<\/time>)/, (m, a, b) => `${a}23 Nov 2026${b}`), 'the "Updated" note written with a day by hand'],
+        // owner follow-up 2026-11-23: the visible "Updated" note exists only when the change fell in a later month than the publication. An article modified in the month of publication has none
+        // (a note put back by hand is stale), and one modified in a later month must have it (a note taken away by hand is stale)
+        ['apply-guide-template.js', arts.find((p) => p.modified > p.published && p.modified.slice(0, 7) === p.published.slice(0, 7)).file, (h) => h.replace('<p class="art-meta-note">', '<p class="art-meta-note">Updated <time datetime="2026-11-23">November 2026</time><span aria-hidden="true">·</span>'), 'an "Updated" note put back by hand on an article modified in the month of publication'],
+        ['apply-guide-template.js', arts.find((p) => p.modified.slice(0, 7) > p.published.slice(0, 7)).file, (h) => h.replace(/<p class="art-meta-note">Updated <time datetime="\d{4}-\d{2}-\d{2}">[^<]*<\/time><span aria-hidden="true">·<\/span>/, '<p class="art-meta-note">'), 'the "Updated" note taken away by hand from an article modified in a later month than it was published'],
+        ['build-guides-hub.js', 'guides/index.html', (h) => h.replace(/(<p class="kg-meta"><time datetime="\d{4}-\d{2}-\d{2}">)[^<]*(<\/time>)/, (m, a, b) => `${a}19 Nov 2026${b}`), 'a hub card date written with a day by hand'],
+        ['build-guides-hub.js', 'guides/index.html', (h) => h.replace(/(<span>Updated <time datetime="\d{4}-\d{2}-\d{2}">)[^<]*(<\/time>)/, (m, a, b) => `${a}23 November 2026${b}`), 'the hub dateline written with a day by hand'],
       ];
       for (const [script, file, fn, what] of pairs) {
         const f = path.join(tmp, file), t = fs.readFileSync(f, 'utf8'), next = fn(t);
@@ -1950,6 +1971,169 @@ describe('guides: the journal — registry, hub structure, photographs and credi
         assert.match(r.stderr, /FAIL/, what);
       }
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Dates on The Kitchen Guide (owner ruling 2026-11-23): every date a READER sees is a month and a year ("November 2026"; a hub card abbreviates the month, "Nov 2026", to keep "<date> · 6 min read" on
+// one line on a phone) — the hub's dateline and its cards, each byline, each "Updated" note, the
+// editorial standards page — so the journal does not look as if many articles came out on one day. The EXACT dates stay where machines read them and never move: <time datetime="YYYY-MM-DD">, the
+// JSON-LD datePublished / dateModified, article:published_time / article:modified_time and the sitemap's lastmod. ONE function formats a visible date (monthYear in scripts/guides-lib.js);
+// scripts/apply-guide-template.js writes it into every byline and "Updated" note and scripts/build-guides-hub.js into the dateline and the cards, and their --check fails on a day put back by hand.
+// The dates of OTHER people's documents are facts about those documents, not dates of the journal, and stay as the sources give them: a source's own date inside a References entry ("(2026, May 14)",
+// "January 18, 2023 version") and a law's own date in the text (the Fire Code guide's "approved on 19 December 2008"). The one date of OURS that a References entry carries, the day a web page was
+// read ("Retrieved November 2026, from …"), is a month and a year like every other.
+describe('guides: dates are shown as a month and a year, never a day (owner ruling 2026-11-23) — and the exact dates stay in the page data', () => {
+  const hub = byPath('/guides/');
+  const std = byPath(STANDARDS);
+  const arts = articles;
+  const MON = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const ABBR = 'Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec';
+  const YEAR = '(?:19|20)\\d\\d';
+  const MONTH_ANY = `(?:${MON}|${ABBR})\\.?`;
+  // every way English prose writes a date WITH A DAY. None may appear in the visible text of a guide page (the allowance below aside)
+  const DAY_FORMS = [
+    ['D Month YYYY', new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)? (?:${MON}) ${YEAR}\\b`)],
+    ['D Mon YYYY', new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)? (?:${ABBR})\\.? ${YEAR}\\b`)],
+    ['D Month, no year', new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)? (?:of )?(?:${MON})\\b(?! ${YEAR})`)],
+    ['an ISO date', new RegExp(`\\b${YEAR}-\\d{2}-\\d{2}\\b`)],
+    ['"Retrieved" with a day', new RegExp(`\\bRetrieved\\s+(?:${MONTH_ANY}\\s+\\d{1,2},?|\\d{1,2}\\s+${MONTH_ANY}),?\\s+${YEAR}\\b`)],
+  ];
+  // these two are a SOURCE's own date when they stand in a References entry (APA writes "(2026, May 14)" and "January 18, 2023 version"), and OURS anywhere else
+  const SOURCE_FORMS = [
+    ['Month D, YYYY', new RegExp(`\\b${MONTH_ANY} \\d{1,2}(?:st|nd|rd|th)?,? ${YEAR}\\b`)],
+    ['(YYYY, Month D)', new RegExp(`\\b${YEAR}, ${MONTH_ANY} \\d{1,2}\\b`)],
+  ];
+  // the date of someone else's document, stated in our text (page slug → the exact words): a fact about that document, which the journal does not round
+  const THEIR_DATES = { 'fire-code-kitchen-exhaust-and-suppression': ['approved on 19 December 2008'] };   // Republic Act No. 9514, the Revised Fire Code of the Philippines
+  // what a visitor or a crawler reads as text: the body text, alt / title / aria-label, the title and the head's meta descriptions (not the article:* dates, which are data)
+  const strings = (p, { refs = true } = {}) => [
+    ...p.S.texts.filter((t) => inBody(t.chain) && (refs || !inRefs(t.chain))).map((t) => decode(t.text)),
+    ...p.S.attrs.filter((a) => ['alt', 'title', 'aria-label'].includes(a.name)).map((a) => decode(a.value)),
+    ...p.S.elements.filter((e) => e.tag === 'meta' && e.attrs.content && !/^article:/.test(e.attrs.property || '')).map((e) => decode(e.attrs.content)),
+    p.title,
+  ];
+  const hits = (p, forms, opts) => {
+    const allow = THEIR_DATES[p.slug] || [];
+    const out = [];
+    for (const s0 of strings(p, opts)) {
+      const s = allow.reduce((t, a) => t.split(a).join(' '), s0);
+      for (const [name, re] of forms) { const m = re.exec(s); if (m) out.push(`${name}: "${m[0]}"`); }
+    }
+    return out;
+  };
+
+  it('shows every <time> of every guide page as the month and year of its own datetime, which is always a full, real YYYY-MM-DD date — the month spelled out in the hub dateline, each byline and each "Updated" note ("November 2026"), abbreviated on a hub card ("Nov 2026")', () => {
+    const ABBR_MONTH = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec';
+    let n = 0, cards = 0;
+    for (const p of PAGES) {
+      const all = (p.html.match(/<time\b/g) || []).length;
+      const els = [...p.html.matchAll(/(<p class="kg-meta">)?<time datetime="([^"]*)">([^<]*)<\/time>/g)];
+      assert.equal(els.length, all, `${p.path}: every <time> is <time datetime="…">text</time>`);
+      for (const [, card, dt, text] of els) {
+        assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(dt) && new Date(dt + 'T00:00:00Z').toISOString().slice(0, 10) === dt, `${p.path}: datetime="${dt}" is a full, real date`);
+        if (card) {
+          cards++;
+          assert.equal(p.path, '/guides/', 'a card date is on the hub');
+          assert.equal(text, monthYearShort(dt), `${p.path}: the card date of <time datetime="${dt}">`);
+          assert.ok(new RegExp(`^(?:${ABBR_MONTH}) ${YEAR}$`).test(text), `${p.path}: "${text}" is an abbreviated month and a year`);
+        } else {
+          assert.equal(text, monthYear(dt), `${p.path}: the text of <time datetime="${dt}">`);
+          assert.ok(new RegExp(`^(?:${MON}) ${YEAR}$`).test(text), `${p.path}: "${text}" is a month and a year`);
+        }
+      }
+      n += els.length;
+    }
+    assert.ok(cards >= arts.length, `${cards} hub cards: at least one for every article`);
+    assert.ok(n >= 2 * arts.length + 2, `${n} <time> elements: a byline and a hub card for every article, the standards page's byline and the hub's dateline at the least`);
+  });
+
+  it('shows no date with a day on any guide page — not "23 November 2026", "23 Nov 2026", "23 November", an ISO date or "Retrieved November 23, 2026" — in the text, the alt text, the title or the meta descriptions of the hub, the editorial standards page and every article', () => {
+    assert.ok(PAGES.length >= 132 && PAGES.every((p) => p.html), 'the hub, the standards page and every article were read');
+    for (const p of PAGES) assert.deepEqual(hits(p, DAY_FORMS), [], `${p.path}: a date with a day is visible`);
+    // the one allowance is real (a stale allowance fails, so the list cannot rot) and is a law's date, not the journal's
+    for (const [slug, phrases] of Object.entries(THEIR_DATES)) for (const ph of phrases) assert.equal(byPath(`/guides/${slug}/`).body.split(ph).length - 1, 1, `${slug}: the allowed phrase "${ph}" is no longer on the page, so drop it from THEIR_DATES`);
+  });
+
+  it('lets a source\'s own date keep its day only inside a References entry ("(2026, May 14)", "January 18, 2023 version") — outside References, "Month D, YYYY" and "(YYYY, Month D)" would be a date of the journal, and are never shown', () => {
+    for (const p of PAGES) assert.deepEqual(hits(p, SOURCE_FORMS, { refs: false }), [], `${p.path}: a date with a day outside References`);
+    // the exemption is real, not vacuous: the References lists do state sources' own dates with a day (the day a page was read, "Retrieved …", is OURS and is covered by the test above)
+    const refsText = arts.map((p) => p.S.texts.filter((t) => inRefs(t.chain)).map((t) => decode(t.text)).join(' '));
+    assert.ok(refsText.some((t) => SOURCE_FORMS.some(([, re]) => re.test(t))), 'References entries state their sources\' own dates with a day');
+  });
+
+  it('keeps the exact dates in the page data, unrounded: each byline <time datetime> is the registered published date and each "Updated" <time datetime> (shown only when the change fell in a later month than the publication) the modified date; article:published_time / article:modified_time and the JSON-LD datePublished / dateModified carry the day for EVERY article, the note shown or not (the JSON-LD with its +08:00 time); so do the hub\'s and the standards page\'s JSON-LD; and every guide URL\'s sitemap lastmod is a full date', () => {
+    const full = /^\d{4}-\d{2}-\d{2}$/, stamp = (d) => `${d}T08:00:00+08:00`;
+    for (const p of arts) {
+      const byline = p.html.match(/<p class="art-meta">[\s\S]*?<\/p>/)[0];
+      assert.equal((byline.match(/<time datetime="([^"]+)"/) || [])[1], p.published, `${p.path}: the byline's datetime is the published date`);
+      const note = (p.html.match(/<p class="art-meta-note">[\s\S]*?<\/p>/) || [''])[0];
+      assert.equal((note.match(/<time datetime="([^"]+)"/) || [])[1], p.modified.slice(0, 7) > p.published.slice(0, 7) ? p.modified : undefined, `${p.path}: the "Updated" datetime is the exact modified date (and there is no visible note when the change was in the month of publication; the exact dateModified is still in the data, below)`);
+      assert.ok(full.test(p.meta('article:published_time')) && p.meta('article:published_time') === p.published, `${p.path}: article:published_time`);
+      assert.ok(full.test(p.meta('article:modified_time')) && p.meta('article:modified_time') === p.modified, `${p.path}: article:modified_time`);
+      const a = p.node('Article')[0];
+      assert.equal(a.datePublished, stamp(p.published), `${p.path}: JSON-LD datePublished`);
+      assert.equal(a.dateModified, stamp(p.modified), `${p.path}: JSON-LD dateModified`);
+    }
+    const newest = arts.reduce((m, a) => [a.published, a.modified].reduce((x, y) => (y > x ? y : x), m), '0000-00-00');
+    assert.ok(hub.html.includes(`<span>Updated <time datetime="${newest}">${monthYear(newest)}</time></span>`), 'the hub dateline: the month (spelled out) and year of the newest exact date');
+    assert.equal(hub.node('CollectionPage')[0].dateModified, stamp(newest), 'the hub\'s JSON-LD dateModified is the newest exact date');
+    const wp = std.node('WebPage')[0];
+    assert.equal(wp.datePublished, stamp('2026-11-23'), 'the standards page: JSON-LD datePublished');
+    assert.equal(wp.dateModified, stamp('2026-11-23'), 'the standards page: JSON-LD dateModified');
+    assert.ok(std.html.includes('<time datetime="2026-11-23">November 2026</time>'), 'the standards page: the byline shows the month and year of its exact date');
+    const sm = read('sitemap.xml');
+    for (const p of PAGES) { const m = new RegExp(`<loc>${p.url}</loc>\\s*<lastmod>([^<]*)</lastmod>`).exec(sm); assert.ok(m && full.test(m[1]), `${p.path}: its sitemap lastmod ("${m && m[1]}") is a full date`); }
+  });
+
+  it('shows the "Updated" note only when the article was modified in a LATER MONTH than the one it was published in: a change made in the month of publication is in the data only (the exact dateModified and article:modified_time, no visible note), a change in a later month shows the note (a year boundary included) — the generator run in a scratch copy with the dates moved, and the repository\'s own pages checked against the same rule', () => {
+    const later = (p) => p.modified.slice(0, 7) > p.published.slice(0, 7);
+    // the repository: the visible note is exactly the later-month changes, and both kinds exist (so the rule is exercised, not assumed)
+    const withNote = arts.filter(later), sameMonth = arts.filter((p) => p.modified > p.published && !later(p));
+    assert.ok(withNote.length >= 1 && sameMonth.length >= 1, `the pages hold both cases: ${withNote.length} with a note, ${sameMonth.length} modified in the month of publication`);
+    for (const p of arts) assert.equal(/<p class="art-meta-note">Updated\b/.test(p.html), later(p), `${p.path}: published ${p.published}, modified ${p.modified}: the visible "Updated" note ${later(p) ? 'is' : 'is not'} expected`);
+    for (const p of sameMonth) assert.ok(p.meta('article:modified_time') === p.modified && p.node('Article')[0].dateModified === `${p.modified}T08:00:00+08:00`, `${p.path}: no note, but the exact dateModified is in the data`);
+    // the generator: scenarios in a scratch copy (published → modified, the note's month or none)
+    const target = arts.find((p) => p.cfg.modified && p.published === '2026-11-19');
+    assert.ok(target, 'an article published on 2026-11-19 that the registry modifies');
+    const tmp = kgScratchCopy();
+    try {
+      const cfgFile = path.join(tmp, 'scripts/guides-hub.json'), pageFile = path.join(tmp, target.file);
+      const link = `<a href="${STANDARDS}">How we research and cite</a>`;
+      const scenarios = [
+        ['2026-11-19', '2026-11-19', null, 'never modified'],
+        ['2026-11-19', '2026-11-30', null, 'modified later in the month of publication'],
+        ['2026-12-01', '2026-12-31', null, 'modified at the other end of the same month'],
+        ['2026-11-19', '2026-12-01', 'December 2026', 'modified one month after the publication, a few days later'],
+        ['2026-10-05', '2026-11-23', 'November 2026', 'published in October, modified in November'],
+        ['2026-12-30', '2027-01-02', 'January 2027', 'modified across a year boundary'],
+        ['2026-01-15', '2027-01-20', 'January 2027', 'modified a year later, in the same month of the year'],
+      ];
+      for (const [published, modified, noteMonth, what] of scenarios) {
+        const cfg = JSON.parse(JSON.stringify(CFG));
+        cfg.articles.find((a) => a.slug === target.slug).modified = modified;
+        fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2));
+        fs.writeFileSync(pageFile, target.html.replace(/(<p class="art-meta">[\s\S]*?<time datetime=")\d{4}-\d{2}-\d{2}(">)/, (m, a, b) => `${a}${published}${b}`));
+        const r = spawnSync('node', [path.join(tmp, 'scripts/apply-guide-template.js')], { cwd: tmp, encoding: 'utf8' });
+        assert.equal(r.status, 0, `${what}: the generator ran:\n${r.stdout}${r.stderr}`);
+        const html = fs.readFileSync(pageFile, 'utf8');
+        const note = html.match(/<p class="art-meta-note">([\s\S]*?)<\/p>/)[1];
+        assert.equal(note, noteMonth ? `Updated <time datetime="${modified}">${noteMonth}</time><span aria-hidden="true">·</span>${link}` : link, `${what} (${published} → ${modified}): the note`);
+        assert.ok(html.includes(`<time datetime="${published}">${monthYear(published)}</time>`), `${what}: the byline keeps its exact datetime`);
+        assert.ok(html.includes(`"dateModified": "${modified}T08:00:00+08:00"`) && html.includes(`<meta property="article:modified_time" content="${modified}">`), `${what}: the exact dateModified and article:modified_time are in the data, note or no note`);
+        const again = spawnSync('node', [path.join(tmp, 'scripts/apply-guide-template.js'), '--check'], { cwd: tmp, encoding: 'utf8' });
+        assert.equal(again.status, 0, `${what}: the page is a fixed point of the generator:\n${again.stdout}${again.stderr}`);
+      }
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
+  it('tells the reader, on the editorial standards page, what they see and where the exact date is: a month and a year for publishing, "Updated" with the month and year of a change made in a later month, the exact dates of publication and of the latest change in the page\'s own data (a change in the month of publication recorded there, not on the page) — which is what the pages do (the tests above)', () => {
+    const t = visibleText(std.html.match(/<section id="dates"[\s\S]*?<\/section>/)[0]);
+    for (const must of ['Every article shows the month and year it was published.', 'When its text, figures or sources change in a later month, it also shows “Updated” with the month and year of that change.', 'The exact dates of publication and of the latest change are kept in the page’s own data, which search engines and other software read, so a change made in the month of publication is recorded there, not on the page.', 'A change of photograph or layout alone does not move the date.']) assert.ok(t.includes(must), `the "dates" section lacks: ${must}`);
+    assert.ok(!/shows the date it was published|with that date|sources change, it also shows/.test(t), 'the older wordings (the exact day; an "Updated" note for every change) are gone');
+    // the corrections section no longer promises a visible "Updated" date: it records the date of the correction
+    const fix = visibleText(std.html.match(/<section id="corrections"[\s\S]*?<\/section>/)[0]);
+    assert.ok(fix.includes('We check each report, correct confirmed errors and record the date of the correction.') && !/move the “Updated” date/.test(fix), 'the corrections section: the date of the correction is recorded');
   });
 });
 
