@@ -423,9 +423,13 @@ describe('Warranty & after-sales: the owner\'s two facts, exactly', () => {
     assert.match(warranty, /<h2 id="warranty-h">Warranty &amp; after-sales<\/h2>/);
   });
 
-  it('adds no other term: only the numbers 6 and 12, no lifetime / guarantee / parts / labour / free / unlimited', () => {
+  it('both cards show 12 months in the big figure (the 6-month warranty is retired, owner 2026-11-20)', () => {
+    assert.deepEqual(cards.map(c => (c.match(/<span class="wcard-num">([^<]*)<\/span>/) || [])[1]), ['12', '12']);
+  });
+
+  it('adds no other term: only the number 12, no lifetime / guarantee / parts / labour / free / unlimited', () => {
     const t = visibleText(warranty);
-    assert.deepEqual([...new Set(t.match(/\d+/g))].sort(), ['12', '6']);
+    assert.deepEqual([...new Set(t.match(/\d+/g))].sort(), ['12']);
     assert.ok(!/\b(lifetime|guarantee[ds]?|parts|labou?r|free|unlimited|replacement|on[- ]site|24\/7|hours?|days?|years?|extended|full coverage)\b/i.test(t), 'a term the owner did not give is in the warranty section');
   });
 

@@ -751,7 +751,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
     for (const p of PAGES.filter((x) => x.kind !== 'hub')) {
       const s = p.section('warranty');
       assert.deepEqual((s.match(/<article class="wcard">[\s\S]*?<\/article>/g) || []).map(textOf), cards, `${p.path}: warranty cards`);
-      assert.deepEqual([...new Set(textOf(s).match(/\d+/g))].sort(), ['12', '6']);
+      assert.deepEqual([...new Set(textOf(s).match(/\d+/g))].sort(), ['12']);
     }
   });
 

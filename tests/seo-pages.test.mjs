@@ -1197,7 +1197,7 @@ describe('the homepage\'s own words, kept: the projects, the process, the warran
       const section = p.html.match(/<section id="warranty"[\s\S]*?<\/section>/)[0];
       assert.deepEqual([...section.matchAll(/<article class="wcard">([\s\S]*?)<\/article>/g)].map((m) => visibleText(m[1])), cards, `${p.path}: warranty cards`);
       const t = visibleText(section);
-      assert.deepEqual([...new Set(t.match(/\d+/g))].sort(), ['12', '6']);
+      assert.deepEqual([...new Set(t.match(/\d+/g))].sort(), ['12']);
       assert.ok(!/\b(lifetime|guarantee[ds]?|parts|labou?r|free|unlimited|replacement|on[- ]site|24\/7|hours?|days?|years?|extended|full coverage)\b/i.test(t), `${p.path}: a warranty term the owner did not give`);
     }
     assert.deepEqual(PAGES.filter((x) => x.html.includes('id="warranty"')).map((x) => x.path), ['/services/', ...SERVICE_SLUGS.map((x) => `/services/${x}/`)]);
