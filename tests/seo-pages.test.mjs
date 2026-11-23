@@ -820,7 +820,7 @@ describe('the brand (owner ruling 2026-11-20): Barro Kitchens is the public bran
       assert.ok(p.footer.includes('<p class="foot-name">Barro Kitchens</p>'), `${p.path}: the footer name`);
       assert.ok(p.footer.includes(`<p>by Barro Industries OPC<br>${ADDRESS}</p>`));
       assert.ok(p.footer.includes('<p>Sales <a href="tel:+639208018475">0920 801 8475</a> · Office <a href="tel:+639276836300">0927 683 6300</a> · <a href="mailto:hello@barroindustries.com">hello@barroindustries.com</a></p>'));
-      assert.ok(p.footer.includes('© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.'));
+      assert.ok(p.footer.includes('© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission.'));
     });
   });
 

@@ -571,7 +571,7 @@ describe('4 · the brand (owner ruling 2026-11-20): "Barro Kitchens" is the publ
       assert.ok(/<a href="\/" id="site-brand"><img src="\/?site\/img\/barro-kitchens-96\.webp" width="36" height="36" alt="Barro Kitchens"><span class="site-brand-text"><span class="site-brand-name">Barro Kitchens<\/span><span class="site-brand-sub">by Barro Industries OPC<\/span><\/span><\/a>/.test(p.html), `${p.file}: the header lockup`);
       assert.ok(p.footer.includes('<p class="foot-name">Barro Kitchens</p>\n      <p>by Barro Industries OPC<br>21 Capricorn St.'), `${p.file}: the footer lead`);
       assert.ok(p.footer.includes('<a href="tel:+639276836300">0927 683 6300</a> · <a href="mailto:hello@barroindustries.com">hello@barroindustries.com</a>'));
-      assert.ok(p.footer.includes('Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.'), `${p.file}: the copyright notice in the footer`);
+      assert.ok(p.footer.includes('Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission.'), `${p.file}: the copyright notice in the footer`);
     }
     assert.ok(home.footer.includes('<span data-brand>Barro Kitchens</span> is a brand of Barro Industries OPC.'));
     assert.ok(catalogue.footer.includes('<span data-brand>Barro Kitchens</span> is a brand of Barro Industries OPC.'));

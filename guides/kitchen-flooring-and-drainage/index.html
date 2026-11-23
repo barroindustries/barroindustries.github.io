@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-LHfrBvGCBGzRtlSHWsze0orocjUjrt5otfMH8bLdYwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Commercial Kitchen Flooring and Drainage | Barro Kitchens</title>
 <meta name="description" content="Commercial kitchen flooring and drainage: finish, slope, floor drains, trench drains and where equipment stands. A guide from Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/kitchen-flooring-and-drainage/">
@@ -28,7 +28,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="DMMMSU — room installed with stainless-steel tables, racks and shelving">
 <meta property="article:published_time" content="2026-11-19">
-<meta property="article:modified_time" content="2026-11-19">
+<meta property="article:modified_time" content="2026-11-23">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Commercial Kitchen Flooring and Drainage | Barro Kitchens">
 <meta name="twitter:description" content="Commercial kitchen flooring and drainage: finish, slope, floor drains, trench drains and where equipment stands. A guide from Barro Kitchens (Barro Industries).">
@@ -47,7 +47,7 @@
         "https://barroindustries.com/site/img/pages/og-dmmmsu.webp"
       ],
       "datePublished": "2026-11-19T08:00:00+08:00",
-      "dateModified": "2026-11-19T08:00:00+08:00",
+      "dateModified": "2026-11-23T08:00:00+08:00",
       "inLanguage": "en-PH",
       "author": {
         "@type": "Organization",
@@ -85,6 +85,38 @@
       },
       "copyrightYear": 2026,
       "copyrightNotice": "© 2026 Barro Industries OPC. All rights reserved.",
+      "citation": [
+        {
+          "@type": "CreativeWork",
+          "name": "Mandatory grease interceptors for food service establishments",
+          "url": "https://www.toronto.ca/services-payments/water-environment/water-sewer-related-permits-and-bylaws/sewers-by-law/mandatory-grease-traps-for-food-service-establishments/",
+          "author": {
+            "@type": "Organization",
+            "name": "City of Toronto"
+          },
+          "datePublished": "2026"
+        },
+        {
+          "@type": "CreativeWork",
+          "name": "Preventing slips and trips in kitchens and food service",
+          "url": "https://www.hse.gov.uk/pubns/cais6.pdf",
+          "author": {
+            "@type": "Organization",
+            "name": "Health and Safety Executive"
+          },
+          "datePublished": "2017"
+        },
+        {
+          "@type": "CreativeWork",
+          "name": "Food Code 2022",
+          "url": "https://www.fda.gov/media/164194/download",
+          "author": {
+            "@type": "Organization",
+            "name": "U.S. Food and Drug Administration"
+          },
+          "datePublished": "2023"
+        }
+      ],
       "mainEntityOfPage": {
         "@id": "https://barroindustries.com/guides/kitchen-flooring-and-drainage/#webpage"
       }
@@ -933,8 +965,8 @@ body{margin:0;background:#fff;color:#0E1116}
 }
 #site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
-   (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
-   contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
+   (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds what a long article needs on top of those (a reading column, a
+   contents block, lists, notes, a checklist, two "choose" cards, the byline, the Quick answer, References, credited photographs) and the journal front page. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
    Not precached by the service worker, like css/pages.css. No inline style anywhere (the pages' CSP has no 'unsafe-inline'). No 4-digit z-index (CHECK 1).
    Phone first: every grid is minmax(0,1fr), nothing is wider than the viewport. */
 
@@ -1026,25 +1058,29 @@ body{margin:0;background:#fff;color:#0E1116}
 /* ── a closing paragraph with the three ways to start ── */
 #site .art-next{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
 
-/* ── the guides index: one wide card per guide ── */
-#site .art-cards{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
-@media (min-width:900px){
-  #site .art-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
-}
-
 /* ── the copyright notice at the foot of an article (and of the index) ── */
 #site .art .art-copy{margin-top:22px;color:var(--site-muted);font-size:13.5px;line-height:1.6}   /* the last question above it already ends in a hairline */
 #site .art-copy-index{margin-top:clamp(32px,4vw,48px);padding-top:18px;border-top:1px solid var(--site-line);color:var(--site-muted);font-size:13.5px;line-height:1.6;max-width:44rem}
 
-/* ══ The Kitchen Guide (2026-11-19, owner: "make it look like an online magazine or guide") ═════════════════════════════════════════════
-   The index is a magazine front: a masthead, a section bar that stays under the header while you scroll, a featured spread, then one
-   block per section — three lead stories with a picture, the rest as a compact two-column list with a small thumbnail. Every entry is
-   still one <article class="pg-card"> with one link, so the cards, the ItemList and the tests read it the same way. */
-#site .kg-mast .pg-hero-copy{max-width:46rem}
-#site .kg-mast h1{font-size:clamp(2.6rem,4.2vw + 1rem,4.4rem);letter-spacing:-.01em}
-#site .kg-count{margin-top:16px;color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+/* ══ The Kitchen Guide, a journal (2026-11-23; specs/KITCHEN-GUIDE-JOURNAL-SPEC.md §9) ═══════════════════════════════════════════════
+   The front page is a publication: nameplate, topic bar under the header, one lead story and four features, "Start here", "Latest", then a block
+   per topic (three photo cards, rows, a native <details> for the rest). Flat and calm: navy type, hairlines, gold only as rules and small caps.
+   Every entry is one <article class="pg-card"> with one link (the stretched h3 a::after of pages.css). Generated by scripts/build-guides-hub.js
+   (the hub) and scripts/apply-guide-template.js (the answer, byline note, credit, References, related parts of an article). */
 
-/* the section bar: chips that scroll sideways on a phone, sticky under the header */
+/* the masthead */
+#site .kg-mast{padding:clamp(18px,3vw,32px) 0 0;background:#fff;text-align:center}
+#site .kg-mast .pg-hero-copy{max-width:none}
+#site .kg-mast .crumbs ol{justify-content:center}
+#site .kg-dateline{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 20px;padding:10px 0;border-top:1px solid var(--site-line);border-bottom:1px solid var(--site-line);color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+#site .kg-mast h1{margin:clamp(22px,3.6vw,44px) 0 6px;font-size:clamp(2.9rem,6.4vw + .8rem,5.5rem);line-height:1;letter-spacing:-.02em}
+#site .kg-by{color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.22em;text-transform:uppercase}
+#site .kg-tagline{max-width:38rem;margin:16px auto 0;color:var(--site-muted);font:italic 400 clamp(1.05rem,.5vw + .98rem,1.25rem)/1.5 var(--site-serif)}
+#site .kg-count{margin-top:clamp(20px,3vw,32px);padding:12px 0 14px;border-bottom:3px double var(--site-navy);color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+#site .kg-count a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:3px}
+@media (min-width:560px){#site .kg-dateline{justify-content:space-between}}
+
+/* the topic bar: chips that scroll sideways on a phone, sticky under the header */
 #site .kg-nav{position:sticky;top:var(--site-head);z-index:5;border-bottom:1px solid var(--site-line);background:rgba(255,255,255,.96);backdrop-filter:saturate(1.2) blur(6px)}
 #site .kg-nav ul{display:flex;gap:8px;overflow-x:auto;padding:12px 0;list-style:none;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 #site .kg-nav ul::-webkit-scrollbar{display:none}
@@ -1052,57 +1088,147 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .kg-nav a{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--site-line);border-radius:999px;background:#fff;color:var(--site-navy);font:500 14px/1.2 var(--site-sans);text-decoration:none;white-space:nowrap}
 #site .kg-nav a:hover{border-color:var(--site-navy)}
 #site .kg-nav a span{color:var(--site-gold-ink);font-weight:600;font-size:12px}
-#site .kg-sec{scroll-margin-top:calc(var(--site-head) + 64px)}
+@media (prefers-reduced-motion:reduce){#site .kg-nav{backdrop-filter:none}}
+
+/* section heads */
+#site .kg-sec,#site #start-here,#site #latest{scroll-margin-top:calc(var(--site-head) + 64px)}
 #site .kg-sec+.kg-sec{border-top:1px solid var(--site-line)}
 #site .kg-sec-head{display:grid;gap:8px;margin-bottom:clamp(22px,3vw,32px)}
 #site .kg-sec-head h2{font-size:clamp(1.9rem,1.8vw + 1.2rem,2.6rem)}
 #site .kg-sec-head p{max-width:40rem;color:var(--site-muted);font-size:1.0625rem}
 #site .kg-sec-head .eyebrow{margin-bottom:0}
+#site #featured-h{margin-bottom:18px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .kg-front{padding-top:clamp(28px,4vw,44px)}
 
-/* a story card: picture, kicker, serif headline, one line of standfirst */
-#site .kg-card .pg-card-media{aspect-ratio:16/10}
-#site .kg-card .pg-card-body{padding:18px 20px 20px}
-#site .kg-card h3{font-size:clamp(1.25rem,.5vw + 1.1rem,1.45rem)}
-#site .kg-card p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-#site .kg-kicker{display:block;margin-bottom:8px;color:var(--site-gold-ink);font:600 11.5px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
-#site .kg-lead{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+/* cards: flat, no box, no shadow */
+#site .kg-card{border:0;border-radius:0;background:none;overflow:visible}
+#site .kg-card:hover{box-shadow:none}
+#site .kg-card:hover h3 a{text-decoration:underline;text-decoration-color:var(--site-gold);text-decoration-thickness:1px;text-underline-offset:4px}
+#site .kg-card:focus-within{outline:2px solid var(--site-navy);outline-offset:4px}
+#site .kg-card h3 a:focus-visible{outline:0}
+#site .kg-card .pg-card-media{aspect-ratio:4/3;border-radius:4px}
+#site .kg-card .pg-card-body{padding:14px 0 0}
+#site .kg-card h3{margin-bottom:6px;font-size:clamp(1.2rem,.5vw + 1.05rem,1.4rem);line-height:1.22}
+#site .kg-card p{margin-bottom:10px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#site .kg-kicker{display:block;margin-bottom:6px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
+#site .kg-card p.kg-meta{display:flex;flex-wrap:wrap;gap:0 8px;margin:auto 0 0;color:var(--site-muted);font:500 12.5px/1.5 var(--site-sans);letter-spacing:.04em}
+#site .kg-meta span[aria-hidden]{color:var(--site-gold)}
 
-/* the featured spread: one large story beside four smaller ones */
-#site .kg-feature{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
-#site .kg-feature .kg-big h3{font-size:clamp(1.6rem,1.4vw + 1.1rem,2.2rem)}
-#site .kg-feature .kg-big p{-webkit-line-clamp:4;font-size:1.0625rem}
-#site .kg-side{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+/* a row: text left, small picture right */
+#site .kg-row{flex-direction:row-reverse;align-items:flex-start;gap:14px;padding:16px 0;border-bottom:1px solid var(--site-line)}
+#site .kg-row .pg-card-media{flex:none;width:96px}
+#site .kg-row .pg-card-body{padding:0}
+#site .kg-row h3{font-size:1.08rem;line-height:1.3}
+#site .kg-row p:not(.kg-meta){display:none}
+@media (min-width:720px){#site .kg-list .kg-row p:not(.kg-meta){display:-webkit-box;-webkit-line-clamp:2;font-size:.95rem;line-height:1.5}}
 
-/* the compact list: a small square thumbnail beside the headline */
-#site .kg-list{display:grid;grid-template-columns:minmax(0,1fr);gap:0 32px;margin-top:clamp(20px,3vw,28px);border-top:1px solid var(--site-line)}
-#site .kg-list .pg-card{flex-direction:row;align-items:flex-start;gap:14px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;background:none;box-shadow:none}
-#site .kg-list .pg-card:hover{box-shadow:none}
-#site .kg-list .pg-card:hover h3 a{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
-#site .kg-list .pg-card-media{flex:none;width:88px;aspect-ratio:1;border-radius:4px}
-#site .kg-list .pg-card-body{padding:0}
-#site .kg-list h3{margin-bottom:4px;font-size:1.1rem;line-height:1.3}
-#site .kg-list p{margin-bottom:0;font-size:.95rem;line-height:1.5;-webkit-line-clamp:2}
-#site .kg-list .link-arrow{display:none}
+/* the lead story, the features, "Start here" */
+#site .kg-front-grid,#site .kg-start-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(20px,3vw,32px)}
+#site .kg-lead-story h3{font-size:clamp(1.7rem,1.6vw + 1.2rem,2.5rem);line-height:1.12;letter-spacing:-.01em}
+#site .kg-lead-story p:not(.kg-meta){-webkit-line-clamp:4;font-size:1.0625rem}
+#site .kg-features{border-top:1px solid var(--site-line)}
+#site .kg-features .pg-card-media{width:112px}
+#site .kg-pillar{border-radius:6px;background:var(--site-navy);overflow:hidden}
+#site .kg-pillar .pg-card-media{border-radius:0}
+#site .kg-pillar .pg-card-body{padding:22px 22px 26px}
+#site .kg-pillar h3{color:#fff;font-size:clamp(1.5rem,1.2vw + 1.15rem,2.1rem)}
+#site .kg-pillar p{color:rgba(255,255,255,.82)}
+#site .kg-pillar .kg-kicker{color:var(--site-gold-lite)}
+#site .kg-pillar .link-arrow{color:#fff}
+#site .kg-pillar:focus-within{outline-color:var(--site-gold-lite)}
+#site .kg-steps{list-style:none;counter-reset:kgstep;border-top:1px solid var(--site-line)}
+#site .kg-steps>li{position:relative;padding-left:44px;counter-increment:kgstep}
+#site .kg-steps>li::before{content:counter(kgstep);position:absolute;left:2px;top:12px;color:var(--site-gold-big);font:500 2rem/1 var(--site-serif)}
 
+/* a topic: three photo cards, then rows */
+#site .kg-top{display:grid;grid-template-columns:minmax(0,1fr);gap:0}
+#site .kg-list{display:grid;grid-template-columns:minmax(0,1fr);gap:0 40px;border-top:1px solid var(--site-line)}
+#site .kg-top+.kg-list{margin-top:clamp(8px,2vw,24px)}
+@media (max-width:719px){
+  #site .kg-top .kg-card:first-child{padding-bottom:18px;border-bottom:1px solid var(--site-line)}
+  #site .kg-top .kg-card+.kg-card{flex-direction:row-reverse;align-items:flex-start;gap:14px;padding:16px 0;border-bottom:1px solid var(--site-line)}
+  #site .kg-top .kg-card+.kg-card .pg-card-media{flex:none;width:96px}
+  #site .kg-top .kg-card+.kg-card .pg-card-body{padding:0}
+  #site .kg-top .kg-card+.kg-card h3{font-size:1.08rem;line-height:1.3}
+  #site .kg-top .kg-card+.kg-card p:not(.kg-meta){display:none}
+  #site .kg-top+.kg-list{margin-top:0;border-top:0}
+}
 @media (min-width:720px){
-  #site .kg-lead,#site .kg-side{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .kg-features{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 40px}
+  #site .kg-top{grid-template-columns:repeat(3,minmax(0,1fr));gap:28px}
   #site .kg-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .kg-start-solo .kg-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(3,auto);grid-auto-flow:column;gap:0 40px}
 }
 @media (min-width:1024px){
-  #site .kg-lead{grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
-  #site .kg-feature{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:24px}
-  #site .kg-feature .kg-big .pg-card-media{aspect-ratio:4/3}
-  #site .kg-side{grid-template-columns:minmax(0,1fr);gap:0;border-top:1px solid var(--site-line)}
-  #site .kg-side .pg-card{flex-direction:row;align-items:flex-start;gap:16px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;box-shadow:none}
-  #site .kg-side .pg-card-media{flex:none;width:132px;aspect-ratio:4/3;border-radius:4px}
-  #site .kg-side .pg-card-body{padding:0}
-  #site .kg-side .link-arrow{display:none}
+  #site .kg-front-grid{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:40px;align-items:start}
+  #site .kg-features{display:block}
+  #site .kg-features .pg-card-media{width:150px}
+  #site .kg-start-grid{grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:40px;align-items:start}
+  #site .kg-start-solo .kg-start-grid{grid-template-columns:minmax(0,1fr)}
+  #site .kg-list-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #site .kg-top{gap:32px}
 }
-@media (prefers-reduced-motion:reduce){#site .kg-nav{backdrop-filter:none}}
 
-/* an article's kicker (its section) and reading time */
+/* "show the others" (a native <details>, no script) and the colophon */
+#site .kg-more{margin-top:20px}
+#site .kg-more>summary{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:0 18px;border:1px solid var(--site-navy);border-radius:4px;color:var(--site-navy);font:600 14px/1.2 var(--site-sans);cursor:pointer;list-style:none}
+#site .kg-more>summary{text-wrap:balance}
+#site .kg-more>summary::-webkit-details-marker{display:none}
+#site .kg-more>summary::after{content:"+";font-size:18px;line-height:1}
+#site .kg-more[open]>summary::after{content:"\2212"}
+#site .kg-more>summary:focus-visible{outline:2px solid var(--site-navy);outline-offset:3px}
+#site .kg-more[open]>.kg-list{margin-top:18px}
+#site .kg-colophon{border-top:3px double var(--site-navy)}
+#site .kg-colophon h2{margin-bottom:14px;font-size:1.5rem}
+#site .kg-colophon p{max-width:44rem;color:var(--site-muted);font-size:1rem;line-height:1.65}
+#site .kg-colophon p+p{margin-top:12px}
+#site .kg-colophon a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:3px}
+
+/* ── an article: the Quick answer, the byline note, the credit under a photograph, References, related reading ── */
+#site .art-answer{padding:18px 0 20px;border-top:2px solid var(--site-navy);border-bottom:1px solid var(--site-line)}
+#site .art-answer-title{margin-bottom:8px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .art-answer p+p{color:var(--site-navy);font:400 clamp(1.15rem,.5vw + 1.05rem,1.35rem)/1.5 var(--site-serif)}
+@media (min-width:1024px){
+  #site .art-wrap.has-answer .art-answer{grid-column:2;grid-row:1}
+  #site .art-wrap.has-answer .art-toc{grid-column:1;grid-row:1/span 2}
+  #site .art-wrap.has-answer .art{grid-column:2;grid-row:2}
+}
+#site .art-meta-note{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:6px;color:var(--site-muted);font:500 13px/1.5 var(--site-sans)}
+#site .art-meta-note a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:3px}
+#site .art-meta-note span[aria-hidden]{color:var(--site-gold)}
+#site .art-credit{display:block;margin-top:2px;font-size:12px;line-height:1.5}
+#site .pg-hero-media figcaption .art-credit a{color:inherit;font-weight:400;text-decoration:underline;text-decoration-color:var(--site-line-gold);text-underline-offset:2px}
+@media (min-width:900px){   /* the gold frame follows the 4:3 picture, not the taller figure */
+  #site .art-hero .pg-hero-media::after{inset:14px -14px auto 14px;height:auto;aspect-ratio:4/3}
+  #site .art-hero .pg-hero-media figcaption{margin-top:26px}
+}
+#site #references{padding-top:0}
+#site .art-refs>*{max-width:44rem}
+#site .art-refs h2{margin-bottom:14px;padding-top:22px;border-top:1px solid var(--site-line);font-size:1.35rem}
+#site .ref-list{list-style:none}
+#site .ref-list li{padding-left:1.75em;text-indent:-1.75em;color:var(--site-muted);font-size:.9rem;line-height:1.55;overflow-wrap:anywhere}
+#site .ref-list li+li{margin-top:10px}
+#site .ref-list cite{font-style:italic}
+#site .ref-list a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:2px}
+@media (min-width:1024px){
+  #site .art-refs{display:grid;grid-template-columns:minmax(0,15.5rem) minmax(0,44rem);justify-content:center;column-gap:clamp(48px,6vw,88px)}
+  #site .art-refs>*{grid-column:2}
+}
+#site .kg-related .pg-card-media{aspect-ratio:4/3}
+#site .kg-up{display:flex;flex-wrap:wrap;gap:12px 32px;margin-top:clamp(22px,3vw,32px)}
+#site .kg-up .link-arrow{text-wrap:balance}   /* a long link breaks in two even lines, so its arrow never stands alone */
+
+/* the section a guide belongs to, above its headline */
 #site .art-hero .kg-kicker a{color:inherit;text-decoration:none}
 #site .art-hero .kg-kicker a:hover{text-decoration:underline;text-underline-offset:4px}
+
+/* reading progress (spec §4.8): a 2px gold bar under the sticky header, CSS only, where scroll-driven animations exist and motion is welcome */
+@supports (animation-timeline:scroll()){
+  @media (prefers-reduced-motion:no-preference){
+    #site .art-hero::before{content:"";position:fixed;z-index:6;top:var(--site-head);left:0;width:100%;height:2px;background:var(--site-gold);transform-origin:0 50%;transform:scaleX(0);animation:art-progress linear both;animation-timeline:scroll(root)}
+    @keyframes art-progress{to{transform:scaleX(1)}}
+  }
+}
 </style>
 <!-- PAGE-CSS:END -->
 </head>
@@ -1130,21 +1256,26 @@ body{margin:0;background:#fff;color:#0E1116}
   <div class="site-wrap pg-hero-in">
     <div class="pg-hero-copy">
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">The Kitchen Guide</a></li><li><span aria-current="page">Kitchen flooring and drainage</span></li></ol></nav>
-      <p class="eyebrow kg-kicker"><a href="/guides/#planning">Planning and operations</a></p>
+      <p class="eyebrow kg-kicker"><a href="/guides/#design">Design and layout</a></p>
       <h1>Commercial Kitchen Flooring and Drainage: Floors, Slope, Drains and Trenches</h1>
       <p class="site-lead">Kitchens get wet every day. A floor that is sealed, non-slip and sloped to its drains keeps the room safe, clean and dry. Here is how to plan the finish, slope, drains and the equipment on top.</p>
       <p class="art-meta"><span>By Barro Kitchens</span><span aria-hidden="true">·</span><time datetime="2026-11-19">19 November 2026</time><span aria-hidden="true">·</span><span>6 min read</span></p>
+      <p class="art-meta-note">Updated <time datetime="2026-11-23">23 November 2026</time><span aria-hidden="true">·</span><a href="/guides/editorial-standards/">How we research and cite</a></p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?quote=1">Get a quote</a><a class="site-btn site-btn-outline" href="#finish">Start with the floor finish</a></p>
     </div>
     <figure class="pg-hero-media">
-      <img src="/site/img/projects/dmmmsu/02.webp" srcset="/site/img/projects/dmmmsu/02-thumb.webp 600w, /site/img/projects/dmmmsu/02.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="1600" height="1200" alt="DMMMSU — room installed with stainless-steel tables, racks and shelving" fetchpriority="high" decoding="async">
-      <figcaption>Stainless-steel tables, racks and shelving installed at DMMMSU.</figcaption>
+      <img src="/site/img/guides/kitchen-flooring-and-drainage.webp" srcset="/site/img/guides/kitchen-flooring-and-drainage-thumb.webp 600w, /site/img/guides/kitchen-flooring-and-drainage-1000.webp 1000w, /site/img/guides/kitchen-flooring-and-drainage.webp 1600w" sizes="(min-width:900px) 520px, 70vw" width="1600" height="900" alt="A long commercial kitchen with stainless steel counters, a wok range under a hood, and a red tile floor with a drain channel" fetchpriority="high" decoding="async">
+      <figcaption>Tile floor and a drain channel running along the cooking line of a large kitchen. <span class="art-credit">Photo: <a href="https://www.pexels.com/photo/spacious-industrial-kitchen-interior-with-stainless-steel-appliances-33986701/" rel="noopener nofollow" target="_blank">klgeoges</a> / Pexels. Stock photo for illustration — not a Barro Kitchens project.</span></figcaption>
     </figure>
   </div>
 </section>
 
 <section class="site-sec" aria-label="The guide">
-  <div class="site-wrap art-wrap">
+  <div class="site-wrap art-wrap has-answer">
+    <div class="art-answer">
+      <p class="art-answer-title">Quick answer</p>
+      <p>A commercial kitchen floor should be non-slip, non-absorbent, sealed and coved up the wall, such as sealed unglazed tile or a seamless resin floor, with the slope to the drains built in. Put drains where the water is: sinks, dishwashing and the cooking line. Tell your contractor where equipment stands before the floor is laid.</p>
+    </div>
     <nav class="art-toc" aria-label="In this guide">
       <p class="art-toc-title">In this guide</p>
       <ol>
@@ -1172,17 +1303,17 @@ body{margin:0;background:#fff;color:#0E1116}
         <h2 id="finish-h">Choosing the floor finish</h2>
         <p>Commercial kitchen flooring takes water, grease, heat, dropped pots and strong cleaners every day. Ask your flooring contractor for a finish that is:</p>
         <ul class="art-check">
-        <li>Non-slip when wet and greasy, with a texture that grips shoes but can still be scrubbed.</li>
-        <li>Non-absorbent, so water, grease and smells do not soak in.</li>
+        <li>Non-slip when wet and greasy, with a texture that grips shoes but can still be scrubbed (Health and Safety Executive [HSE], 2017).</li>
+        <li>Non-absorbent, so water, grease and smells do not soak in (U.S. Food and Drug Administration [FDA], 2023).</li>
         <li>Sealed, with few joints, because joints and grout lines hold dirt.</li>
-        <li>Coved up the wall, so the corner where floor meets wall can be cleaned.</li>
+        <li>Coved up the wall, so the corner where floor meets wall can be cleaned (FDA, 2023).</li>
         </ul>
         <p>Kitchens commonly use unglazed tile with sealed, chemical-resistant joints, or a seamless resin floor. Polished tile is slippery when wet, and bare concrete, timber and carpet absorb water and grease. Ask too about a waterproof layer under the finish: on an upper floor, a leak reaches the unit below.</p>
       </section>
 
       <section id="slope" aria-labelledby="slope-h">
         <h2 id="slope-h">Slope and where the water goes</h2>
-        <p>Water should run to a drain, not pool under a table or at a door. Your contractor builds a gentle fall into the slab or screed, toward each drain, before the finish goes on. Make it gentle enough that wheeled racks do not drift, and never let it fall toward a door, a cold room or the dining area.</p>
+        <p>Water should run to a drain, not pool under a table or at a door (FDA, 2023). Your contractor builds a gentle fall into the slab or screed, toward each drain, before the finish goes on. Make it gentle enough that wheeled racks do not drift, and never let it fall toward a door, a cold room or the dining area.</p>
         <ul>
         <li>Slope the wet zones, such as washing, preparation and the cooking line, to their own drains. A dry store can often stay level.</li>
         <li>Test the fall before the equipment goes in: run water over the bare floor and fix any puddle.</li>
@@ -1191,13 +1322,13 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="drains" aria-labelledby="drains-h">
         <h2 id="drains-h">Floor drains and the drain line</h2>
-        <p>Put a kitchen floor drain where the water is: beside sinks, at dishwashing, under steamers, and at the cooking line where you wash down. Do not hide one under equipment you cannot move, because someone must reach it to clear it.</p>
+        <p>Put a kitchen floor drain where the water is: beside sinks, at dishwashing, under steamers, and at the cooking line where you wash down (HSE, 2017). Do not hide one under equipment you cannot move, because someone must reach it to clear it.</p>
         <ul>
         <li><strong>Grate and basket.</strong> The grate lifts out for cleaning, and a basket catches solids. Choose a grate that carries trolley wheels without rocking.</li>
         <li><strong>Floor sink.</strong> A sunken basin that takes the waste from equipment. Ask your plumber whether each machine drains over a floor drain or a floor sink, rather than straight into the pipe.</li>
         <li><strong>Trap seal.</strong> Each drain holds a seal of water that blocks smells and pests. A rarely used drain dries out, so pour water in on a routine, or ask your plumber about a trap primer.</li>
         </ul>
-        <p>Fat that reaches a drain sets in the pipe, so ask your plumber which drains go to the grease trap: see our <a href="/guides/grease-trap-guide-restaurants/">grease trap guide</a>. In a flood-prone area, ask how the line is protected from backing up.</p>
+        <p>Fat that reaches a drain sets in the pipe, so ask your plumber which drains go to the grease trap (City of Toronto, 2026): see our <a href="/guides/grease-trap-guide-restaurants/">grease trap guide</a>. In a flood-prone area, ask how the line is protected from backing up.</p>
       </section>
 
       <section id="trench" aria-labelledby="trench-h">
@@ -1214,7 +1345,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="equipment" aria-labelledby="equipment-h">
         <h2 id="equipment-h">Equipment on the floor</h2>
-        <p>Stand equipment so the floor under and around it can be cleaned.</p>
+        <p>Stand equipment so the floor under and around it can be cleaned (FDA, 2023).</p>
         <ul>
         <li><strong>Feet.</strong> Our floor-standing tables, sinks, stoves and cabinets stand on square-tube posts with adjustable bullet feet, so they sit level and the floor can be cleaned underneath.</li>
         <li><strong>Walls.</strong> Close the gap behind a table with a backsplash, or leave room to clean behind it.</li>
@@ -1281,8 +1412,19 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
     </div>
   </section>
-      <p class="art-copy">© 2026 Barro Industries OPC. All rights reserved. All text, photographs and designs on this page are our own work and may not be copied or reused without written permission.</p>
+      <p class="art-copy">© 2026 Barro Industries OPC. All rights reserved. The text and designs on this page are our own work and may not be copied or reused without written permission. Photographs are credited where they appear.</p>
     </article>
+  </div>
+</section>
+
+<section id="references" class="site-sec" aria-labelledby="references-h">
+  <div class="site-wrap art-refs">
+    <h2 id="references-h">References</h2>
+    <ul class="ref-list">
+      <li>City of Toronto. (2026, May 14). <cite>Mandatory grease interceptors for food service establishments</cite>. <a href="https://www.toronto.ca/services-payments/water-environment/water-sewer-related-permits-and-bylaws/sewers-by-law/mandatory-grease-traps-for-food-service-establishments/" rel="noopener" target="_blank">https://www.toronto.ca/services-payments/water-environment/water-sewer-related-permits-and-bylaws/sewers-by-law/mandatory-grease-traps-for-food-service-establishments/</a></li>
+      <li>Health and Safety Executive. (2017). <cite>Preventing slips and trips in kitchens and food service</cite> (Catering Information Sheet No. 6). <a href="https://www.hse.gov.uk/pubns/cais6.pdf" rel="noopener" target="_blank">https://www.hse.gov.uk/pubns/cais6.pdf</a></li>
+      <li>U.S. Food and Drug Administration. (2023). <cite>Food Code 2022</cite> (January 18, 2023 version). <a href="https://www.fda.gov/media/164194/download" rel="noopener" target="_blank">https://www.fda.gov/media/164194/download</a></li>
+    </ul>
   </div>
 </section>
 
@@ -1292,8 +1434,9 @@ body{margin:0;background:#fff;color:#0E1116}
       <p class="eyebrow">Keep reading</p>
       <h2 id="related-h">Related reading</h2>
     </header>
-    <div class="pg-cards pg-cards-3 pg-cards-text">
+    <div class="pg-cards pg-cards-3 kg-related">
       <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/guides/grease-trap-guide-restaurants-thumb.webp" srcset="/site/img/guides/grease-trap-guide-restaurants-320.webp 320w, /site/img/guides/grease-trap-guide-restaurants-thumb.webp 600w" sizes="(min-width:1024px) 370px, (min-width:720px) 46vw, 92vw" width="600" height="450" alt="Close-up of a chrome sink drain strainer with water droplets on a white background" loading="lazy" decoding="async"></div>
         <div class="pg-card-body">
           <h3><a href="/guides/grease-trap-guide-restaurants/">Grease trap guide</a></h3>
           <p>How a trap works, what drains to it, its size and its routine.</p>
@@ -1301,6 +1444,7 @@ body{margin:0;background:#fff;color:#0E1116}
         </div>
       </article>
       <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/guides/commercial-kitchen-sink-guide-thumb.webp" srcset="/site/img/guides/commercial-kitchen-sink-guide-320.webp 320w, /site/img/guides/commercial-kitchen-sink-guide-thumb.webp 600w" sizes="(min-width:1024px) 370px, (min-width:720px) 46vw, 92vw" width="600" height="450" alt="A stainless-steel prep sink and a smaller hand-wash sink with wall-mounted taps in a commercial kitchen" loading="lazy" decoding="async"></div>
         <div class="pg-card-body">
           <h3><a href="/guides/commercial-kitchen-sink-guide/">Commercial kitchen sink guide</a></h3>
           <p>Bowls, drainboards and hand-wash sinks.</p>
@@ -1308,6 +1452,7 @@ body{margin:0;background:#fff;color:#0E1116}
         </div>
       </article>
       <article class="pg-card">
+        <div class="pg-card-media"><img src="/site/img/guides/how-to-plan-a-commercial-kitchen-layout-thumb.webp" srcset="/site/img/guides/how-to-plan-a-commercial-kitchen-layout-320.webp 320w, /site/img/guides/how-to-plan-a-commercial-kitchen-layout-thumb.webp 600w" sizes="(min-width:1024px) 370px, (min-width:720px) 46vw, 92vw" width="600" height="400" alt="Hands drawing a floor plan with a scale ruler and pen, with a calculator beside the plan" loading="lazy" decoding="async"></div>
         <div class="pg-card-body">
           <h3><a href="/guides/how-to-plan-a-commercial-kitchen-layout/">How to plan a commercial kitchen layout</a></h3>
           <p>Workflow, aisles, ventilation and gas.</p>
@@ -1315,6 +1460,7 @@ body{margin:0;background:#fff;color:#0E1116}
         </div>
       </article>
     </div>
+    <p class="kg-up"><a class="link-arrow" href="/guides/how-to-build-a-restaurant-kitchen/">Start with: how to build a restaurant kitchen</a><a class="link-arrow" href="/guides/#design">More in Design and layout</a></p>
   </div>
 </section>
 
@@ -1349,7 +1495,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
     <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
-    <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
+    <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>
 

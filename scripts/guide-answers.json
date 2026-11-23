@@ -1,0 +1,522 @@
+{
+  "baffle-filter-vs-mesh-filter": {
+    "question": "What is the difference between a baffle filter and a mesh filter?",
+    "answer": "A baffle filter makes the air turn through overlapping stainless-steel channels, so grease strikes the steel and drains away, while a mesh filter holds the grease inside its wire layers. A restaurant line that fries, grills or uses a wok calls for baffles; mesh suits home hoods and very light use."
+  },
+  "bain-marie-guide": {
+    "question": "What is a bain marie and how does it work?",
+    "answer": "A bain marie keeps cooked food hot in pans set over a water bath heated by gas or electricity. The water warms the pans gently and evenly, so food stays hot without burning. It holds food at serving temperature; it does not cook it or reheat it, so bring food up to temperature first."
+  },
+  "bakery-kitchen-layout": {
+    "question": "How do you design a bakery kitchen layout?",
+    "answer": "To design a bakery kitchen layout, draw the path of the dough first: store, weigh and mix, shape, let it rise, bake, cool and pack, with washing to one side. Size benches, racks and walkways to one tray size, put the oven under a hood with fresh air, and keep flour away from flames."
+  },
+  "bar-and-pub-back-of-house": {
+    "question": "What does a bar need behind the counter?",
+    "answer": "Behind the counter, a bar needs a bar sink, an ice bin, a speed rail for bottles, a drainboard and glass rack, undercounter chillers, and shelves, all within one step of the person pouring. Add a hand sink for hands only and a way to wash glasses, either a machine or a three-bowl sink."
+  },
+  "buffet-restaurant-equipment": {
+    "question": "What equipment does a buffet restaurant need?",
+    "answer": "A buffet restaurant needs batch cooking under a hood, hot holding for the next pans, a counter with hot and cold wells, sneeze guards and a tray slide, trolleys to carry pans, and a dishwashing line near the return door. Replace pans rather than topping them up, and keep hot food hot and cold food cold."
+  },
+  "butchery-meat-prep-room-equipment": {
+    "question": "What equipment does a meat prep room need?",
+    "answer": "A meat prep room needs heavy stainless-steel work tables with cutting boards, double or triple sinks, a hand-wash basin at the entrance, slotted chiller racks, and trolleys to move meat to cold storage. Lay the room out as a line, receive and chill, cut, portion and pack, and keep raw meat apart from everything else."
+  },
+  "cafe-back-of-house-equipment": {
+    "question": "What equipment does a coffee shop need behind the counter?",
+    "answer": "Behind the counter, a coffee shop needs a bar counter built around the espresso machine and grinder, a bar sink, a separate hand sink, undercounter chillers, a wash sink or dish table, and shelves or racks for stock. Plan it as four zones: bar, prep, washing and storage, and give each sink one job."
+  },
+  "cafe-kitchen-layout": {
+    "question": "How do you design a cafe kitchen?",
+    "answer": "To design a cafe kitchen, split the cafe into a front bar and a small back area, place the machines first, then draw the counter, sinks and shelves around them. Check walkways on a plan drawn to scale, list the water, drain, power and gas each machine needs, and plan a hood only if you cook."
+  },
+  "catering-business-equipment": {
+    "question": "What equipment does a catering business need?",
+    "answer": "A catering business needs equipment to cook in volume, hold food at serving temperature and carry it to the venue: a cooking line under a hood, long prep tables and sinks, hot and cold holding, trolleys or racks, and a wash line for the return trip. The weakest link sets what you can sell."
+  },
+  "central-kitchen-for-restaurant-chains": {
+    "question": "What is a central kitchen for a restaurant chain?",
+    "answer": "A central kitchen is a food production kitchen that prepares sauces, stocks, marinades, cut vegetables and portioned meat for every branch of a restaurant chain, while finishing and frying to order stay in the branch. Plan one line from receiving to dispatch, size cooling and cold storage as carefully as cooking, and use one tray size."
+  },
+  "chicken-inasal-grill-guide": {
+    "question": "What should you look for in a commercial charcoal grill for chicken inasal?",
+    "answer": "Look for strong stainless-steel bars, a pull-out charcoal bin in thick steel, adjustable air vents and a length that matches your busiest hour. Check the welds, because heat warps thin sheet. Charcoal makes heavy smoke, so plan a hood and duct, and ask the Bureau of Fire Protection (BFP) what it expects."
+  },
+  "chicken-inasal-restaurant-setup": {
+    "question": "What equipment does a chicken inasal restaurant need?",
+    "answer": "An inasal restaurant needs six stations in the order a chicken travels: marinade, grill, holding and chopping, rice, sides and washing. Charcoal makes heavy smoke, so plan the hood, duct and fresh air with the grill. Unli-rice makes rice volume high, so plan the rice station and its gas as carefully as the grill."
+  },
+  "chicken-lechon-roaster-guide": {
+    "question": "How does a lechon manok roaster work?",
+    "answer": "A lechon manok roaster is a charcoal rotisserie: chickens are fixed to spits that a motor turns slowly in front of burning charcoal, so they cook evenly on all sides while the fat drips away. Size it by the chickens you sell in your busiest hour, and keep it ventilated, because charcoal makes smoke, heat and carbon monoxide."
+  },
+  "cloud-kitchen-setup-philippines": {
+    "question": "How do you set up a cloud kitchen in the Philippines?",
+    "answer": "To set up a cloud kitchen, lay it out as one straight line from storage to a rider handover window. Choose equipment several brands can share, such as a griddle, a fryer and a wok range, with a packing counter beside the handover. Check the duct route, gas storage and landlord before you sign a lease."
+  },
+  "commercial-bakery-equipment-guide": {
+    "question": "What equipment does a commercial bakery need?",
+    "answer": "A commercial bakery needs storage, a mixer and a scale, baking tables for shaping, a dough proofing cabinet, an oven, racks for cooling and a sink, laid out in one line from mixer to oven to packing table. Plan the hood, exhaust, fresh air and LPG line with the oven, and measure doors before you order."
+  },
+  "commercial-deep-fryer-guide": {
+    "question": "How do you choose a commercial deep fryer?",
+    "answer": "To choose a commercial deep fryer, pick the tanks by your menu: one for a small menu, two for two products or separate fish and chicken oil, three for volume. Size the tank to your largest batch, since a bigger one loses less heat, and stand the fryer under a hood, away from flames and water."
+  },
+  "commercial-gas-stove-guide": {
+    "question": "What is the difference between low-pressure and high-pressure gas burners?",
+    "answer": "A low-pressure burner gives a gentle flame that suits sauces, soups and simmering, while a high-pressure burner burns more gas and gives a much hotter flame for big pots, frying and stir-fry. High pressure needs a regulator and gas line made for it, and a stronger hood. Choose each burner by its job."
+  },
+  "commercial-kitchen-alabang-south-metro": {
+    "question": "How do you plan a commercial kitchen in Alabang and south Metro Manila?",
+    "answer": "A commercial kitchen in Alabang and south Metro Manila is planned around its site: a mall or town-centre unit, a subdivision bakery or caterer, or a school or factory canteen. Near Manila Bay, salty air is a fair reason to compare SS304 and SS316. Barro Kitchens builds it with its own team, then delivers and installs it."
+  },
+  "commercial-kitchen-antipolo-rizal": {
+    "question": "How do you plan a commercial kitchen in Antipolo and the rest of Rizal?",
+    "answer": "A commercial kitchen in Antipolo or Rizal is planned around its site, from roadside restaurants and bakeries in Cainta and Taytay to hillside restaurants, venues and resorts. On a slope, check access, water, the gas cylinder area and where smoke leaves the building. Barro Kitchens builds it with its own team, then delivers and installs it."
+  },
+  "commercial-kitchen-cavite-laguna": {
+    "question": "How do you plan a commercial kitchen fit-out in Cavite and Laguna?",
+    "answer": "For a commercial kitchen fit-out in Cavite or Laguna, settle the duct openings, gas cylinder area, drains, and water and power points with your building contractor on the drawing before the ceilings and floors close. Barro Kitchens builds the equipment with its own team, then delivers and installs it on your site."
+  },
+  "commercial-kitchen-cost-factors": {
+    "question": "How much does it cost to build a commercial kitchen?",
+    "answer": "There is no single cost for a commercial kitchen, because no two kitchens need the same work. The cost depends on size, scope, air and gas systems, steel grade, the site and your date. Scope, whether a quotation covers equipment only or the whole kitchen, is the main reason two quotations differ."
+  },
+  "commercial-kitchen-design-and-build-process": {
+    "question": "What is commercial kitchen design and build, and how does the process work?",
+    "answer": "Commercial kitchen design and build means one contractor takes your kitchen from the first drawing to commissioning, instead of you coordinating several firms. The process has six steps, from consultation and site visit to commissioning and after-sales support. Bring your menu, floor plan and photos to the first meeting, and settle the drawings before anything is made."
+  },
+  "commercial-kitchen-equipment-checklist": {
+    "question": "What equipment does a commercial kitchen need?",
+    "answer": "Every commercial kitchen needs five zones, in the order food moves: receiving and storage, tables and sinks for preparation, cooking equipment under an exhaust hood, ventilation and safety, and a washing area kept apart from food. What the law requires depends on your city, so ask your city health office and the Bureau of Fire Protection (BFP)."
+  },
+  "commercial-kitchen-equipment-quezon-city": {
+    "question": "Who makes commercial kitchen equipment in Quezon City?",
+    "answer": "Commercial kitchen equipment in Quezon City is built to order by Barro Kitchens, based in Tandang Sora: work tables, sinks, stoves, hoods, cabinets, shelving and racks to your exact dimensions, delivered and installed on site. Many city kitchens go into an existing building, so settle the way in, the duct route and the gas position first."
+  },
+  "commercial-kitchen-exhaust-hood-guide": {
+    "question": "How do you size and choose a commercial kitchen exhaust hood?",
+    "answer": "Size a commercial kitchen exhaust hood so the canopy is longer and deeper than the cooking line, extending about 150 mm past the equipment at each open end as a rule of thumb. Plan the whole path together: canopy, baffle filters, duct, blower and fresh air. Clean the filters and grease trough often."
+  },
+  "commercial-kitchen-fabrication-luzon": {
+    "question": "Can a commercial kitchen outside Metro Manila be fabricated, delivered and installed by one team?",
+    "answer": "A commercial kitchen outside Metro Manila can be fabricated, delivered and installed by one team. Barro Kitchens, based in Quezon City, builds the equipment with its own team and installs it across Luzon, from Ilocos Sur to Batangas. Send photos, a floor plan and measurements first, then a site visit and approved drawings come before anything is cut."
+  },
+  "commercial-kitchen-makati-bgc": {
+    "question": "What should you settle for a restaurant kitchen fit-out in Makati or BGC?",
+    "answer": "A restaurant kitchen in Makati or BGC answers to its building first, so ask which drawings it needs, plan the exhaust route first, and order made-to-size equipment only after the layout is approved. Barro Kitchens, based in Quezon City, builds it to order with its own team, then delivers and installs it."
+  },
+  "commercial-kitchen-manila-city": {
+    "question": "How do you plan a commercial kitchen in the City of Manila?",
+    "answer": "A commercial kitchen in the City of Manila is usually a small unit in an older building, so measure the stairs, doors and ceiling, not only the floor. Equipment made to order can be sized to the unit and brought in through the narrowest point. Barro Kitchens builds it with its own team, then delivers and installs it."
+  },
+  "commercial-kitchen-pasig-ortigas": {
+    "question": "How do you plan a commercial kitchen in Pasig and Ortigas?",
+    "answer": "A commercial kitchen in Pasig or Ortigas needs a different plan for exhaust, access and equipment on a Kapitolyo street, in an Ortigas tower or in a warehouse commissary. In a tower or mall, ask for the building requirements in writing. Barro Kitchens builds it with its own team, then delivers and installs it."
+  },
+  "commercial-kitchen-sink-guide": {
+    "question": "What sinks does a commercial kitchen need?",
+    "answer": "A commercial kitchen needs a separate sink for each job: preparation, pot washing and hand washing, plus a dish area. A pot-wash sink usually has two or three bowls for wash, rinse and sanitise, with a drainboard and rack beside it. Size the sink to your largest pot, and plan water, waste and grease with a plumber."
+  },
+  "commercial-kitchen-zambales-subic": {
+    "question": "Which stainless steel suits a commercial kitchen near the sea in Zambales and Subic?",
+    "answer": "For a commercial kitchen in Zambales or Subic within about 5 km of the sea, choose SS316 stainless steel, which resists salt air and the tea staining it causes. Further inland, SS304 is enough for most kitchens if surfaces are rinsed and dried. Barro Kitchens builds in SS304 as standard and SS316 on request."
+  },
+  "commercial-range-hood-quotation-guide": {
+    "question": "What decides the quotation for a commercial range hood?",
+    "answer": "A commercial range hood quotation depends on the canopy length, depth and type (wall, island, slim or rear-pitch), steel grade, filters, the duct run, blower size, fresh air, fire suppression, ceiling height and the way in. The canopy is only one part of the system. Send the line length and depth, ceiling height, duct exit and photos."
+  },
+  "commercial-rice-steamer-guide": {
+    "question": "How does a commercial rice steamer work?",
+    "answer": "A gas rice steamer heats water in a boiler at the bottom of a cabinet, and the steam rises through stacked trays of rice, so one cabinet cooks a large batch evenly. Size it by trays and by your busiest meal, and plan the gas, a water supply and drain, and a place for the steam to go."
+  },
+  "commercial-storage-rack-guide": {
+    "question": "How do you choose a commercial storage rack?",
+    "answer": "To choose a commercial storage rack, pick a floor rack (three to six tiers, with or without wheels), wall shelving (one to three tiers) or a closed cabinet. Solid shelves suit small items, slotted shelves let water drain, and heavy stock belongs low. Measure the room, doors and aisles, and keep raw food below ready-to-eat food."
+  },
+  "commercial-wok-stove-guide": {
+    "question": "How do you choose a commercial wok stove?",
+    "answer": "A commercial wok stove sets the pan in a recessed ring over a high-pressure burner, so the flame wraps around it. Choose the holes by your busiest hour: one for a single station, two for a steady stir-fry menu, three for hotel or commissary kitchens. Plan the high-pressure gas line and a strong hood first."
+  },
+  "commissary-kitchen-requirements-philippines": {
+    "question": "What are the requirements for a commissary kitchen in the Philippines?",
+    "answer": "Commissary kitchen requirements start with one-way flow from receiving to dispatch, so raw and cooked food never cross, plus stainless-steel surfaces, a hood over every cooking line and a fresh-air supply. Legal requirements depend on your city and product, so confirm them with your local government unit, sanitary office and fire safety inspector."
+  },
+  "common-kitchen-equipment-problems": {
+    "question": "What are common commercial kitchen equipment problems and how do you fix them?",
+    "answer": "Most commercial kitchen equipment problems start with dirt, grease or a worn part, such as clogged burner ports, full filters or loose feet, so clean and check first. Never adjust regulators, jets, gas pipes or electrics yourself. A gas smell, sparks, smoke or a fault that keeps returning means stop, make safe and call a technician."
+  },
+  "community-kitchen-lgu": {
+    "question": "What equipment does a community kitchen need?",
+    "answer": "A community kitchen needs gas stoves with burners for large pots, a rice steamer or large pots for rice, long stainless-steel tables and sinks, a serving counter, and racks and shelves for storage. Choose simple, hard-wearing equipment for volunteers and rotating cooks, plan for the biggest day, and plan for a power cut."
+  },
+  "custom-stainless-steel-fabrication-guide": {
+    "question": "How do you order custom stainless steel fabrication?",
+    "answer": "Custom stainless steel fabrication builds a piece to your sizes, so send a clear brief: a dimensioned sketch, site photos, the quantity, the load, the grade and the finish. Measure at several points, in millimetres. Check for smooth welded seams, no sharp edges, an even finish and level feet, and get the grade and finish in writing."
+  },
+  "custom-vs-standard-kitchen-equipment": {
+    "question": "Is custom kitchen equipment better than a standard size?",
+    "answer": "Neither custom nor standard kitchen equipment is better by default. A custom size suits an irregular room or a piece built around a fixed item, while a repeated size is simpler where many pieces are alike. You can mix both: keep height, depth and finish the same along a run, and let the length follow the room."
+  },
+  "dimsum-steamer-guide": {
+    "question": "What is a commercial dimsum steamer and how do you size one?",
+    "answer": "A commercial dimsum steamer is a gas-heated boiler with baskets stacked above it: steam rises through the baskets and cooks siomai, siopao, hakaw and other steamed dishes. Choose the number of boilers by the baskets you need steaming in your busiest hour, and stand the steamer under the hood, with room for cooks to lift hot baskets."
+  },
+  "dirty-kitchen-design-philippines": {
+    "question": "What is a dirty kitchen?",
+    "answer": "A dirty kitchen is a second, working kitchen at the back or side of a Philippine home, often open to the air, for frying, grilling and heavy washing, so the main kitchen stays clean. As a rule of thumb, a one-wall run needs a strip about 1.6 metres wide, with counters 850 to 900 mm high."
+  },
+  "dish-rack-guide": {
+    "question": "How do you choose a stainless steel dish rack?",
+    "answer": "Match a stainless steel dish rack to the tableware: slots for plates on edge, closer slots for saucers, angled supports for bowls, and pegs or shelves for cups. Choose a tabletop, wall-mounted or floor rack, add a drip tray to keep the counter dry, and size it by the dishes you wash in your busiest service."
+  },
+  "factory-canteen-kitchen-equipment": {
+    "question": "What equipment does a factory canteen need?",
+    "answer": "A factory canteen needs batch cooking equipment under a hood, rice steamers, long prep tables and sinks, a one-way serving line with hot holding, a dishwashing line that takes every tray at once, and racks for bulk storage. Size each for the busiest sitting: divide the meals in one sitting by the minutes in the break."
+  },
+  "fire-code-kitchen-exhaust-and-suppression": {
+    "question": "What does the Fire Code say about kitchen hoods and fire suppression?",
+    "answer": "The 2019 Fire Code rules, as read in a published copy, call for an automatic hood fire suppression system over cooking equipment, with exceptions for very small set-ups. No occupancy or business permit is issued without a Fire Safety Inspection Certificate from the Bureau of Fire Protection (BFP). Check these points against the BFP text."
+  },
+  "food-court-stall-equipment": {
+    "question": "What equipment does a food court stall need?",
+    "answer": "A food court stall needs only what its menu cooks with: a griddle, fryer, wok burner or steamer, a narrow prep counter with under-counter storage, wall shelves, a hand sink, a small wash sink and a front counter with room for the till. Ask the mall office what fuel and fire protection it requires before you design."
+  },
+  "food-processing-stainless-equipment": {
+    "question": "What equipment does a food processing room need?",
+    "answer": "A food processing room needs work tables to cut and pack on, sinks to wash ingredients and tools, racks on wheels to move product, and shelving and cabinets for storage, with a hand-wash sink at each entrance. Ask for welded seams ground smooth and rounded inside corners, and lay the room out so product moves one way."
+  },
+  "food-truck-kitchen-layout": {
+    "question": "How should a food truck kitchen be laid out?",
+    "answer": "Lay out a food truck kitchen as a short line that follows the food: storage, preparation, cooking, then the service window. Put a hand sink near the work, keep raw and cooked food apart and draw the plan to scale. LPG, heat, water and weight need more care than in a fixed kitchen."
+  },
+  "fried-chicken-shop-setup": {
+    "question": "How do you set up a fried chicken kitchen?",
+    "answer": "Set up a fried chicken kitchen as a one-way line: chiller, breading table, fryers, holding and counter. Raw chicken stays on one side and cooked chicken never goes back. Size the frying by dividing the pieces you sell in your busiest hour by what one basket holds. Stand the fryers under a hood with fire suppression."
+  },
+  "gas-leak-safety-commercial-kitchen": {
+    "question": "How do you prevent, detect and respond to an LPG leak in a commercial kitchen?",
+    "answer": "Prevent an LPG leak in a commercial kitchen by checking hoses, regulators, connections and burner knobs. Detect one with soap tests and a detector fitted low, not by smell alone. If you smell gas, use no switches or flames, cut the supply if safe, get everyone out and call your LPG supplier and the Bureau of Fire Protection."
+  },
+  "government-bidding-kitchen-equipment": {
+    "question": "How does a government agency buy kitchen equipment in the Philippines?",
+    "answer": "Government agencies buy kitchen and stainless steel equipment through public bidding. The end-user describes what is needed, and the bidding committee (BAC) runs the bidding under the procurement rules, with opportunities posted on PhilGEPS. Write specifications in measurable terms, not a brand, group items into lots, and ask your procurement office which steps apply."
+  },
+  "grease-trap-guide-restaurants": {
+    "question": "What does a grease trap do in a restaurant?",
+    "answer": "A grease trap catches fat, oil and grease from kitchen waste water before it reaches the drain: the water slows in a baffled box, so grease floats and solids settle. It stops working when full, so clean it on a routine. Size it from the drains that connect to it and your menu, with your plumber."
+  },
+  "griddle-vs-teppanyaki-grill": {
+    "question": "What is the difference between a griddle and a teppanyaki grill?",
+    "answer": "A griddle, or flat top, is a steel plate heated from below that sits in the cooking line, where the cook works out of sight. A teppanyaki grill is a larger plate where the chef cooks in front of seated guests, so its finish, guest ledge and hood matter more. Plate thickness decides how evenly each heats."
+  },
+  "hand-sink-guide-food-business": {
+    "question": "Where should hand sinks go in a food business?",
+    "answer": "Put hand sinks at the kitchen entrance, by each prep area and by the dishwashing area, close enough that cooks use them, and ask the city or municipal health office how many it expects. Keep each basin for hands only. Choose a lever tap, knee valve or foot pedal, with soap, paper towels and a bin beside it."
+  },
+  "home-kitchen-ventilation-range-hood-vs-exhaust-fan": {
+    "question": "Is a range hood better than an exhaust fan for a home kitchen?",
+    "answer": "For a home stove, a range hood that vents outside is better than an exhaust fan: it catches smoke, steam and grease where they rise, while a fan clears the whole room and is the fallback. A recirculating hood only filters the air and sends it back, so it is much less effective than a ducted one."
+  },
+  "hospital-kitchen-equipment-planning": {
+    "question": "How do you plan a hospital kitchen?",
+    "answer": "To plan a hospital kitchen, start with the number of meals at each meal time, the diet list and when trays must leave, and plan for the busiest meal. Draw six zones in one direction, from receiving to dishwashing, and keep special-diet food on its own table, sink and utensils. Ask your dietitian to review the plan."
+  },
+  "hot-holding-cabinet-guide": {
+    "question": "What is a hot holding cabinet?",
+    "answer": "A hot holding cabinet is an insulated cabinet with a heater and a thermostat that keeps cooked food at serving temperature in trays, pans or packed orders. It holds food; it does not cook it or reheat it. Size it by the trays you must hold at your busiest time, and preheat it before loading hot food."
+  },
+  "hotel-kitchen-equipment-checklist": {
+    "question": "What equipment does a hotel kitchen need?",
+    "answer": "A hotel kitchen needs a cooking line under a hood, preparation tables and sinks, hot holding and plating space for banquets and room service, a bakery or pastry section, stores and a dishwashing area. Plan around the busiest time of each service, and size the hood, exhaust and gas line for the whole line."
+  },
+  "how-stainless-kitchen-equipment-is-made": {
+    "question": "How is stainless steel kitchen equipment made?",
+    "answer": "Stainless steel kitchen equipment is made to order from an approved drawing and a cut list. The sheet and tube are cut, bent, welded, ground smooth and polished, then assembled, delivered and installed. Good work shows in smooth ground welds, an even finish and no sharp edges, so check the drawing before cutting starts."
+  },
+  "how-to-build-a-restaurant-kitchen": {
+    "question": "How do you build a restaurant kitchen?",
+    "answer": "To build a restaurant kitchen, design it around your menu and workflow, zone it from receiving to dishwashing, plan the gas, water, drains, power, exhaust and fresh air, and choose the equipment. Then get the plans approved by the Building Official, the local health office and the Bureau of Fire Protection (BFP), and build, install and test."
+  },
+  "how-to-choose-commercial-kitchen-contractor": {
+    "question": "How do you choose a commercial kitchen contractor?",
+    "answer": "To choose a commercial kitchen contractor, check that one team covers the whole scope: equipment, hood and ducting, fresh air, gas line and fire suppression. Expect drawings before building, and the steel grade, thickness and finish in writing. Ask who connects and tests the gas, what the warranty covers, and what is left out."
+  },
+  "how-to-clean-and-care-for-stainless-steel": {
+    "question": "How do you clean stainless steel kitchen equipment?",
+    "answer": "Clean stainless steel kitchen equipment daily with warm water, mild detergent and a soft cloth, wiping along the grain, then rinse and dry. Never use chlorine bleach, steel wool or abrasive pads, which cause pitting and scratches. In a humid or coastal kitchen, rinse salt off every week, and near the sea ask about SS316."
+  },
+  "how-to-plan-a-commercial-kitchen-layout": {
+    "question": "How do you plan a commercial kitchen layout?",
+    "answer": "To plan a commercial kitchen layout, start with the flow of food: receiving, storage, preparation, cooking, then service, with washing kept apart. Choose the layout that fits your room, assembly line, island, zone or galley, and place the cooking line under one hood. Check the aisles on a scaled drawing before you fix anything."
+  },
+  "how-to-read-a-kitchen-floor-plan": {
+    "question": "How do you read a kitchen floor plan?",
+    "answer": "A kitchen floor plan is a view from above, so check the scale and the unit first, then read the written sizes, not a ruler. Most plans use 1:50 or 1:100: at 1:100, 1 cm on the plan is 1 metre in the room. Symbols vary, so read the legend, or key, on the plan."
+  },
+  "how-to-specify-commercial-kitchen-equipment": {
+    "question": "What should a commercial kitchen equipment specification include?",
+    "answer": "A commercial kitchen equipment specification gives each item a tag, quantity, size, steel grade and thickness, finish, options and every utility connection: gas, water, drain, power and exhaust. The Philippine texts that were read give no kitchen aisle width or fixed work-surface height, so those figures are industry guidance: confirm them with your offices."
+  },
+  "kitchen-cleaning-and-food-safety-at-home": {
+    "question": "How do you keep a home kitchen clean and food safe?",
+    "answer": "Keep a home kitchen clean and food safe with a daily and weekly routine: wash your hands for at least 20 seconds, clean as you go, keep raw and cooked food apart, and clean first, then sanitise. Do not leave cooked food out for more than two hours. Wipe stainless steel along the grain."
+  },
+  "kitchen-counter-height-and-dimensions": {
+    "question": "What is the standard kitchen counter height?",
+    "answer": "There is no single standard kitchen counter height. About 850 to 900 mm is a common rule of thumb for home counters and commercial work tables, and the right height depends on the person and the job. Leave about 1 metre between facing counters, and 1.2 to 1.5 metres where two people pass."
+  },
+  "kitchen-countertop-materials-compared": {
+    "question": "How do stainless steel, granite, quartz, tile, laminate and wood countertops compare?",
+    "answer": "No kitchen countertop material wins on all five checks: heat, stains, hygiene, scratches and chips, and upkeep. Stainless steel takes hot pans and does not soak up stains, but it shows scratches. Granite needs sealing, quartz and laminate dislike very hot pans, tile has grout to look after, and wood needs oil."
+  },
+  "kitchen-equipment-baguio-la-trinidad": {
+    "question": "How do you plan a commercial kitchen in Baguio and La Trinidad?",
+    "answer": "A commercial kitchen in Baguio or La Trinidad has to cope with cool, damp air. Use stainless steel, because damp air is hard on painted and mild steel, and plan a hood, exhaust and fresh-air supply, because cool weather keeps doors shut. Barro Kitchens builds it with its own team, then delivers and installs it."
+  },
+  "kitchen-equipment-batangas": {
+    "question": "What kitchen equipment does a Batangas restaurant or resort need?",
+    "answer": "A Batangas restaurant or resort kitchen needs a cooking line under a hood, preparation tables and sinks, storage, a dishwashing line and a gas line, planned for the busiest weekend. Soups, noodles and grills each need a station under one hood. Barro Kitchens builds it to order, then delivers and installs it."
+  },
+  "kitchen-equipment-tarlac": {
+    "question": "How do you plan commercial kitchen equipment for a school, hospital or restaurant in Tarlac?",
+    "answer": "In inland Tarlac, heat matters more than salt, so plan the hood, duct and fresh-air supply with the cooking line. For a school, hospital or local government kitchen, settle who approves the drawings and send procurement questions to your bidding committee (BAC). Barro Kitchens supplies the whole kitchen, made to your room and installed on site."
+  },
+  "kitchen-equipment-warranty-after-sales": {
+    "question": "What does a kitchen equipment warranty cover?",
+    "answer": "A kitchen equipment warranty covers faults in the equipment and the work for a stated period. It usually leaves out misuse, normal wear, improper cleaning and problems from your own gas, water or power supply. Warranty, preventive maintenance and repair are different services, so ask what each covers and who answers, and keep the drawings and delivery receipt."
+  },
+  "kitchen-exhaust-blower-guide": {
+    "question": "How do you size and place a kitchen exhaust blower?",
+    "answer": "Size a kitchen exhaust blower for the hood and the duct together, by the airflow the hood needs against the resistance of the duct, not by motor power alone. Centrifugal blowers suit filters and long or bent ducts; axial fans suit short, simple runs. Put it at the outlet end, away from windows and intakes."
+  },
+  "kitchen-exhaust-cleaning-schedule": {
+    "question": "How often should a kitchen exhaust be cleaned?",
+    "answer": "How often a kitchen exhaust needs cleaning depends on what you cook. As a rule of thumb, wash baffle filters daily to every few days on a line that grills, woks or deep fries, and weekly on lighter cooking. Clean the hood each week, and have a specialist clean the duct and blower. Keep a dated log."
+  },
+  "kitchen-exhaust-ducting-guide": {
+    "question": "How should a kitchen exhaust duct be built and routed?",
+    "answer": "A kitchen exhaust duct carries heat, smoke and grease outside, so build it fully welded and as short and straight as the building allows, with access doors for cleaning. Slope horizontal runs back toward the hood so grease drains. Have the duct cleaned on a schedule, because grease in a duct is fuel."
+  },
+  "kitchen-exhaust-problems": {
+    "question": "Why do smoke, heat and smells escape from a kitchen exhaust?",
+    "answer": "Most kitchen exhaust problems come from five places: the hood, filters, blower, duct and fresh air. A hood that does not pull smoke usually has draughts, clogged filters, a weak blower, no fresh air or a canopy that is too small or high. Ask whether it ever worked and what changed, then clean, repair or redesign."
+  },
+  "kitchen-fabrication-la-union-ilocos": {
+    "question": "Who supplies kitchen equipment and stainless steel fabrication in La Union and Ilocos?",
+    "answer": "In La Union and Ilocos, near the sea, salt settles on steel, so SS304 with a weekly rinse suits most kitchens and SS316, which resists salt better, is available on request. Barro Kitchens delivered and installed stainless-steel equipment at DMMMSU and fabricated and installed work tables, sinks, gas ranges and exhaust hoods at ISPSC."
+  },
+  "kitchen-flooring-and-drainage": {
+    "question": "What flooring and drainage does a commercial kitchen need?",
+    "answer": "A commercial kitchen floor should be non-slip, non-absorbent, sealed and coved up the wall, such as sealed unglazed tile or a seamless resin floor, with the slope to the drains built in. Put drains where the water is: sinks, dishwashing and the cooking line. Tell your contractor where equipment stands before the floor is laid."
+  },
+  "kitchen-fresh-air-system-guide": {
+    "question": "What is a fresh air system for kitchens, and why does an exhaust hood need makeup air?",
+    "answer": "A kitchen fresh air system supplies outside air, called makeup air, to replace what the exhaust hood removes, through an intake, a blower of its own, ducting and diffusers. Without one, the kitchen pulls air through doors and gaps and runs under negative pressure. Watch for smoke spilling, doors sticking and flames leaning."
+  },
+  "kitchen-layout-types": {
+    "question": "What are the main kitchen layouts for Philippine homes?",
+    "answer": "The six usual kitchen layouts for a Filipino home are single-wall, galley, L-shape, U-shape, peninsula and island, chosen from the shape of your room. Keep the sink, stove and fridge close but not cramped: the work triangle suggests each side of 1.2 to 2.7 m, with about 1067 mm between counters."
+  },
+  "kitchen-organisation-and-storage-ideas": {
+    "question": "How do you organise a small kitchen?",
+    "answer": "To organise a kitchen, sort it into zones for storing, preparing, cooking and washing. Use the walls for shelves, racks, rails and hooks, keep everyday items between knee and shoulder height and heavy pots low, and keep everything off the floor. Store food in lidded containers, with new stock behind old."
+  },
+  "kitchen-renovation-philippines": {
+    "question": "How do you plan a kitchen renovation in the Philippines?",
+    "answer": "To plan a kitchen renovation, list what you need, then fix the layout and the water, drain, gas and power points. Ask your city or municipal building office which approvals apply, since a building permit can be required to alter or repair a building. Get the work and schedule in writing, and plan a temporary kitchen."
+  },
+  "kitchen-renovation-without-closing": {
+    "question": "Can a restaurant renovate its kitchen without closing?",
+    "answer": "A restaurant can sometimes renovate its kitchen in phases without closing for long. Settle the layout, drawings and equipment list first, have the steel made and delivered finished, and upgrade one zone at a time while a temporary station or shorter menu keeps you cooking. The gas, exhaust and cooking-line cut-over usually needs a planned pause."
+  },
+  "kitchen-safety-tips": {
+    "question": "What are the main kitchen safety tips?",
+    "answer": "Most kitchen accidents are simple to prevent: stay with the pan, keep things that can burn away from the stove, and smother a pan fire with a lid, never water. Cool a burn under cool running water for 20 minutes, keep water away from sockets, and test LPG joints with soapy water, never a flame."
+  },
+  "kitchen-sink-types-and-sizes": {
+    "question": "Should you choose a single bowl or a double bowl kitchen sink?",
+    "answer": "A single bowl sink takes big pots and trays; a double bowl lets you wash in one side and rinse in the other, so choose two bowls if you wash many pots by hand. Typical home sinks are 760 to 950 mm long, as a rule of thumb, and SS304 is the usual stainless steel."
+  },
+  "kitchen-trolley-guide": {
+    "question": "What are the main types of kitchen trolley?",
+    "answer": "The main types of kitchen trolley are utility, food service, dish collection, tray rack and enclosed units, each built around one job such as clearing dishes or moving trays of bread. Choose by the job first, then check the wheels, shelves, frame, handles and load, and measure the narrowest door, lift and corner on the route."
+  },
+  "kitchen-ventilation-requirements-philippines": {
+    "question": "What are the kitchen ventilation requirements in the Philippines?",
+    "answer": "Kitchen ventilation requirements in the Philippines come from the Code on Sanitation, the Fire Code and local building rules. In plain words, they ask for an exhaust that takes heat, smoke, grease and odours outside, fresh air to replace it, and fire protection on the hood. Confirm details with the health, fire and building offices."
+  },
+  "korean-bbq-samgyupsal-restaurant-equipment": {
+    "question": "What equipment does a samgyupsal restaurant need?",
+    "answer": "A samgyupsal restaurant needs table grills with smoke extraction, then a kitchen behind them: meat prep tables and sinks, chillers and storage for meat, a stove for stews, rice cooking, banchan prep and a large dishwashing area. Plan the smoke extraction first, because it shapes the ceiling, the floor and the ducts."
+  },
+  "lava-rock-vs-charcoal-grill": {
+    "question": "What is the difference between a lava rock griller and a charcoal grill?",
+    "answer": "A lava rock griller is gas-fired: burners heat a bed of rock, and fat dripping on it smokes and flavours the food. A charcoal grill burns lit charcoal, which gives a stronger smoky taste but needs more skill and daily ash removal. Gas gives steadier results. Either way, plan the hood and fire suppression with the grill."
+  },
+  "lechon-business-equipment": {
+    "question": "What equipment does a lechon business need?",
+    "answer": "A lechon business needs a roaster or charcoal pit, stainless-steel prep tables, a sink with a drain, cold storage, a chopping counter with a scale, and a display, arranged in five steps: clean and season, roast, rest and chop, display, sell. Charcoal means smoke, sparks and ash, so plan where the smoke goes."
+  },
+  "local-vs-imported-kitchen-equipment-philippines": {
+    "question": "Should you choose locally made or imported commercial kitchen equipment?",
+    "answer": "Locally made and imported kitchen equipment suit different items. Stainless-steel tables, sinks, shelving, stoves and hoods suit local fabrication to your exact sizes, while machines with compressors, motors and electronic controls, such as refrigeration and dishwashers, are usually bought in. Ask each supplier for the grade and thickness in writing."
+  },
+  "lpg-gas-line-for-restaurants": {
+    "question": "How is an LPG gas line installed in a restaurant?",
+    "answer": "A restaurant LPG gas line keeps the cylinders outside in a secured, well-ventilated cage. A manifold and regulator feed fully welded black-iron pipe to each appliance, with a shut-off valve at each one, a gas leak detector and an emergency auto-shutoff valve. The line is leak tested before use."
+  },
+  "lpg-regulator-high-vs-low-pressure": {
+    "question": "What is the difference between a high-pressure and a low-pressure LPG regulator?",
+    "answer": "A low-pressure LPG regulator delivers a low, fixed pressure for standard burners and ovens, while a high-pressure regulator delivers a higher, usually adjustable pressure for burners such as wok burners. Match the regulator to the appliance data plate, because the wrong one gives a weak flame, soot or a hazard."
+  },
+  "lpg-safety-at-home": {
+    "question": "Where should you keep an LPG tank at home, and what do you do if you smell gas?",
+    "answer": "Keep a home LPG tank upright and in a ventilated place, never in a closed cabinet. Check the hose for cracks and the connections with soapy water, never a flame. If you smell gas, open doors and windows, touch no switches, close the regulator, move the tank outside and call your dealer."
+  },
+  "mall-kitchen-fit-out-requirements": {
+    "question": "What does a mall restaurant fit-out require?",
+    "answer": "A mall restaurant fit-out follows the mall tenant guidelines, which differ from mall to mall, so get them before you design. Ask about the exhaust route, fuel, fire suppression, drains and work hours, and settle the exhaust route first. Submit complete drawings early, and order made-to-size equipment only after they are approved."
+  },
+  "milk-tea-shop-equipment": {
+    "question": "What equipment does a milk tea shop need?",
+    "answer": "A milk tea shop needs a stainless-steel work counter built around your sealer, dispensers and blender, a bar sink, a hand sink and a wash sink, a burner or cooker for pearls, under-counter chillers, and wall shelves and racks for cups and stock. Plan the counter in the order of the cup."
+  },
+  "national-building-code-commercial-kitchens": {
+    "question": "What does the National Building Code say about commercial kitchens?",
+    "answer": "The National Building Code sorts a restaurant into an occupancy group by head count and sets minimums for ceiling height, windows and ventilation. For kitchen air it gives ten air changes an hour, while the rules table gives five at a 2.40 m ceiling, so plan for the higher figure. Confirm each point with your Building Official."
+  },
+  "noodle-boiler-guide": {
+    "question": "How does a noodle boiler work?",
+    "answer": "A noodle boiler is a well of water heated by gas burners, with baskets hanging in the water, each holding one portion, so cooks can time every order separately. Choose the baskets by the orders cooking at once. Starch builds up, so refresh the water on a routine, and stand the boiler under the hood."
+  },
+  "open-kitchen-design": {
+    "question": "What is an open kitchen restaurant and how do you design one?",
+    "answer": "An open kitchen lets guests see the cooking, through a pass window, a glass wall or a cooking line in the dining room. With no wall to keep smoke in, the hood is the only barrier, so size it generously, replace the air it removes and control draughts. Keep dishwashing and bins out of sight."
+  },
+  "outdoor-kitchen-design": {
+    "question": "How do you design an outdoor kitchen in the Philippines?",
+    "answer": "To design an outdoor kitchen in the Philippines, plan for the weather first: a roof over the cooking and the electrics, surfaces that drain freely, and steel to suit the air, SS304 for most places and SS316 near the sea. Lay out a grill zone, prep counter, sink with a proper drain, closed storage and a serving side."
+  },
+  "pandesal-oven-pugon-guide": {
+    "question": "What kind of oven do you need to bake pandesal?",
+    "answer": "To bake pandesal, you need an oven that heats evenly and holds its temperature from bake to bake, such as a pugon, either wood-fired brick or steel. Size it backwards from the morning: pieces per tray, trays per bake and bakes before opening. Plan the hood, fresh air and LPG line before you order."
+  },
+  "pizza-restaurant-kitchen": {
+    "question": "What equipment does a pizza kitchen need?",
+    "answer": "A pizza kitchen is one short line: dough, make line, oven, then cut and box. It needs a dough area with a work table, trays and proofing space, a make line with chilled toppings, a cut-and-box counter, racks and shelves, a sink and a hood. Plan the hood and gas line with the oven type."
+  },
+  "pot-rack-and-overshelf-guide": {
+    "question": "What is the difference between an overshelf and a pot rack?",
+    "answer": "An overshelf is a shelf above a work table or sink for small stock, while a pot rack is a rail with hooks that hangs pots, pans and ladles. Set the height by the tallest item on the table and the shortest cook who must reach it, and check the wall and weigh your heaviest load."
+  },
+  "pre-rinse-dishwashing-station": {
+    "question": "How do you design a dishwashing station?",
+    "answer": "To design a dishwashing station, plan one direction: drop-off, scrape and pre-rinse, wash in a triple sink or dishwasher, dry on racks, then store, so dirty and clean dishes never cross. A pre-rinse sink with a spray faucet comes first, because removing food keeps the machine and the drains working."
+  },
+  "preventive-maintenance-commercial-kitchen": {
+    "question": "What is preventive maintenance for a commercial kitchen?",
+    "answer": "Preventive maintenance for a commercial kitchen is a routine of small checks and cleaning jobs done before anything breaks: daily wipe-downs and shut-offs, weekly deep cleans, monthly inspections, and periodic specialist jobs. Give every task an owner and write it down, and call a technician for gas, electrical, blower and fire suppression work."
+  },
+  "ramen-shop-kitchen-equipment": {
+    "question": "What equipment does a ramen shop need?",
+    "answer": "A ramen shop needs stock pot burners and large pots for the broth, a noodle boiler, a stove or griddle and prep tables for toppings, an assembly counter, and strong racks and sinks for the bowls. Long-simmered broth fills the air with steam and smell, so plan a hood, fresh air and gas line for it."
+  },
+  "range-hood-types-compared": {
+    "question": "Which type of range hood should you choose: wall, island, slim or rear-pitch?",
+    "answer": "Choose a range hood from the room: a wall canopy for a line against a wall, an island canopy for a block open on all sides, a slim canopy for a low ceiling, or a rear-pitch hood that pulls smoke to the back, away from the cook. Plan any hood with its duct, blower and fresh air."
+  },
+  "raw-and-cooked-food-separation": {
+    "question": "Why should raw and cooked food be kept apart in a commercial kitchen?",
+    "answer": "Raw and cooked food are kept apart because raw meat, seafood and unwashed vegetables can carry germs that cooking would kill, and cooked food gets no second cooking. Use separate tables and sinks for raw meat and seafood, vegetables and cooked food, store ready-to-eat food above raw food, and plan a one-way path."
+  },
+  "resort-kitchen-equipment": {
+    "question": "What kitchen equipment does a resort need?",
+    "answer": "A resort kitchen needs a cooking line under a hood, prep tables and sinks, hot and cold holding for buffets and events, dry and cold storage, and a dishwashing area sized for event days. Size it for the busiest day, not the average one. Near the sea, salt air attacks steel, so ask about SS316."
+  },
+  "salamander-broiler-guide": {
+    "question": "What is a salamander broiler used for?",
+    "answer": "A salamander is a high-heat overhead broiler. Cooks use it to finish dishes by melting cheese, browning a gratin, crisping skin and toasting bread, and it can also cook food. A cheesemelter is the gentler unit for finishing. Place it at the end of the line, near plating and under the hood."
+  },
+  "sanitary-welds-food-equipment": {
+    "question": "What is a sanitary weld?",
+    "answer": "A sanitary weld on food equipment is continuous, ground smooth and clean, with no gap, pit, ridge or coloured band where food and moisture can collect. The common defects are stitch welds, pinholes, heat tint and spatter. Check welds by touch and in low light at handover, and get the grade and thickness in writing."
+  },
+  "sanitation-code-food-establishments": {
+    "question": "What does the Sanitation Code require of a food business kitchen in the Philippines?",
+    "answer": "Under the Code on Sanitation, anyone serving food to the public needs a sanitary permit from the local health office, and plans go there for approval before building or opening. The rules set a minimum kitchen of one quarter of the dining area, never less than 9.30 square metres. The health office has the final word."
+  },
+  "save-gas-commercial-kitchen": {
+    "question": "How can a restaurant save gas?",
+    "answer": "A restaurant can save gas by matching each burner to the pot, keeping burners clean, using lids and letting insulated ovens hold their heat. Cook in fuller, fewer batches, turn burners down between rushes and fix leaks at once. Note your cylinder changes against meals served, so you can see what works."
+  },
+  "school-university-kitchen-lab-fitout": {
+    "question": "What stainless steel equipment does a school kitchen, canteen or lab need?",
+    "answer": "Training kitchens, laboratories and canteens each need a different layout, but all need stainless steel that survives daily use by many hands. A kitchen needs work tables, sinks, a cooking line under a range hood, racks, shelving or cabinets and a dishwashing area, and a canteen adds a serving counter and hot holding."
+  },
+  "seafood-prep-area-equipment": {
+    "question": "What equipment does a seafood prep area need?",
+    "answer": "A seafood prep area needs a sturdy table for cleaning and cutting, deep sinks for washing and thawing, a place to hold ice, slotted shelving for draining, and a hand-wash basin at the entrance, with a chiller or freezer for storage. Plan the water, ice and floor drain first, and rinse salt off the steel every day."
+  },
+  "skewer-grill-barbecue-isaw": {
+    "question": "What size skewer grill do you need for barbecue or isaw?",
+    "answer": "To choose a skewer grill size, lay a real batch of your sticks on a table with a gap between each, and measure the length they cover. As a rule of thumb, about 600 mm suits a small stall and 900 to 1200 mm a busy stall or restaurant. Keep the heated width shorter than the stick."
+  },
+  "small-kitchen-design-tips": {
+    "question": "How do you design a small commercial kitchen?",
+    "answer": "To design a small commercial kitchen, decide what must be inside, then choose a single line, a galley or an L-shape with all the heat under one hood. Build upward with overshelves and wall-hung cabinets, and choose equipment that does two jobs. Never shrink the hood, fresh-air supply or gas safety controls to gain space."
+  },
+  "small-kitchen-ideas-philippine-homes": {
+    "question": "How do you design a small kitchen in the Philippines?",
+    "answer": "To design a small kitchen in the Philippines, start with how you cook, then measure the room and choose a single-wall, galley or L-shaped layout. Build storage up the walls, keeping every shelf well clear of the flame, light every work surface, and fit a hood that sends smoke outside if you can."
+  },
+  "small-restaurant-kitchen-setup": {
+    "question": "What equipment does a small restaurant or carinderia kitchen need?",
+    "answer": "A small restaurant or carinderia kitchen needs a stove, a work table, a sink, a hood with exhaust and shelving first, with a fryer, griddle or oven added when the menu proves it. Start from the menu: mark how each dish is cooked. Get the gas line, hood and duct right from the start."
+  },
+  "ss304-vs-ss316-stainless-steel": {
+    "question": "What is the difference between SS304 and SS316 stainless steel, and which do you need?",
+    "answer": "SS304, the standard food-grade stainless steel, is enough for most kitchens, including work tables, sinks, shelving, cabinets and hoods. SS316 adds molybdenum, which resists chlorides such as salt, so choose it for laboratories, coastal sites, or steel that meets brine or chlorine-based cleaners daily. The grades look the same, so ask for the grade in writing."
+  },
+  "stainless-laboratory-tables": {
+    "question": "How do you choose stainless steel laboratory tables for a school science room?",
+    "answer": "Choose SS304 for general teaching rooms and food science, and SS316 where salts, chemicals or strong cleaners touch the steel, because SS316 contains molybdenum, which resists chlorides better. Pick the bench type first: wall bench, island bench or rows of work tables. Then add the sink, shelves and cabinets, and plan aisles, water, drain and power points."
+  },
+  "stainless-steel-cabinet-guide": {
+    "question": "How do you choose a stainless steel cabinet for a commercial kitchen?",
+    "answer": "Use a stainless steel cabinet for what must stay clean and dry, and open shelving or racks for what is wet or heavy. Choose floor-standing for pans, containers and dry goods, or wall-hung above a work table for lighter items, with swing or sliding doors and one to three shelves inside."
+  },
+  "stainless-steel-countertops": {
+    "question": "Is a stainless steel countertop a good choice for a home kitchen?",
+    "answer": "A stainless steel countertop suits modern and industrial kitchens. It is heat resistant, does not absorb stains or odours and is easy to sanitise, but it shows scratches over time and can drum or dent if the top is thin. A hairline finish hides scratches, and a supported top keeps it quiet."
+  },
+  "stainless-steel-fabrication-bulacan": {
+    "question": "Can you get stainless steel fabrication and kitchen equipment in Bulacan?",
+    "answer": "Stainless steel fabrication in Bulacan starts with measuring the room you have, because walls lean, corners are rarely square and floors fall toward the drain. In a food production room, smooth seams, a backsplash, slotted shelves and racks on wheels decide how easily it stays clean. Barro Kitchens designs, fabricates, delivers and installs it as one team."
+  },
+  "stainless-steel-fabrication-pampanga": {
+    "question": "What does stainless steel fabrication for a Pampanga kitchen need to handle?",
+    "answer": "Grilling and frying in Pampanga call for a hood longer and deeper than the line, fire suppression on the hood and a gas pipe sized for every burner at once. Food production rooms need tables, sinks, racks and trolleys with smooth welded seams. Barro Kitchens builds it with its own team, then delivers and installs it after a site visit."
+  },
+  "stainless-steel-finishes-guide": {
+    "question": "What are the common stainless steel finishes, and how do you choose one?",
+    "answer": "The common stainless steel finishes are hairline, brushed, satin and mirror. A finish is the surface texture, not the grade. Grained finishes hide fingerprints and everyday scratches, while mirror shows every mark, so it suits decorative parts, not busy work tables. Say which finish you want, which way the grain runs and which faces show."
+  },
+  "stainless-steel-railings-and-gates": {
+    "question": "Is stainless steel good for railings and gates?",
+    "answer": "Stainless steel is a good choice for railings and gates in most places, because it needs no paint and resists rust. SS304 suits most indoor and outdoor sites, and SS316 is worth asking for near the sea. Height, infill gaps and fixings are safety matters, so ask your architect, engineer or the building office."
+  },
+  "stainless-steel-thickness-guide": {
+    "question": "What thickness of stainless steel should a kitchen table have?",
+    "answer": "Stainless steel thickness depends on the maker and the part, so ask for the figure in millimetres for the top, body and shelves, because a gauge number runs backwards and can mislead. Grade resists rust and thickness resists dents, drumming and load, so get both in writing. Bracing and the frame matter as much as the sheet."
+  },
+  "stainless-steel-work-table-guide": {
+    "question": "How do you choose a stainless steel work table?",
+    "answer": "To choose a stainless steel work table, also called a prep table, pick one to three layers and none, one or two upper shelves. Measure the room, doors and aisles, then set the length, width and height, and choose a wall-type or centre table. Ask for the grade and finish in writing."
+  },
+  "stock-pot-burner-guide": {
+    "question": "What is a stock pot burner?",
+    "answer": "A stock pot burner is a strong gas burner set low under a sturdy grate, for big, heavy pots of soup and stock. The low height lets a cook see into the pot, stir it and ladle from it without lifting. Measure your largest pot first, and plan the gas line and hood."
+  }
+}

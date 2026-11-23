@@ -1420,7 +1420,7 @@ describe('guides and downloads: the footer of every public page, sitemap.xml, ro
 // Image copyright (owner-approved, 2026-10-22): the footer notice on every public page, and every photo a page shows marked as an ImageObject that names
 // its creator, its credit, its copyright notice, its holder (the business) and the page that states the usage terms (#copyright, the homepage's footer).
 describe('image copyright: the footer notice and the ImageObject markup', () => {
-  const NOTICE = 'All photos, designs and content on this site are our own work and may not be copied or reused without written permission.';
+  const NOTICE = 'Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission.';
   const COPY = { creator: { '@type': 'Organization', name: 'Barro Industries OPC' }, creditText: 'Barro Industries OPC', copyrightNotice: '© 2026 Barro Industries OPC', copyrightHolder: { '@id': BASE + '/#business' }, license: BASE + '/#copyright', acquireLicensePage: BASE + '/#copyright' };
   const imageNodes = (p) => {
     const out = [];
@@ -1439,7 +1439,7 @@ describe('image copyright: the footer notice and the ImageObject markup', () => 
     return urls;
   };
 
-  it('puts the owner\'s notice in the footer\'s legal line of every page, small and in the footer\'s own colours: "© 2026 Barro Industries OPC (Barro Kitchens). All photos, designs and content on this site are our own work and may not be copied or reused without written permission."', () => {
+  it('puts the owner\'s notice in the footer\'s legal line of every page, small and in the footer\'s own colours: "© 2026 Barro Industries OPC (Barro Kitchens). Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission."', () => {
     each((p) => {
       const legal = p.footer.match(/<p class="foot-legal"[^>]*>[\s\S]*?<\/p>/)[0];
       assert.equal(textOf(legal), `© 2026 Barro Industries OPC (Barro Kitchens). ${NOTICE}`, `${p.path}: the notice`);

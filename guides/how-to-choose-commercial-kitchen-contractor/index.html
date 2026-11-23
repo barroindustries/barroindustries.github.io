@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-NV0JeItg/vbgzkbIgYgrFzKnP+UR7WBOK1O/e5PHkCg=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-LHfrBvGCBGzRtlSHWsze0orocjUjrt5otfMH8bLdYwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>How to Choose a Commercial Kitchen Contractor | Barro Kitchens</title>
 <meta name="description" content="A checklist for choosing a commercial kitchen contractor, from Barro Kitchens (Barro Industries): scope, drawings, materials, gas and exhaust, warranty and payment.">
 <link rel="canonical" href="https://barroindustries.com/guides/how-to-choose-commercial-kitchen-contractor/">
@@ -28,7 +28,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ISPSC 2026 — wide view of the cooking stations with range ovens, sinks and overhead hoods">
 <meta property="article:published_time" content="2026-11-19">
-<meta property="article:modified_time" content="2026-11-19">
+<meta property="article:modified_time" content="2026-11-23">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="How to Choose a Commercial Kitchen Contractor | Barro Kitchens">
 <meta name="twitter:description" content="A checklist for choosing a commercial kitchen contractor, from Barro Kitchens (Barro Industries): scope, drawings, materials, gas and exhaust, warranty and payment.">
@@ -47,7 +47,7 @@
         "https://barroindustries.com/site/img/pages/og-services.webp"
       ],
       "datePublished": "2026-11-19T08:00:00+08:00",
-      "dateModified": "2026-11-19T08:00:00+08:00",
+      "dateModified": "2026-11-23T08:00:00+08:00",
       "inLanguage": "en-PH",
       "author": {
         "@type": "Organization",
@@ -85,6 +85,48 @@
       },
       "copyrightYear": 2026,
       "copyrightNotice": "© 2026 Barro Industries OPC. All rights reserved.",
+      "citation": [
+        {
+          "@type": "CreativeWork",
+          "name": "Kitchen ventilation",
+          "url": "https://handbook.ashrae.org/Handbooks/A19/SI/a19_ch34/a19_ch34_si.aspx",
+          "author": {
+            "@type": "Organization",
+            "name": "American Society of Heating, Refrigerating and Air-Conditioning Engineers"
+          },
+          "datePublished": "2019"
+        },
+        {
+          "@type": "CreativeWork",
+          "name": "Businessperson’s guide to federal warranty law",
+          "url": "https://www.ftc.gov/business-guidance/resources/businesspersons-guide-federal-warranty-law",
+          "author": {
+            "@type": "Organization",
+            "name": "Federal Trade Commission"
+          },
+          "datePublished": "2018"
+        },
+        {
+          "@type": "CreativeWork",
+          "name": "Gas safety in catering and hospitality",
+          "url": "https://www.hse.gov.uk/pubns/cais23.pdf",
+          "author": {
+            "@type": "Organization",
+            "name": "Health and Safety Executive"
+          },
+          "datePublished": "2017"
+        },
+        {
+          "@type": "CreativeWork",
+          "name": "Ventilation in catering kitchens",
+          "url": "https://www.hse.gov.uk/pubns/cais10.pdf",
+          "author": {
+            "@type": "Organization",
+            "name": "Health and Safety Executive"
+          },
+          "datePublished": "2017"
+        }
+      ],
       "mainEntityOfPage": {
         "@id": "https://barroindustries.com/guides/how-to-choose-commercial-kitchen-contractor/#webpage"
       }
@@ -933,8 +975,8 @@ body{margin:0;background:#fff;color:#0E1116}
 }
 #site .pg-split.pg-split-solo{grid-template-columns:minmax(0,1fr)}
 /* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
-   (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
-   contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
+   (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds what a long article needs on top of those (a reading column, a
+   contents block, lists, notes, a checklist, two "choose" cards, the byline, the Quick answer, References, credited photographs) and the journal front page. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
    Not precached by the service worker, like css/pages.css. No inline style anywhere (the pages' CSP has no 'unsafe-inline'). No 4-digit z-index (CHECK 1).
    Phone first: every grid is minmax(0,1fr), nothing is wider than the viewport. */
 
@@ -1026,25 +1068,29 @@ body{margin:0;background:#fff;color:#0E1116}
 /* ── a closing paragraph with the three ways to start ── */
 #site .art-next{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
 
-/* ── the guides index: one wide card per guide ── */
-#site .art-cards{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
-@media (min-width:900px){
-  #site .art-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
-}
-
 /* ── the copyright notice at the foot of an article (and of the index) ── */
 #site .art .art-copy{margin-top:22px;color:var(--site-muted);font-size:13.5px;line-height:1.6}   /* the last question above it already ends in a hairline */
 #site .art-copy-index{margin-top:clamp(32px,4vw,48px);padding-top:18px;border-top:1px solid var(--site-line);color:var(--site-muted);font-size:13.5px;line-height:1.6;max-width:44rem}
 
-/* ══ The Kitchen Guide (2026-11-19, owner: "make it look like an online magazine or guide") ═════════════════════════════════════════════
-   The index is a magazine front: a masthead, a section bar that stays under the header while you scroll, a featured spread, then one
-   block per section — three lead stories with a picture, the rest as a compact two-column list with a small thumbnail. Every entry is
-   still one <article class="pg-card"> with one link, so the cards, the ItemList and the tests read it the same way. */
-#site .kg-mast .pg-hero-copy{max-width:46rem}
-#site .kg-mast h1{font-size:clamp(2.6rem,4.2vw + 1rem,4.4rem);letter-spacing:-.01em}
-#site .kg-count{margin-top:16px;color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+/* ══ The Kitchen Guide, a journal (2026-11-23; specs/KITCHEN-GUIDE-JOURNAL-SPEC.md §9) ═══════════════════════════════════════════════
+   The front page is a publication: nameplate, topic bar under the header, one lead story and four features, "Start here", "Latest", then a block
+   per topic (three photo cards, rows, a native <details> for the rest). Flat and calm: navy type, hairlines, gold only as rules and small caps.
+   Every entry is one <article class="pg-card"> with one link (the stretched h3 a::after of pages.css). Generated by scripts/build-guides-hub.js
+   (the hub) and scripts/apply-guide-template.js (the answer, byline note, credit, References, related parts of an article). */
 
-/* the section bar: chips that scroll sideways on a phone, sticky under the header */
+/* the masthead */
+#site .kg-mast{padding:clamp(18px,3vw,32px) 0 0;background:#fff;text-align:center}
+#site .kg-mast .pg-hero-copy{max-width:none}
+#site .kg-mast .crumbs ol{justify-content:center}
+#site .kg-dateline{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 20px;padding:10px 0;border-top:1px solid var(--site-line);border-bottom:1px solid var(--site-line);color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+#site .kg-mast h1{margin:clamp(22px,3.6vw,44px) 0 6px;font-size:clamp(2.9rem,6.4vw + .8rem,5.5rem);line-height:1;letter-spacing:-.02em}
+#site .kg-by{color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.22em;text-transform:uppercase}
+#site .kg-tagline{max-width:38rem;margin:16px auto 0;color:var(--site-muted);font:italic 400 clamp(1.05rem,.5vw + .98rem,1.25rem)/1.5 var(--site-serif)}
+#site .kg-count{margin-top:clamp(20px,3vw,32px);padding:12px 0 14px;border-bottom:3px double var(--site-navy);color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+#site .kg-count a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:3px}
+@media (min-width:560px){#site .kg-dateline{justify-content:space-between}}
+
+/* the topic bar: chips that scroll sideways on a phone, sticky under the header */
 #site .kg-nav{position:sticky;top:var(--site-head);z-index:5;border-bottom:1px solid var(--site-line);background:rgba(255,255,255,.96);backdrop-filter:saturate(1.2) blur(6px)}
 #site .kg-nav ul{display:flex;gap:8px;overflow-x:auto;padding:12px 0;list-style:none;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 #site .kg-nav ul::-webkit-scrollbar{display:none}
@@ -1052,57 +1098,147 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .kg-nav a{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--site-line);border-radius:999px;background:#fff;color:var(--site-navy);font:500 14px/1.2 var(--site-sans);text-decoration:none;white-space:nowrap}
 #site .kg-nav a:hover{border-color:var(--site-navy)}
 #site .kg-nav a span{color:var(--site-gold-ink);font-weight:600;font-size:12px}
-#site .kg-sec{scroll-margin-top:calc(var(--site-head) + 64px)}
+@media (prefers-reduced-motion:reduce){#site .kg-nav{backdrop-filter:none}}
+
+/* section heads */
+#site .kg-sec,#site #start-here,#site #latest{scroll-margin-top:calc(var(--site-head) + 64px)}
 #site .kg-sec+.kg-sec{border-top:1px solid var(--site-line)}
 #site .kg-sec-head{display:grid;gap:8px;margin-bottom:clamp(22px,3vw,32px)}
 #site .kg-sec-head h2{font-size:clamp(1.9rem,1.8vw + 1.2rem,2.6rem)}
 #site .kg-sec-head p{max-width:40rem;color:var(--site-muted);font-size:1.0625rem}
 #site .kg-sec-head .eyebrow{margin-bottom:0}
+#site #featured-h{margin-bottom:18px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .kg-front{padding-top:clamp(28px,4vw,44px)}
 
-/* a story card: picture, kicker, serif headline, one line of standfirst */
-#site .kg-card .pg-card-media{aspect-ratio:16/10}
-#site .kg-card .pg-card-body{padding:18px 20px 20px}
-#site .kg-card h3{font-size:clamp(1.25rem,.5vw + 1.1rem,1.45rem)}
-#site .kg-card p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-#site .kg-kicker{display:block;margin-bottom:8px;color:var(--site-gold-ink);font:600 11.5px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
-#site .kg-lead{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+/* cards: flat, no box, no shadow */
+#site .kg-card{border:0;border-radius:0;background:none;overflow:visible}
+#site .kg-card:hover{box-shadow:none}
+#site .kg-card:hover h3 a{text-decoration:underline;text-decoration-color:var(--site-gold);text-decoration-thickness:1px;text-underline-offset:4px}
+#site .kg-card:focus-within{outline:2px solid var(--site-navy);outline-offset:4px}
+#site .kg-card h3 a:focus-visible{outline:0}
+#site .kg-card .pg-card-media{aspect-ratio:4/3;border-radius:4px}
+#site .kg-card .pg-card-body{padding:14px 0 0}
+#site .kg-card h3{margin-bottom:6px;font-size:clamp(1.2rem,.5vw + 1.05rem,1.4rem);line-height:1.22}
+#site .kg-card p{margin-bottom:10px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#site .kg-kicker{display:block;margin-bottom:6px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
+#site .kg-card p.kg-meta{display:flex;flex-wrap:wrap;gap:0 8px;margin:auto 0 0;color:var(--site-muted);font:500 12.5px/1.5 var(--site-sans);letter-spacing:.04em}
+#site .kg-meta span[aria-hidden]{color:var(--site-gold)}
 
-/* the featured spread: one large story beside four smaller ones */
-#site .kg-feature{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
-#site .kg-feature .kg-big h3{font-size:clamp(1.6rem,1.4vw + 1.1rem,2.2rem)}
-#site .kg-feature .kg-big p{-webkit-line-clamp:4;font-size:1.0625rem}
-#site .kg-side{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+/* a row: text left, small picture right */
+#site .kg-row{flex-direction:row-reverse;align-items:flex-start;gap:14px;padding:16px 0;border-bottom:1px solid var(--site-line)}
+#site .kg-row .pg-card-media{flex:none;width:96px}
+#site .kg-row .pg-card-body{padding:0}
+#site .kg-row h3{font-size:1.08rem;line-height:1.3}
+#site .kg-row p:not(.kg-meta){display:none}
+@media (min-width:720px){#site .kg-list .kg-row p:not(.kg-meta){display:-webkit-box;-webkit-line-clamp:2;font-size:.95rem;line-height:1.5}}
 
-/* the compact list: a small square thumbnail beside the headline */
-#site .kg-list{display:grid;grid-template-columns:minmax(0,1fr);gap:0 32px;margin-top:clamp(20px,3vw,28px);border-top:1px solid var(--site-line)}
-#site .kg-list .pg-card{flex-direction:row;align-items:flex-start;gap:14px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;background:none;box-shadow:none}
-#site .kg-list .pg-card:hover{box-shadow:none}
-#site .kg-list .pg-card:hover h3 a{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
-#site .kg-list .pg-card-media{flex:none;width:88px;aspect-ratio:1;border-radius:4px}
-#site .kg-list .pg-card-body{padding:0}
-#site .kg-list h3{margin-bottom:4px;font-size:1.1rem;line-height:1.3}
-#site .kg-list p{margin-bottom:0;font-size:.95rem;line-height:1.5;-webkit-line-clamp:2}
-#site .kg-list .link-arrow{display:none}
+/* the lead story, the features, "Start here" */
+#site .kg-front-grid,#site .kg-start-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(20px,3vw,32px)}
+#site .kg-lead-story h3{font-size:clamp(1.7rem,1.6vw + 1.2rem,2.5rem);line-height:1.12;letter-spacing:-.01em}
+#site .kg-lead-story p:not(.kg-meta){-webkit-line-clamp:4;font-size:1.0625rem}
+#site .kg-features{border-top:1px solid var(--site-line)}
+#site .kg-features .pg-card-media{width:112px}
+#site .kg-pillar{border-radius:6px;background:var(--site-navy);overflow:hidden}
+#site .kg-pillar .pg-card-media{border-radius:0}
+#site .kg-pillar .pg-card-body{padding:22px 22px 26px}
+#site .kg-pillar h3{color:#fff;font-size:clamp(1.5rem,1.2vw + 1.15rem,2.1rem)}
+#site .kg-pillar p{color:rgba(255,255,255,.82)}
+#site .kg-pillar .kg-kicker{color:var(--site-gold-lite)}
+#site .kg-pillar .link-arrow{color:#fff}
+#site .kg-pillar:focus-within{outline-color:var(--site-gold-lite)}
+#site .kg-steps{list-style:none;counter-reset:kgstep;border-top:1px solid var(--site-line)}
+#site .kg-steps>li{position:relative;padding-left:44px;counter-increment:kgstep}
+#site .kg-steps>li::before{content:counter(kgstep);position:absolute;left:2px;top:12px;color:var(--site-gold-big);font:500 2rem/1 var(--site-serif)}
 
+/* a topic: three photo cards, then rows */
+#site .kg-top{display:grid;grid-template-columns:minmax(0,1fr);gap:0}
+#site .kg-list{display:grid;grid-template-columns:minmax(0,1fr);gap:0 40px;border-top:1px solid var(--site-line)}
+#site .kg-top+.kg-list{margin-top:clamp(8px,2vw,24px)}
+@media (max-width:719px){
+  #site .kg-top .kg-card:first-child{padding-bottom:18px;border-bottom:1px solid var(--site-line)}
+  #site .kg-top .kg-card+.kg-card{flex-direction:row-reverse;align-items:flex-start;gap:14px;padding:16px 0;border-bottom:1px solid var(--site-line)}
+  #site .kg-top .kg-card+.kg-card .pg-card-media{flex:none;width:96px}
+  #site .kg-top .kg-card+.kg-card .pg-card-body{padding:0}
+  #site .kg-top .kg-card+.kg-card h3{font-size:1.08rem;line-height:1.3}
+  #site .kg-top .kg-card+.kg-card p:not(.kg-meta){display:none}
+  #site .kg-top+.kg-list{margin-top:0;border-top:0}
+}
 @media (min-width:720px){
-  #site .kg-lead,#site .kg-side{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .kg-features{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 40px}
+  #site .kg-top{grid-template-columns:repeat(3,minmax(0,1fr));gap:28px}
   #site .kg-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .kg-start-solo .kg-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(3,auto);grid-auto-flow:column;gap:0 40px}
 }
 @media (min-width:1024px){
-  #site .kg-lead{grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
-  #site .kg-feature{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:24px}
-  #site .kg-feature .kg-big .pg-card-media{aspect-ratio:4/3}
-  #site .kg-side{grid-template-columns:minmax(0,1fr);gap:0;border-top:1px solid var(--site-line)}
-  #site .kg-side .pg-card{flex-direction:row;align-items:flex-start;gap:16px;padding:16px 0;border:0;border-bottom:1px solid var(--site-line);border-radius:0;box-shadow:none}
-  #site .kg-side .pg-card-media{flex:none;width:132px;aspect-ratio:4/3;border-radius:4px}
-  #site .kg-side .pg-card-body{padding:0}
-  #site .kg-side .link-arrow{display:none}
+  #site .kg-front-grid{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:40px;align-items:start}
+  #site .kg-features{display:block}
+  #site .kg-features .pg-card-media{width:150px}
+  #site .kg-start-grid{grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:40px;align-items:start}
+  #site .kg-start-solo .kg-start-grid{grid-template-columns:minmax(0,1fr)}
+  #site .kg-list-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #site .kg-top{gap:32px}
 }
-@media (prefers-reduced-motion:reduce){#site .kg-nav{backdrop-filter:none}}
 
-/* an article's kicker (its section) and reading time */
+/* "show the others" (a native <details>, no script) and the colophon */
+#site .kg-more{margin-top:20px}
+#site .kg-more>summary{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:0 18px;border:1px solid var(--site-navy);border-radius:4px;color:var(--site-navy);font:600 14px/1.2 var(--site-sans);cursor:pointer;list-style:none}
+#site .kg-more>summary{text-wrap:balance}
+#site .kg-more>summary::-webkit-details-marker{display:none}
+#site .kg-more>summary::after{content:"+";font-size:18px;line-height:1}
+#site .kg-more[open]>summary::after{content:"\2212"}
+#site .kg-more>summary:focus-visible{outline:2px solid var(--site-navy);outline-offset:3px}
+#site .kg-more[open]>.kg-list{margin-top:18px}
+#site .kg-colophon{border-top:3px double var(--site-navy)}
+#site .kg-colophon h2{margin-bottom:14px;font-size:1.5rem}
+#site .kg-colophon p{max-width:44rem;color:var(--site-muted);font-size:1rem;line-height:1.65}
+#site .kg-colophon p+p{margin-top:12px}
+#site .kg-colophon a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:3px}
+
+/* ── an article: the Quick answer, the byline note, the credit under a photograph, References, related reading ── */
+#site .art-answer{padding:18px 0 20px;border-top:2px solid var(--site-navy);border-bottom:1px solid var(--site-line)}
+#site .art-answer-title{margin-bottom:8px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .art-answer p+p{color:var(--site-navy);font:400 clamp(1.15rem,.5vw + 1.05rem,1.35rem)/1.5 var(--site-serif)}
+@media (min-width:1024px){
+  #site .art-wrap.has-answer .art-answer{grid-column:2;grid-row:1}
+  #site .art-wrap.has-answer .art-toc{grid-column:1;grid-row:1/span 2}
+  #site .art-wrap.has-answer .art{grid-column:2;grid-row:2}
+}
+#site .art-meta-note{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:6px;color:var(--site-muted);font:500 13px/1.5 var(--site-sans)}
+#site .art-meta-note a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:3px}
+#site .art-meta-note span[aria-hidden]{color:var(--site-gold)}
+#site .art-credit{display:block;margin-top:2px;font-size:12px;line-height:1.5}
+#site .pg-hero-media figcaption .art-credit a{color:inherit;font-weight:400;text-decoration:underline;text-decoration-color:var(--site-line-gold);text-underline-offset:2px}
+@media (min-width:900px){   /* the gold frame follows the 4:3 picture, not the taller figure */
+  #site .art-hero .pg-hero-media::after{inset:14px -14px auto 14px;height:auto;aspect-ratio:4/3}
+  #site .art-hero .pg-hero-media figcaption{margin-top:26px}
+}
+#site #references{padding-top:0}
+#site .art-refs>*{max-width:44rem}
+#site .art-refs h2{margin-bottom:14px;padding-top:22px;border-top:1px solid var(--site-line);font-size:1.35rem}
+#site .ref-list{list-style:none}
+#site .ref-list li{padding-left:1.75em;text-indent:-1.75em;color:var(--site-muted);font-size:.9rem;line-height:1.55;overflow-wrap:anywhere}
+#site .ref-list li+li{margin-top:10px}
+#site .ref-list cite{font-style:italic}
+#site .ref-list a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:2px}
+@media (min-width:1024px){
+  #site .art-refs{display:grid;grid-template-columns:minmax(0,15.5rem) minmax(0,44rem);justify-content:center;column-gap:clamp(48px,6vw,88px)}
+  #site .art-refs>*{grid-column:2}
+}
+#site .kg-related .pg-card-media{aspect-ratio:4/3}
+#site .kg-up{display:flex;flex-wrap:wrap;gap:12px 32px;margin-top:clamp(22px,3vw,32px)}
+#site .kg-up .link-arrow{text-wrap:balance}   /* a long link breaks in two even lines, so its arrow never stands alone */
+
+/* the section a guide belongs to, above its headline */
 #site .art-hero .kg-kicker a{color:inherit;text-decoration:none}
 #site .art-hero .kg-kicker a:hover{text-decoration:underline;text-underline-offset:4px}
+
+/* reading progress (spec §4.8): a 2px gold bar under the sticky header, CSS only, where scroll-driven animations exist and motion is welcome */
+@supports (animation-timeline:scroll()){
+  @media (prefers-reduced-motion:no-preference){
+    #site .art-hero::before{content:"";position:fixed;z-index:6;top:var(--site-head);left:0;width:100%;height:2px;background:var(--site-gold);transform-origin:0 50%;transform:scaleX(0);animation:art-progress linear both;animation-timeline:scroll(root)}
+    @keyframes art-progress{to{transform:scaleX(1)}}
+  }
+}
 </style>
 <!-- PAGE-CSS:END -->
 </head>
@@ -1130,21 +1266,26 @@ body{margin:0;background:#fff;color:#0E1116}
   <div class="site-wrap pg-hero-in">
     <div class="pg-hero-copy">
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">The Kitchen Guide</a></li><li><span aria-current="page">Choosing a kitchen contractor</span></li></ol></nav>
-      <p class="eyebrow kg-kicker"><a href="/guides/#planning">Planning and operations</a></p>
+      <p class="eyebrow kg-kicker"><a href="/guides/#planning">Planning a kitchen</a></p>
       <h1>How to Choose a Commercial Kitchen Contractor in the Philippines: A Checklist</h1>
       <p class="site-lead">A commercial kitchen is equipment, gas, water, drainage, exhaust and fire safety working together. Use this checklist to judge a contractor on scope, drawings, materials, gas, warranty and payment before you sign.</p>
       <p class="art-meta"><span>By Barro Kitchens</span><span aria-hidden="true">·</span><time datetime="2026-11-19">19 November 2026</time><span aria-hidden="true">·</span><span>6 min read</span></p>
+      <p class="art-meta-note">Updated <time datetime="2026-11-23">23 November 2026</time><span aria-hidden="true">·</span><a href="/guides/editorial-standards/">How we research and cite</a></p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/catalogue/?quote=1">Get a quote</a><a class="site-btn site-btn-outline" href="#scope">Start with the scope</a></p>
     </div>
     <figure class="pg-hero-media">
-      <img src="/site/img/projects/ispsc/01.webp" srcset="/site/img/projects/ispsc/01-thumb.webp 600w, /site/img/pages/hero-ispsc-01.webp 1000w, /site/img/projects/ispsc/01.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="1600" height="1200" alt="ISPSC 2026 — wide view of the cooking stations with range ovens, sinks and overhead hoods" fetchpriority="high" decoding="async">
-      <figcaption>Overhead hoods above the cooking stations at ISPSC (March 2026).</figcaption>
+      <img src="/site/img/guides/how-to-choose-commercial-kitchen-contractor.webp" srcset="/site/img/guides/how-to-choose-commercial-kitchen-contractor-thumb.webp 600w, /site/img/guides/how-to-choose-commercial-kitchen-contractor-1000.webp 1000w, /site/img/guides/how-to-choose-commercial-kitchen-contractor.webp 1600w" sizes="(min-width:900px) 520px, 70vw" width="1600" height="1067" alt="A person in a hard hat and face mask holding up a floor plan in a doorway at a building site" fetchpriority="high" decoding="async">
+      <figcaption>Checking the plans on site before the work begins. <span class="art-credit">Photo: <a href="https://www.pexels.com/photo/engineer-looking-on-a-floor-plan-8482555/" rel="noopener nofollow" target="_blank">Thirdman</a> / Pexels. Stock photo for illustration — not a Barro Kitchens project.</span></figcaption>
     </figure>
   </div>
 </section>
 
 <section class="site-sec" aria-label="The guide">
-  <div class="site-wrap art-wrap">
+  <div class="site-wrap art-wrap has-answer">
+    <div class="art-answer">
+      <p class="art-answer-title">Quick answer</p>
+      <p>To choose a commercial kitchen contractor, check that one team covers the whole scope: equipment, hood and ducting, fresh air, gas line and fire suppression. Expect drawings before building, and the steel grade, thickness and finish in writing. Ask who connects and tests the gas, what the warranty covers, and what is left out.</p>
+    </div>
     <nav class="art-toc" aria-label="In this guide">
       <p class="art-toc-title">In this guide</p>
       <ol>
@@ -1219,10 +1360,10 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="gas-air" aria-labelledby="gas-air-h">
         <h2 id="gas-air-h">Who connects the gas, the air and the fire suppression?</h2>
-        <p>These three carry the most risk, so ask who does each, and whether it is the contractor’s own team or a subcontractor.</p>
+        <p>These three carry the most risk, so ask who does each, and whether it is the contractor’s own team or a subcontractor (Health and Safety Executive [HSE], 2017a).</p>
         <ul>
         <li><strong>Gas.</strong> The tanks, regulator, welded pipe, shut-off valves and leak detector should be fitted properly and <a href="/guides/lpg-gas-line-for-restaurants/">leak tested</a> before use. Ask for a written record of the test.</li>
-        <li><strong>Exhaust and fresh air.</strong> The hood, duct, blower and <a href="/services/exhaust-and-fresh-air-systems/">fresh-air supply</a> should be planned as one system.</li>
+        <li><strong>Exhaust and fresh air.</strong> The hood, duct, blower and <a href="/services/exhaust-and-fresh-air-systems/">fresh-air supply</a> should be planned as one system (American Society of Heating, Refrigerating and Air-Conditioning Engineers [ASHRAE], 2019; HSE, 2017b).</li>
         <li><strong>Fire suppression.</strong> It is integrated with the hood, so ask that it is planned with the hood.</li>
         </ul>
         <p>Before the drawings are fixed, ask the Bureau of Fire Protection (BFP) and the city or municipal building office what they expect. The contractor should work from their answers.</p>
@@ -1230,7 +1371,7 @@ body{margin:0;background:#fff;color:#0E1116}
 
       <section id="terms" aria-labelledby="terms-h">
         <h2 id="terms-h">Warranty, service and payment</h2>
-        <p>Ask what the warranty covers and for how long, who answers a service call and how quickly, and what happens when the warranty ends. We give a 12-month warranty on workmanship, and full-kitchen projects can add 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>
+        <p>Ask what the warranty covers and for how long, who answers a service call and how quickly, and what happens when the warranty ends (Federal Trade Commission, 2018). We give a 12-month warranty on workmanship, and full-kitchen projects can add 12 months of preventive maintenance service (PMS) with KitchenShield™.</p>
         <p>Ask how payment is staged, and what each stage covers. Then check that the quotation says what is included and what is left out: delivery, installation, gas and water connections, commissioning, and the floors, walls, drains and power around the equipment. Two quotations can only be compared when both say the same things.</p>
       </section>
 
@@ -1278,8 +1419,20 @@ body{margin:0;background:#fff;color:#0E1116}
       </div>
     </div>
   </section>
-      <p class="art-copy">© 2026 Barro Industries OPC. All rights reserved. All text, photographs and designs on this page are our own work and may not be copied or reused without written permission.</p>
+      <p class="art-copy">© 2026 Barro Industries OPC. All rights reserved. The text and designs on this page are our own work and may not be copied or reused without written permission. Photographs are credited where they appear.</p>
     </article>
+  </div>
+</section>
+
+<section id="references" class="site-sec" aria-labelledby="references-h">
+  <div class="site-wrap art-refs">
+    <h2 id="references-h">References</h2>
+    <ul class="ref-list">
+      <li>American Society of Heating, Refrigerating and Air-Conditioning Engineers. (2019). Kitchen ventilation. In <cite>2019 ASHRAE handbook: HVAC applications</cite> (SI ed., chap. 34). <a href="https://handbook.ashrae.org/Handbooks/A19/SI/a19_ch34/a19_ch34_si.aspx" rel="noopener" target="_blank">https://handbook.ashrae.org/Handbooks/A19/SI/a19_ch34/a19_ch34_si.aspx</a></li>
+      <li>Federal Trade Commission. (2018). <cite>Businessperson’s guide to federal warranty law</cite>. <a href="https://www.ftc.gov/business-guidance/resources/businesspersons-guide-federal-warranty-law" rel="noopener" target="_blank">https://www.ftc.gov/business-guidance/resources/businesspersons-guide-federal-warranty-law</a></li>
+      <li>Health and Safety Executive. (2017a). <cite>Gas safety in catering and hospitality</cite> (Catering Information Sheet No. 23). <a href="https://www.hse.gov.uk/pubns/cais23.pdf" rel="noopener" target="_blank">https://www.hse.gov.uk/pubns/cais23.pdf</a></li>
+      <li>Health and Safety Executive. (2017b). <cite>Ventilation in catering kitchens</cite> (Catering Information Sheet No. 10). <a href="https://www.hse.gov.uk/pubns/cais10.pdf" rel="noopener" target="_blank">https://www.hse.gov.uk/pubns/cais10.pdf</a></li>
+    </ul>
   </div>
 </section>
 
@@ -1312,6 +1465,7 @@ body{margin:0;background:#fff;color:#0E1116}
         </div>
       </article>
     </div>
+    <p class="kg-up"><a class="link-arrow" href="/guides/how-to-build-a-restaurant-kitchen/">Start with: how to build a restaurant kitchen</a><a class="link-arrow" href="/guides/#planning">More in Planning a kitchen</a></p>
   </div>
 </section>
 
@@ -1346,7 +1500,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <p class="foot-files"><a href="/downloads/barro-industries-company-profile.pdf">Company profile (PDF)</a><a href="/downloads/barro-industries-catalogue.pdf">Catalogue (PDF)</a><a href="/downloads/barro-industries-portfolio.pdf">Portfolio (PDF)</a></p>
     </div>
     <p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/catalogue/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">The Kitchen Guide</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>
-    <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
+    <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>
   </div>
 </footer>
 

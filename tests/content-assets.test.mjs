@@ -44,6 +44,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -88,12 +89,18 @@ const RE = {
 };
 const ALLOWED_INSTITUTIONS = new Set(['Don Mariano Marcos Memorial State University', 'Ilocos Sur Polytechnic State College']);
 // every "<Capitalised words> University / College / Hospital / Hotel ..." phrase in a text must END with one of the two allowed names (a PDF prints a label such as CLIENT before it)
-function assertInstitutions(text, label) {
-  // the footer's own download label "Company profile (PDF)" is our document, not another company
-  for (const m of text.replace(/\bCompany profile \(PDF\)/g, '').matchAll(/\b((?:[A-Z][A-Za-z.'’&-]*\s+){0,7}(?:University|College|Institute|Hospital|Corporation|Company|Academy|Foundation|Hotel|Mall|Bank))\b/g)) assert.ok([...ALLOWED_INSTITUTIONS].some((a) => m[1].endsWith(a)), `${label}: another institution is named: ${m[1]}`);
+function assertInstitutions(text, label, cited = []) {
+  // the footer's own download label "Company profile (PDF)" is our document, not another company; a source the page cites under References may be named where it is cited (2026-11-23)
+  for (const m of text.replace(/\bCompany profile \(PDF\)/g, '').matchAll(/\b((?:[A-Z][A-Za-z.'’&-]*\s+){0,7}(?:University|College|Institute|Hospital|Corporation|Company|Academy|Foundation|Hotel|Mall|Bank))\b/g)) assert.ok([...ALLOWED_INSTITUTIONS].some((a) => m[1].endsWith(a)) || cited.some((a) => a.includes(m[1]) || m[1].includes(a)), `${label}: another institution is named: ${m[1]}`);
 }
 // the values of a JSON-LD graph, without the schema.org vocabulary ("@type": "Organization" is not English prose)
 const ldValues = (v, out = []) => { if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) v.forEach((x) => ldValues(x, out)); else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) if (!k.startsWith('@')) ldValues(x, out); return out; };
+// the Article's "citation" array lists the sources named under References (their titles and authors, in the sources' own words and spelling): bibliography, not our copy (2026-11-23)
+const withoutCitations = (v) => (Array.isArray(v) ? v.map(withoutCitations) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'citation').map(([k, x]) => [k, withoutCitations(x)])) : v);
+const withoutCited = (p, s) => p.cited.reduce((t, a) => (a ? t.split(a).join('') : t), s);   // a cited organisation keeps the spelling of its own name ("World Health Organization")
+const inRefs = (chain) => chain.some((e) => e.tag === 'section' && e.attrs.id === 'references');
+// the organisations a page cites (the authors of its References entries): they may be named in the text that cites them, though no other institution may be
+const citedAuthors = (refsHtml) => [...refsHtml.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => visibleText(m[1]).split(/\s\((?:\d{4}|n\.d\.)/)[0].replace(/[.,\s]+$/, ''));
 
 // ── a small HTML scanner (no dependency; the same idea as tests/seo-pages.test.mjs) ─────────────────────────────────────────────────────
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
@@ -255,6 +262,7 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
 // the order is the hub's order (cards and ItemList). priceLine: the ONE guide that may carry the owner's price sentence (see PRICE_SENTENCE).
 const GUIDES = [
   { path: '/guides/', kind: 'index' },
+  { path: '/guides/editorial-standards/', kind: 'standards' },
   { path: '/guides/commissary-kitchen-requirements-philippines/', kind: 'article', h1: 'Commissary Kitchen Requirements in the Philippines: Layout, Equipment and Ventilation', ogImage: 'og-fit-out.webp', published: '2026-10-22' },
   { path: '/guides/ss304-vs-ss316-stainless-steel/', kind: 'article', h1: 'SS304 vs SS316 Stainless Steel: Which Do You Need for Your Kitchen or Laboratory?', ogImage: 'og-fabrication.webp', published: '2026-10-22' },
   { path: '/guides/how-to-plan-a-commercial-kitchen-layout/', kind: 'article', h1: 'How to Plan a Commercial Kitchen Layout: Workflow, Aisles, Ventilation and Gas', ogImage: 'og-ispsc.webp', published: '2026-10-28' },
@@ -362,11 +370,50 @@ const GUIDES = [
   { path: '/guides/commercial-kitchen-pasig-ortigas/', kind: 'article', h1: 'Commercial Kitchen Pasig: Restaurants, Commissaries and BPO Canteens in Ortigas and Kapitolyo', ogImage: 'og-areas.webp', published: '2026-11-22' },
   { path: '/guides/commercial-kitchen-alabang-south-metro/', kind: 'article', h1: 'Commercial Kitchen Alabang: Planning in Muntinlupa, Parañaque and Las Piñas', ogImage: 'og-areas.webp', published: '2026-11-22' },
   { path: '/guides/commercial-kitchen-antipolo-rizal/', kind: 'article', h1: 'Commercial Kitchen Antipolo: Planning in Rizal, from Cainta and Taytay to the Hills', ogImage: 'og-areas.webp', published: '2026-11-22' },
+  { path: '/guides/commercial-kitchen-cost-factors/', kind: 'article', h1: 'Commercial Kitchen Cost in the Philippines: What Drives It and How to Get an Accurate Quote', ogImage: 'og-fit-out.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-counter-height-and-dimensions/', kind: 'article', h1: 'Kitchen Counter Height and Dimensions in the Philippines: Typical Sizes in mm and Metres', ogImage: 'og-work.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-sink-types-and-sizes/', kind: 'article', h1: 'Kitchen Sink Types and Sizes: Single or Double Bowl, Drainboard, Depth and Faucet', ogImage: 'og-faq.webp', published: '2026-11-23' },
+  { path: '/guides/food-truck-kitchen-layout/', kind: 'article', h1: 'Food Truck Kitchen Layout: Equipment, Sinks, LPG and Ventilation for a Mobile Kitchen', ogImage: 'og-faq.webp', published: '2026-11-23' },
+  { path: '/guides/national-building-code-commercial-kitchens/', kind: 'article', h1: 'National Building Code and Your Kitchen: The Basics', ogImage: 'og-fit-out.webp', published: '2026-11-23' },
+  { path: '/guides/how-to-read-a-kitchen-floor-plan/', kind: 'article', h1: 'How to Read a Kitchen Floor Plan: Scale, Dimensions, Symbols and What to Mark Before You Ask for a Quote', ogImage: 'og-ispsc.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-countertop-materials-compared/', kind: 'article', h1: 'Kitchen Countertop Materials Compared: Stainless Steel, Granite, Quartz, Tile, Laminate and Wood', ogImage: 'og-fabrication.webp', published: '2026-11-23' },
+  { path: '/guides/bakery-kitchen-layout/', kind: 'article', h1: 'Bakery Kitchen Layout and Design: Zones, Flow, Benches and the Oven Area', ogImage: 'og-ispsc.webp', published: '2026-11-23' },
+  { path: '/guides/sanitation-code-food-establishments/', kind: 'article', h1: 'Sanitation Code Basics for Food Businesses in the Philippines', ogImage: 'og-ispsc.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-organisation-and-storage-ideas/', kind: 'article', h1: 'Kitchen Organisation and Storage Ideas: Shelves, Racks, Hooks and Food Storage', ogImage: 'og-institutional.webp', published: '2026-11-23' },
+  { path: '/guides/outdoor-kitchen-design/', kind: 'article', h1: 'Outdoor Kitchen Design Ideas for the Philippines: Weather, Steel, Gas and Layout', ogImage: 'og-fit-out.webp', published: '2026-11-23' },
+  { path: '/guides/how-to-specify-commercial-kitchen-equipment/', kind: 'article', h1: 'How to Specify Commercial Kitchen Equipment: A Checklist for Owners and Designers', ogImage: 'og-fabrication.webp', published: '2026-11-23' },
+  { path: '/guides/dirty-kitchen-design-philippines/', kind: 'article', h1: 'Dirty Kitchen Design in the Philippines: Meaning, Standard Size, Layout and Materials', ogImage: 'og-lpg.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-renovation-philippines/', kind: 'article', h1: 'Kitchen Renovation in the Philippines: How to Plan Your Home Kitchen Step by Step', ogImage: 'og-fit-out.webp', published: '2026-11-23' },
+  { path: '/guides/home-kitchen-ventilation-range-hood-vs-exhaust-fan/', kind: 'article', h1: 'Range Hood vs Exhaust Fan: Home Kitchen Ventilation, Types and Sizing', ogImage: 'og-exhaust.webp', published: '2026-11-23' },
+  { path: '/guides/small-kitchen-ideas-philippine-homes/', kind: 'article', h1: 'Small Kitchen Design Ideas for Philippine Homes: Layout, Storage and Ventilation', ogImage: 'og-faq.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-safety-tips/', kind: 'article', h1: 'Kitchen Safety Tips: Fire, Burns, Cuts, Slips, Electricity and Gas', ogImage: 'og-fire.webp', published: '2026-11-23' },
+  { path: '/guides/cafe-kitchen-layout/', kind: 'article', h1: 'Cafe Kitchen Design: Layout, Dimensions and Requirements for a Coffee Shop', ogImage: 'og-faq.webp', published: '2026-11-23' },
+  { path: '/guides/lpg-safety-at-home/', kind: 'article', h1: 'LPG Safety at Home: Where to Put the Tank, How to Check for Leaks and What to Do', ogImage: 'og-lpg.webp', published: '2026-11-23' },
+  { path: '/guides/fire-code-kitchen-exhaust-and-suppression/', kind: 'article', h1: 'Fire Code Basics for Kitchen Hoods and Fire Suppression', ogImage: 'og-fire.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-layout-types/', kind: 'article', h1: 'Kitchen Layout Ideas for Philippine Homes: L-Shape, U-Shape, Galley and More', ogImage: 'og-ispsc.webp', published: '2026-11-23' },
+  { path: '/guides/kitchen-cleaning-and-food-safety-at-home/', kind: 'article', h1: 'Kitchen Cleaning and Food Safety at Home: A Simple Daily and Weekly Routine', ogImage: 'og-fabrication.webp', published: '2026-11-23' },
+  { path: '/guides/how-to-build-a-restaurant-kitchen/', kind: 'article', h1: 'How to Build a Restaurant Kitchen in the Philippines: A Step-by-Step Guide', ogImage: 'og-fit-out.webp', published: '2026-11-23' },
 ];
 // the owner's own sentence, the one answer to the price question that the product pages give (CHECK 9 takes it out of the product pages and of the equipment list before it scans for the word "price")
 const PRICE_SENTENCE = 'Prices depend on size and options.';
 const PRICE_LINE = 'Prices depend on size and options. Get an estimated range online in minutes — no account needed.';
 const noPriceLine = (p, s) => (p.priceLine ? String(s).split(PRICE_SENTENCE).join('') : String(s));
+// the registry behind the hub and the shared article template (scripts/guides-hub.json), the photo manifests and the Quick answers: read here, so the generators and the tests cannot drift (2026-11-23)
+const CFG = JSON.parse(read('scripts/guides-hub.json'));
+const MANIFEST = Object.assign({}, ...fs.readdirSync(path.join(ROOT, 'scripts')).filter((f) => /^guide-photos-.*\.json$/.test(f)).sort().map((f) => JSON.parse(read('scripts/' + f))));
+const ANSWERS = exists('scripts/guide-answers.json') ? JSON.parse(read('scripts/guide-answers.json')) : {};
+const STANDARDS = '/guides/editorial-standards/';
+const RELEASE_COPY = '© 2026 Barro Industries OPC. All rights reserved. The text and designs on this page are our own work and may not be copied or reused without written permission. Photographs are credited where they appear.';
+const DISCLAIMER = 'Stock photo for illustration — not a Barro Kitchens project.';
+// ONE more allowance beside the price sentence (owner ruling 2026-11-23; CHECK 9's COST_GUIDE): the guide on what drives the cost of a commercial kitchen may use the plain words "cost" and "costs",
+// and its address and exact headline may appear wherever another page (the hub, the pillar) links to it. A peso amount, "price", "pricing" and every other price word stay banned there, as everywhere.
+const COST_SLUG = 'commercial-kitchen-cost-factors';
+const COST_H1 = GUIDES.find((g) => g.path === `/guides/${COST_SLUG}/`).h1;
+const allowCost = (p, s) => { let t = String(s).split(COST_SLUG).join('').split(COST_H1).join(''); if (p.path === `/guides/${COST_SLUG}/`) t = t.replace(/\bcosts?\b/gi, ''); return t; };
+const scrub = (p, s) => allowCost(p, noPriceLine(p, s)).replace(/\bBuilding Officials?\b/g, '').replace(/\b(?:gas|water|electric(?:ity)?|energy|flow|pressure) meters?\b/gi, '');   // a gas meter is a device, not the US spelling of a unit of length   // "Building Official" is an office title, not an "official" claim (owner ruling 2026-11-23)
+// the owner's project photographs inside the article (figure.art-fig): since 2026-11-23 the hero may be a credited guide photograph, so "two project images" became "one inline project photograph"
+const inlineProject = (p) => p.S.elements.filter((e) => e.tag === 'img' && /site\/img\/projects\//.test(e.attrs.src) && e.chain.some((c) => c.tag === 'figure' && c.attrs.class === 'art-fig'));
+const shortDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`; };
 const longDate = (iso) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
 const PAGES = GUIDES.map((g) => {
   const file = g.path.slice(1) + 'index.html';
@@ -388,30 +435,42 @@ const PAGES = GUIDES.map((g) => {
   o.footer = (html.match(/<footer id="site-footer">[\s\S]*?<\/footer>/) || [''])[0];
   o.main = (html.match(/<main\b[\s\S]*?<\/main>/) || [''])[0];
   o.article = (html.match(/<article class="art">[\s\S]*?<\/article>/) || [''])[0];
+  o.slug = g.path.split('/')[2] || '';
+  o.cfg = CFG.articles.find((a) => a.slug === o.slug) || null;
+  o.modified = (o.cfg && o.cfg.modified) || o.published;
+  o.refs = (html.match(/<section id="references"[\s\S]*?<\/section>/) || [''])[0];
+  o.mainNoRefs = o.main.replace(o.refs, '');
+  o.answer = (html.match(/<div class="art-answer">\s*<p class="art-answer-title">Quick answer<\/p>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/) || [])[1] || null;
+  o.cited = citedAuthors(o.refs);
   o.imgs = S.elements.filter((e) => e.tag === 'img');
   o.headings = [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/g)].map((m) => ({ level: +m[1], text: visibleText(m[2]) }));
   o.draft = /<!-- DRAFT — awaiting owner approval/.test(html);
   o.body = S.texts.filter((t) => inBody(t.chain)).map((t) => decode(t.text)).join(' ').replace(/\s+/g, ' ').trim();
+  o.bodyNoRefs = S.texts.filter((t) => inBody(t.chain) && !inRefs(t.chain)).map((t) => decode(t.text)).join(' ').replace(/\s+/g, ' ').trim();
   return o;
 });
 const each = (fn) => { for (const p of PAGES) fn(p); };
 const articles = PAGES.filter((p) => p.kind === 'article');
 const byPath = (p) => PAGES.find((x) => x.path === p);
-const publicStrings = (p) => {
+// noRefs: the page's own copy only — without the References list and the JSON-LD "citation" array (titles and authors in the sources' own words and spelling). The scans for institutions,
+// US spelling, superlatives and legal words use it (owner-approved 2026-11-23); the scans for money and price words read everything.
+const publicStrings = (p, noRefs = false) => {
   const out = [{ kind: 'title', value: p.title }];
-  for (const t of p.S.texts) if (inBody(t.chain)) out.push({ kind: 'text', value: decode(t.text) });
-  for (const a of p.S.attrs) if (['alt', 'title', 'aria-label', 'content', 'placeholder'].includes(a.name)) out.push({ kind: `<${a.tag} ${a.name}>`, value: decode(a.value) });
+  for (const t of p.S.texts) if (inBody(t.chain) && !(noRefs && inRefs(t.chain))) out.push({ kind: 'text', value: decode(t.text) });
+  for (const a of p.S.attrs) if (['alt', 'title', 'aria-label', 'content', 'placeholder'].includes(a.name) && !(noRefs && inRefs(a.chain))) out.push({ kind: `<${a.tag} ${a.name}>`, value: decode(a.value) });
   for (const c of p.S.comments) out.push({ kind: 'comment', value: c.text });
   // the image-copyright markup (2026-10-22) is schema.org vocabulary, not copy: the key "license" and the type "Organization" are not claims or a US spelling
-  for (const s of p.S.scripts) if (s.attrs.type === 'application/ld+json') out.push({ kind: 'json-ld', value: s.body.replace(/"license":\s*"https:\/\/barroindustries\.com\/#copyright"/g, '""').replace(/"@type":\s*"Organization"/g, '"@type": ""') });
-  return out.map((o) => ({ ...o, value: noPriceLine(p, o.value) }));   // the owner's price sentence is the one allowance, on one page (pinned by its own test)
+  for (const s of p.S.scripts) if (s.attrs.type === 'application/ld+json') out.push({ kind: 'json-ld', value: (noRefs ? JSON.stringify(withoutCitations(JSON.parse(s.body)), null, 2) : s.body).replace(/"license":\s*"https:\/\/barroindustries\.com\/#copyright"/g, '""').replace(/"@type":\s*"Organization"/g, '"@type": ""') });
+  return out.map((o) => ({ ...o, value: scrub(p, o.value) }));   // the owner's price sentence and the cost guide's word "cost" are the allowances, on one page each (pinned by their own tests)
 };
-const firstHit = (p, re) => { const hit = publicStrings(p).find((s) => re.test(s.value)); return hit ? `${hit.kind}: "${(hit.value.match(re) || [])[0]}"` : null; };
+const firstHit = (p, re, noRefs = false) => { const hit = publicStrings(p, noRefs).find((s) => re.test(s.value)); return hit ? `${hit.kind}: "${(hit.value.match(re) || [])[0]}"` : null; };
 const allStrings = (v, out = []) => { if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) v.forEach((x) => allStrings(x, out)); else if (v && typeof v === 'object') Object.values(v).forEach((x) => allStrings(x, out)); return out; };
 const allKeys = (v, out = new Set()) => { if (Array.isArray(v)) v.forEach((x) => allKeys(x, out)); else if (v && typeof v === 'object') for (const k of Object.keys(v)) { out.add(k); allKeys(v[k], out); } return out; };
 
-describe('guides: the pages exist (the index and fifteen articles), nothing else lives in the folder, and the stylesheet is scoped and clean', () => {
-  it('has an index and the fifteen articles, and no other file under /guides/', () => {
+describe('guides: the pages exist (the index, the editorial standards page and every registered article), nothing else lives in the folder, and the stylesheet is scoped and clean', () => {
+  it('has the index, the editorial standards page and every article of scripts/guides-hub.json, and no other file under /guides/', () => {
+    assert.equal(PAGES.length, 2 + CFG.articles.length);
+    assert.deepEqual(articles.map((p) => p.slug), CFG.articles.map((a) => a.slug), 'GUIDES is the registry, in its order (the order of the hub\'s ItemList)');
     for (const p of PAGES) assert.ok(p.html.length > 8000, `${p.file} is missing or empty`);
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) (e.isDirectory() ? walk(`${d}/${e.name}`) : files.push(`${d}/${e.name}`)); };
@@ -424,7 +483,8 @@ describe('guides: the pages exist (the index and fifteen articles), nothing else
     assert.ok(css.length > 3000);
     assert.ok(/^\/\* css\/guides\.css/.test(css));
     const body = css.replace(/\/\*[\s\S]*?\*\//g, '');
-    const selectors = body.replace(/\{[^{}]*\}/g, '{}').split(/[{}]/).map((x) => x.trim()).filter((x) => x && !/^@media/.test(x));
+    // @media, @supports and @keyframes (and its from / to / NN% steps) are wrappers, not rules: the rules inside them are what must start with #site (the reading-progress bar, 2026-11-23, is the one use of the last two)
+    const selectors = body.replace(/\{[^{}]*\}/g, '{}').split(/[{}]/).map((x) => x.trim()).filter((x) => x && !/^@(media|supports|keyframes)/.test(x) && !/^(from|to|\d+%)$/.test(x));
     for (const sel of selectors) for (const part of sel.split(',')) assert.ok(/^#site[\s.:>+~\[]|^#site$/.test(part.trim()), `a rule outside #site: ${part.trim()}`);
     assert.ok(!/z-index\s*:\s*\d{4}/.test(css));
     assert.ok(!/@import|url\(/.test(css));
@@ -509,7 +569,7 @@ describe('guides: <head> — title, description, canonical, robots, Open Graph, 
       assert.deepEqual([w, h], [1200, 630]);
       assert.ok(p.meta('og:image:alt').length > 20 && p.meta('og:image:alt') === p.meta('twitter:image:alt'));
       if (p.ogImage) assert.ok(img.endsWith('/' + p.ogImage), `${p.path}: the social image should be ${p.ogImage}`);
-      if (p.kind === 'article') { assert.equal(p.meta('article:published_time'), p.published); assert.equal(p.meta('article:modified_time'), p.published); }
+      if (p.kind === 'article') { assert.equal(p.meta('article:published_time'), p.published); assert.equal(p.meta('article:modified_time'), p.modified, `${p.path}: article:modified_time is the date in scripts/guides-hub.json (the published date while the article was never modified)`); assert.ok(p.modified >= p.published); }
     });
   });
 
@@ -568,12 +628,14 @@ describe('guides: markup — one H1, a logical heading order, unique ids, sized 
     });
   });
 
-  it('gives every image alt text, width and height equal to its file, an existing file, one high-priority hero (on the articles) and lazy everything else', () => {
+  // the pictures a guide page may show (2026-11-23): the logo, the owner's project photographs (and the 1000 px copy the lead story uses), and the guide photographs under site/img/guides/<slug>(-320|-thumb|-1000)
+  const IMG_OK = new RegExp('^/site/img/(barro-kitchens-96\\.webp|projects/(ispsc|dmmmsu)/\\d\\d(-thumb)?\\.webp|pages/hero-(ispsc|dmmmsu)-\\d\\d\\.webp|guides/(' + Object.keys(MANIFEST).join('|') + ')(-320|-thumb|-1000)?\\.webp)$');
+  it('gives every image alt text, width and height equal to its file, an existing file, one high-priority image (the hero of an article, the lead story of the hub) and lazy everything else', () => {
     each((p) => {
       let high = 0;
       for (const { attrs: a } of p.imgs) {
         assert.ok(a.alt && a.alt.trim().length >= 10, `${p.path}: an image without alt text (${a.src})`);
-        assert.match(a.src, /^\/site\/img\/(barro-kitchens-96\.webp|projects\/(ispsc|dmmmsu)\/\d\d(-thumb)?\.webp)$/, `${p.path}: unexpected image ${a.src}`);
+        assert.match(a.src, IMG_OK, `${p.path}: unexpected image ${a.src}`);
         assert.ok(exists(a.src.slice(1)));
         const { w, h } = webpSize(a.src.slice(1));
         if (a.src === '/site/img/barro-kitchens-96.webp') assert.deepEqual([a.width, a.height], ['36', '36']);
@@ -581,7 +643,9 @@ describe('guides: markup — one H1, a logical heading order, unique ids, sized 
         if (a.srcset) for (const cand of a.srcset.split(',').map((s) => s.trim())) { const [u, d] = cand.split(/\s+/); assert.ok(exists(u.slice(1)), `srcset ${u}`); assert.equal(d, `${webpSize(u.slice(1)).w}w`); }
         if (a.fetchpriority === 'high') { high++; assert.ok(!a.loading); } else if (a.src !== '/site/img/barro-kitchens-96.webp') { assert.equal(a.loading, 'lazy'); assert.equal(a.decoding, 'async'); }
       }
-      assert.equal(high, p.kind === 'article' ? 1 : 0, `${p.path}: fetchpriority="high" count`);
+      assert.equal(high, p.kind === 'standards' ? 0 : 1, `${p.path}: fetchpriority="high" count (the hero of an article, the lead story of the hub, none on the standards page)`);
+      if (p.kind === 'index') assert.ok(/<article class="pg-card kg-card kg-tease kg-lead-story">(?:(?!<\/article>)[\s\S])*fetchpriority="high"/.test(p.html), 'the one high-priority image of the hub is the lead story\'s');
+      if (p.kind === 'article') assert.ok(/<figure class="pg-hero-media">\s*<img [^>]*fetchpriority="high"/.test(p.html), `${p.path}: the high-priority image is the hero`);
     });
   });
 
@@ -600,10 +664,18 @@ describe('guides: markup — one H1, a logical heading order, unique ids, sized 
 
   it('links only to pages that exist (or are planned), to the quote flow, the project brief, Messenger and Facebook, plus mailto and tel — and every page links home, to the catalogue and to the quote flow', () => {
     each((p) => {
-      const hrefs = p.S.attrs.filter((a) => a.tag === 'a' && a.name === 'href').map((a) => a.value);
-      for (const h of hrefs) {
+      const anchors = p.S.elements.filter((e) => e.tag === 'a' && e.attrs.href !== undefined);
+      const hrefs = anchors.map((e) => e.attrs.href);
+      for (const a of anchors) {
+        const h = a.attrs.href;
         if (h.startsWith('#') || h.startsWith('mailto:') || h.startsWith('tel:')) continue;
         if (h === MSGR || h === FB) continue;
+        if (/^https?:\/\//.test(h)) {
+          // an outside link is allowed in exactly two places (2026-11-23): a source under References, and the photographer's credit under the hero picture; never anywhere else
+          if (inRefs(a.chain)) { assert.equal(a.attrs.rel, 'noopener', `${p.path}: ${h}`); assert.equal(a.attrs.target, '_blank', `${p.path}: ${h}`); continue; }   // (one source, propane101.com, is still http: it is the source's own address)
+          if (a.chain.some((e) => e.tag === 'figcaption') && a.chain.some((e) => e.tag === 'span' && e.attrs.class === 'art-credit')) { assert.match(h, /^https:\/\/(unsplash\.com|www\.pexels\.com)\//, `${p.path}: the photo credit links ${h}`); assert.equal(a.attrs.rel, 'noopener nofollow'); assert.equal(a.attrs.target, '_blank'); continue; }
+          assert.fail(`${p.path}: an outside link ${h} outside References and the photo credit`);
+        }
         assert.ok(h.startsWith('/'), `${p.path}: an outside link ${h}`);
         assert.ok(resolvable(h), `${p.path}: ${h} does not exist and is not planned`);
       }
@@ -663,7 +735,9 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
     each((p) => {
       const keys = allKeys(p.ld);
       for (const k of BAD_KEYS) assert.ok(!keys.has(k), `${p.path}: a "${k}" key`);
-      for (const s of allStrings(p.ld).map((x) => noPriceLine(p, x))) assert.ok(!RE.money.test(s) && !RE.priceWords.test(s), `${p.path}: money in JSON-LD: ${s.slice(0, 60)}`);
+      // the price words are checked in our own copy (the "citation" sources keep their own titles: 2026-11-23); money is checked in everything
+      for (const s of allStrings(withoutCitations(p.ld)).map((x) => scrub(p, x))) assert.ok(!RE.money.test(s) && !RE.priceWords.test(s), `${p.path}: money in JSON-LD: ${s.slice(0, 60)}`);
+      for (const s of allStrings(p.ld)) assert.ok(!RE.money.test(s), `${p.path}: money in JSON-LD (a citation?): ${s.slice(0, 60)}`);
     });
   });
 
@@ -677,7 +751,7 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
       assert.equal(n.description, p.meta('description'));
       // a full datetime with the Philippine offset: Google's Rich Results Test flags a bare date as "missing a timezone" (2026-10-28)
       assert.equal(n.datePublished, p.published + 'T08:00:00+08:00');
-      assert.equal(n.dateModified, p.published + 'T08:00:00+08:00');
+      assert.equal(n.dateModified, p.modified + 'T08:00:00+08:00', `${p.path}: dateModified is the "modified" date of scripts/guides-hub.json`);   // 2026-11-23: every guide that gained References or a Quick answer is modified on the release date
       assert.equal(n.inLanguage, 'en-PH');
       assert.deepEqual(n.image, [p.meta('og:image')]);
       for (const who of [n.author, n.publisher]) {
@@ -738,13 +812,15 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
     }
   });
 
-  it('gives the index a CollectionPage whose ItemList is exactly the four articles, in page order, each linked from the page', () => {
+  it('gives the index a CollectionPage whose ItemList is exactly the articles, in registry order (the order of scripts/guides-hub.json and of GUIDES), with their count and the page\'s dateModified, each linked from the page', () => {
     const ix = byPath('/guides/');
     const cp = ix.node('CollectionPage');
     assert.equal(cp.length, 1);
     assert.equal(cp[0]['@id'], ix.url + '#webpage');
     const list = cp[0].mainEntity;
     assert.equal(list['@type'], 'ItemList');
+    assert.equal(list.numberOfItems, articles.length);
+    assert.equal(cp[0].dateModified, articles.reduce((m, a) => (a.modified > m ? a.modified : a.published > m ? a.published : m), '0000-00-00') + 'T08:00:00+08:00', 'the hub\'s dateModified is the newest date of any article');
     assert.deepEqual(list.itemListElement.map((i) => i.url), articles.map((a) => a.url));
     assert.deepEqual(list.itemListElement.map((i) => i.name), articles.map((a) => a.headings.find((h) => h.level === 1).text));
     for (const i of list.itemListElement) assert.ok(ix.html.includes(`href="${i.url.replace(BASE, '')}"`));
@@ -755,10 +831,10 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
 describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, comments)', () => {
   it('shows no price, no peso sign, no thousands-separated number and none of the pricing words (CHECK 9 would refuse them in the body: "price", "pricing", "cost")', () => {
     each((p) => {
-      const page = noPriceLine(p, p.html.replace(STYLE_RE, ''));   // the generated inline stylesheet is three css files verbatim (css text, not page content); the owner's price sentence is out on the one page that may carry it
+      const page = scrub(p, p.html.replace(STYLE_RE, ''));   // the generated inline stylesheet is three css files verbatim (css text, not page content); the owner's price sentence and the cost guide's word "cost" are out on the one page each that may carry them
       assert.ok(!/basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|laborHours|ratePerDay|\bmarkup\b|₱|PHP ?[0-9]/i.test(page), `${p.path}: a price token`);
       assert.ok(!/\b[0-9]{1,3}(,[0-9]{3})+\b/.test(page.replace(/<link[^>]*fonts\.googleapis\.com[^>]*>/g, '')), `${p.path}: a thousands-separated number`);
-      const body = noPriceLine(p, p.html.slice(p.html.indexOf('</head>')));
+      const body = scrub(p, p.html.slice(p.html.indexOf('</head>')));
       assert.ok(!/pric(e|ing)|[^a-z]costs?[^a-z]/i.test(body), `${p.path}: CHECK 9's body scan would fail`);
       assert.equal(firstHit(p, RE.money), null, p.path);
       assert.equal(firstHit(p, RE.priceWords), null, p.path);
@@ -781,7 +857,7 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
   it('states no project count, names no client but DMMMSU and ISPSC, shows no agency logo, and credits no grade, finish or compliance to a project', () => {
     each((p) => {
       assert.equal(firstHit(p, RE.counts), null, p.path);
-      for (const t of p.S.texts.filter((x) => inBody(x.chain))) assertInstitutions(decode(t.text), p.path);
+      for (const t of p.S.texts.filter((x) => inBody(x.chain) && !inRefs(x.chain))) assertInstitutions(decode(t.text), p.path, p.cited);   // not the References list itself (sources in their own words); a cited source may be named in the text that cites it
       assert.equal(firstHit(p, /\b(Lorma|ITRMC|Bethany|Casa Carmelo|Cosmos|Chibab|Gerry|Jollibee|Starbucks|Marriott|Hilton|Plaza Premium)\b/i), null, p.path);
       assert.ok(!/<(object|embed|iframe|picture|canvas|video|audio)\b/i.test(p.html));
     });
@@ -790,7 +866,12 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
   });
 
   it('claims no "best / leading / world-class / award / certified / accredited / licensed / guaranteed", no #1, no superlative', () => {
-    each((p) => assert.equal(firstHit(p, RE.superlative), null, p.path));
+    // our own copy: not the References list or the citation array ("Building Official" is an office title, see scrub()); the code articles summarise what the rules ask of a kitchen, and a rule may call for an
+    // accredited operator, a licence or a certificate: they say so (owner ruling 2026-11-23), and claim none of them for Barro Kitchens
+    const RULES = new Set(CFG.articles.filter((a) => a.section === 'codes').map((a) => a.slug));
+    const RE_RULES = new RegExp(RE.superlative.source.replace('certified|certification|accredit\\w*|licen[cs]\\w*|', ''), 'i');
+    assert.notEqual(RE_RULES.source, RE.superlative.source, 'the rules variant of the superlative scan was not built');
+    each((p) => assert.equal(firstHit(p, RULES.has(p.slug) ? RE_RULES : RE.superlative, true), null, p.path));
   });
 
   it('never mentions the system, the app, a login or the staff — the one way in is the footer "Team portal" link', () => {
@@ -806,18 +887,18 @@ describe('guides: the owner\'s content rules (text, alt text, meta, JSON-LD, com
       assert.equal(p.meta('author'), 'Barro Industries OPC');
       assert.equal(p.meta('copyright'), '© 2026 Barro Industries OPC. All rights reserved.');
       const notice = [...p.html.matchAll(/<p class="art-copy[^"]*">([\s\S]*?)<\/p>/g)].map((m) => visibleText(m[1]));
-      assert.deepEqual(notice, ['© 2026 Barro Industries OPC. All rights reserved. All text, photographs and designs on this page are our own work and may not be copied or reused without written permission.'], `${p.path}: the visible copyright notice`);
-      assert.ok(/© <span id="site-year">2026<\/span> Barro Industries OPC/.test(p.footer) && /may not be copied or reused without written permission/.test(p.footer), `${p.path}: the footer's own copyright line`);
+      assert.deepEqual(notice, [RELEASE_COPY], `${p.path}: the visible copyright notice (the same sentence on the hub and every guide: stock photographs are credited where they appear, so the page does not claim them)`);
+      assert.ok(/© <span id="site-year">2026<\/span> Barro Industries OPC/.test(p.footer) && /Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission\./.test(p.footer), `${p.path}: the footer's own copyright line (owner 2026-11-23: "Unless credited otherwise," so credited stock photographs are covered)`);
       const holder = (n) => { assert.equal(n.copyrightHolder['@type'], 'Organization'); assert.equal(n.copyrightHolder.name, 'Barro Kitchens'); assert.equal(n.copyrightHolder.legalName, 'Barro Industries OPC'); assert.deepEqual(n.copyrightHolder.alternateName, ['Barro Industries', 'Barro Kitchens by Barro Industries']); assert.equal(n.copyrightYear, 2026); };
       if (p.kind === 'article') { const n = p.node('Article')[0]; holder(n); assert.equal(n.copyrightNotice, '© 2026 Barro Industries OPC. All rights reserved.'); }
-      else holder(p.node('CollectionPage')[0]);
+      else holder(p.node(p.kind === 'index' ? 'CollectionPage' : 'WebPage')[0]);
     });
     for (const p of articles) assert.ok(p.article.includes('<p class="art-copy">'), `${p.path}: the notice is inside the article column`);
   });
 
   it('is written in British English, with no doubled space and no hyphen used as a dash', () => {
     each((p) => {
-      for (const s of [...publicStrings(p).filter((x) => x.kind !== 'json-ld').map((x) => x.value), ...ldValues(p.ld)]) assert.ok(!RE.us.test(s), `${p.path}: a US spelling: ${(s.match(RE.us) || [])[0]}`);
+      for (const s of [...publicStrings(p, true).filter((x) => x.kind !== 'json-ld').map((x) => x.value), ...ldValues(withoutCitations(p.ld))].map((x) => withoutCited(p, x))) assert.ok(!RE.us.test(s), `${p.path}: a US spelling: ${(s.match(RE.us) || [])[0]}`);   // our own copy: a source keeps the spelling of its own title (References, the citation array)
       const segments = stripTags(p.html.slice(p.html.indexOf('<body')), '\u0001').split('\u0001').map((s) => s.trim()).filter(Boolean);
       for (const s of segments) assert.ok(!/\S {2,}\S/.test(s), `${p.path}: doubled space in "${s.slice(0, 50)}"`);
       assert.ok(!/ -- |\s-\s(?=[A-Za-z])/.test(p.body));
@@ -840,17 +921,20 @@ describe('guides: the articles — length, structure, and what each one says (an
   const commissary = byPath('/guides/commissary-kitchen-requirements-philippines/');
   const steel = byPath('/guides/ss304-vs-ss316-stainless-steel/');
 
-  it('is 900-1600 words long, whether counted as the article or as the whole <main>', () => {
+  it('is 900-1600 words long, whether counted as the article or as the whole <main> without its References list (the list is the sources\' own words, 2026-11-23)', () => {
     for (const p of articles) {
-      const n = words(p.article), m = words(p.main.replace(/<script[\s\S]*?<\/script>/g, ''));
+      const n = words(p.article), m = words(p.mainNoRefs.replace(/<script[\s\S]*?<\/script>/g, ''));
       assert.ok(n >= 900 && n <= 1600, `${p.path}: the article is ${n} words`);
-      assert.ok(m >= 900 && m <= 1650, `${p.path}: <main> is ${m} words`);   // <main> also carries the section kicker and the reading time (2026-11-19); the article limit above is the real one
+      assert.ok(m >= 900 && m <= 1780, `${p.path}: <main> without References is ${m} words`);   // <main> also carries the section kicker, the reading time (2026-11-19), the Quick answer (up to 60 words), the credited caption and the "Updated" note (2026-11-23); the article limit above is the real one
     }
   });
 
-  it('opens with a short "In short" summary and a contents list whose every entry links to a section of the article', () => {
+  it('opens with a Quick answer, then a short "In short" (or "In plain words") summary, and a contents list whose every entry links to a section of the article', () => {
     for (const p of articles) {
-      assert.ok(p.article.includes('<p class="art-keys-title">In short</p>'));
+      // the pillar keeps no summary list: its nine-step table is the summary, and it has the Quick answer like every other guide
+      if (p.slug === CFG.pillar) assert.ok(!p.article.includes('art-keys-title'), `${p.path}: the pillar's own "Quick answer" box was lifted out of the article into div.art-answer`);
+      else assert.match(p.article, /<p class="art-keys-title">(In short|In plain words)<\/p>/, `${p.path}: the key points`);
+      assert.ok(p.answer, `${p.path}: no Quick answer`);
       const toc = [...p.html.match(/<nav class="art-toc"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="#([^"]+)">([^<]+)<\/a>/g)].map((m) => m[1]);
       assert.ok(toc.length >= 6);
       for (const id of toc) assert.ok(new RegExp(`<section id="${id}"`).test(p.article), `${p.path}: the contents entry #${id} has no section`);
@@ -871,7 +955,7 @@ describe('guides: the articles — length, structure, and what each one says (an
     assert.ok(/local government unit/.test(t) && /sanitary or health office/.test(t) && /fire safety inspector/.test(t));
     assert.ok(/not legal advice/.test(t));
     assert.ok(/Which permits does a commissary kitchen need in the Philippines\?/.test(t) && /so we do not list permits here/.test(t));
-    assert.equal(firstHit(commissary, RE.legal), null);
+    assert.equal(firstHit(commissary, RE.legal, true), null);   // our own copy: a source keeps the title it was published under (References, the citation array: 2026-11-23)
     assert.ok(!/\b(regulations?|compliance|compliant|complies|standards|(?:industry|international|national|safety|quality|building|fire|sanitation) (?:standard|code)s?)\b/i.test(commissary.body), 'a regulation, compliance or standards claim');
     assert.ok(!/\b\d+(\.\d+)?\s*(%|per cent|percent)\b/.test(commissary.body), 'a statistic in the commissary guide');
   });
@@ -924,7 +1008,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
     assert.ok(lastmodOf(`${BASE}/guides/`) >= '2026-10-29', `the hub changed on 2026-10-29 (three more guides), so its lastmod is that day or later (${lastmodOf(`${BASE}/guides/`) || 'missing'})`);
     const order = hub.node('CollectionPage')[0].mainEntity.itemListElement.map((i) => i.url.replace(BASE, ''));
     assert.deepEqual(order, articles.map((a) => a.path), 'the hub ItemList lists every guide in registration order');   // was a hard-coded list; 100+ guides since 2026-11-19
-    assert.ok(/layout/i.test(hub.meta('description')) && /equipment/i.test(hub.meta('description')), 'the hub description names the two new guides');
+    assert.ok(/layout/i.test(hub.meta('description')) && /equipment/i.test(hub.meta('description')), 'the hub description names the topics of the two new guides');
   });
 
   it('put the primary keyword in the title, the H1 and the description, and the secondary keywords in the visible text — without stuffing', () => {
@@ -1043,7 +1127,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
 
   it('both: name no code, permit, licence, certificate, regulation or standard and no specific legal instrument — they send the reader to the Bureau of Fire Protection, the city health office and (to pack food for sale) the FDA', () => {
     for (const p of NEW) {
-      assert.equal(firstHit(p, RE.legal), null, p.path);
+      assert.equal(firstHit(p, RE.legal, true), null, p.path);
       assert.ok(!/\b(regulations?|compliance|compliant|complies|standards)\b|\b(?:industry|international|national|safety|quality|building|fire|sanitation) standard\b/i.test(p.body), `${p.path}: a regulation, compliance or standards claim`);
       assert.ok(!/\b(permits?|licen[cs]es?|certificates?|certification)\b/i.test(p.body), `${p.path}: a permit, licence or certificate`);
       assert.ok(!/\bcodes?\b/i.test(p.body.replace(/\bnot codes\b/gi, '')), `${p.path}: the word "code" outside "not codes"`);
@@ -1073,7 +1157,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
     assert.ok(/class="site-btn site-btn-primary" href="\/sales\/clientinformationrequest\/">Send a project brief/.test(cta(layout)));
     for (const p of NEW) {
       assert.ok(!/site\/img\/products\//.test(p.html) && !/Representative image/.test(p.html), `${p.path}: a product picture`);
-      assert.equal(p.imgs.filter((i) => /site\/img\/projects\//.test(i.attrs.src)).length, 2, `${p.path}: the hero and one inline project photograph`);
+      assert.equal(inlineProject(p).length, 1, `${p.path}: one inline project photograph`);
       assert.ok(/<figure class="art-fig">\s*<img [^>]*loading="lazy"[^>]*>\s*<figcaption>[^<]{20,}<\/figcaption>\s*<\/figure>/.test(p.article), `${p.path}: the inline photograph has a caption`);
     }
   });
@@ -1212,7 +1296,7 @@ describe('guides: the exhaust hood, LPG gas line and stainless steel care guides
       const card = hub.html.match(new RegExp(`<article class="pg-card[^"]*">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
       assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${p.path}: its card on the hub`);
     }
-    assert.ok(/exhaust/i.test(hub.meta('description')) && /LPG/.test(hub.meta('description')) && /stainless steel care/i.test(hub.meta('description')), 'the hub description names the three new guides');
+    assert.ok(/ventilation/i.test(hub.meta('description')) && /gas/i.test(hub.meta('description')) && /stainless steel/i.test(hub.meta('description')), 'the hub description names the topics of the three guides (ventilation, gas, stainless steel; the journal wording of 2026-11-23)');
   });
 
   it('put the primary keyword in the title, the H1 and the description, and the secondary keywords in the visible text — without stuffing', () => {
@@ -1244,7 +1328,7 @@ describe('guides: the exhaust hood, LPG gas line and stainless steel care guides
 
   it('name no code, permit, licence, certificate, regulation or standard and no specific legal instrument, no statistic, no price word; they send the reader to the BFP, the LPG supplier and the city or municipal building office', () => {
     for (const p of THREE) {
-      assert.equal(firstHit(p, RE.legal), null, p.path);
+      assert.equal(firstHit(p, RE.legal, true), null, p.path);
       assert.ok(!/\b(regulations?|compliance|compliant|complies|standards)\b|\b(?:industry|international|national|safety|quality|building|fire|sanitation) standard\b/i.test(p.body), `${p.path}: a regulation, compliance or standards claim`);
       assert.ok(!/\b(permits?|licen[cs]es?|certificates?|certification)\b/i.test(p.body), `${p.path}: a permit, licence or certificate`);
       assert.ok(!/\bcodes?\b/i.test(p.body.replace(/\bnot codes\b/gi, '')), `${p.path}: the word "code" outside "not codes"`);
@@ -1294,7 +1378,7 @@ describe('guides: the exhaust hood, LPG gas line and stainless steel care guides
       const rel = p.html.match(/<section id="related"[\s\S]*?<\/section>/)[0];
       assert.equal((rel.match(/<article class="pg-card">/g) || []).length, 3, `${p.path}: three related cards`);
       assert.ok(!/site\/img\/products\//.test(p.html) && !/Representative image/.test(p.html), `${p.path}: a product picture`);
-      assert.equal(p.imgs.filter((i) => /site\/img\/projects\//.test(i.attrs.src)).length, 2, `${p.path}: the hero and one inline project photograph`);
+      assert.equal(inlineProject(p).length, 1, `${p.path}: one inline project photograph`);
     }
     // the guides are linked back from the pages they are about (one contextual link each, outside the FAQPage JSON-LD)
     const FROM = {
@@ -1350,9 +1434,10 @@ describe('guides: the kitchen ventilation requirements guide (2026-11-19) — th
   });
 
   it('names the four laws (owner ruling 2026-11-19) and the three offices, says it is not legal advice — and quotes no section, clause, figure, foreign standard or statistic', () => {
-    const t = vent.body;
+    const t = vent.bodyNoRefs;   // our own copy: the References list keeps the sources' own titles ("Chapter III ...")
+    const own = vent.html.replace(STYLE_RE, '').replace(vent.refs, '').replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/, JSON.stringify(withoutCitations(vent.ld)));
     for (const f of ['Code on Sanitation of the Philippines (PD 856)', 'Fire Code of the Philippines (RA 9514)', 'National Building Code (PD 1096)', 'Philippine Mechanical Engineering Code', 'Department of Health', 'city or municipal health office', 'Bureau of Fire Protection (BFP)', 'city or municipal building office', 'not legal advice']) assert.ok(t.includes(f), `the guide lacks "${f}"`);
-    assert.ok(!/\b(Section \d+|Sec\. ?\d+|Article \d+|clause \d+|Rule \d+|Chapter [IVX]+|NFPA|ASHRAE|UL ?300|ASTM|ISO ?\d{3,}|HACCP|FSIC|FSEC)\b/i.test(vent.html.replace(STYLE_RE, '')), 'a clause, section or foreign standard');
+    assert.ok(!/\b(Section \d+|Sec\. ?\d+|Article \d+|clause \d+|Rule \d+|Chapter [IVX]+|NFPA|ASHRAE|UL ?300|ASTM|ISO ?\d{3,}|HACCP|FSIC|FSEC)\b/i.test(own), 'a clause, section or foreign standard');
     assert.ok(!/\d+(\.\d+)?\s*(%|per cent|percent|lux|cubic|m³|°C|ºC|foot candles?)/i.test(t), 'a figure from the rules');
     assert.ok(!/\b(compliant|complies|guarantee\w*|pass(?:es)? inspection|approved by)\b/i.test(t), 'a promise that the work passes or is approved');
     assert.ok(/The approval itself is theirs to give/.test(t), 'the approval is the offices\'');
@@ -1364,7 +1449,7 @@ describe('guides: the kitchen ventilation requirements guide (2026-11-19) — th
     for (const u of ['/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/kitchen-fire-suppression/', '/services/commercial-kitchen-fit-out/', '/products/stainless-steel-range-hoods/', '/guides/commercial-kitchen-exhaust-hood-guide/', '/sales/clientinformationrequest/']) assert.ok(h.has(u), `does not link ${u}`);
     const rel = vent.html.match(/<section id="related"[\s\S]*?<\/section>/)[0];
     assert.equal((rel.match(/<article class="pg-card">/g) || []).length, 3);
-    assert.equal(vent.imgs.filter((i) => /site\/img\/projects\//.test(i.attrs.src)).length, 2, 'the hero and one inline project photograph');
+    assert.equal(inlineProject(vent).length, 1, 'one inline project photograph');
     for (const pg of ['guides/commercial-kitchen-exhaust-hood-guide', 'services/exhaust-and-fresh-air-systems']) {
       const html = read(`${pg}/index.html`);
       assert.equal(html.split(`href="${vent.path}"`).length - 1, 1, `${pg}: exactly one link to the guide`);
@@ -1428,7 +1513,7 @@ describe('guides: the seven guides of 2026-11-19 — dates, keywords, structure,
   it('name no law, code, permit, licence, certificate, regulation or standard, quote no statistic and use no price word', () => {
     for (const [path] of SEVEN) {
       const p = byPath(path);
-      assert.equal(firstHit(p, RE.legal), null, path);
+      assert.equal(firstHit(p, RE.legal, true), null, path);
       assert.ok(!/\b(regulations?|compliance|compliant|complies|standards|permits?|licen[cs]es?|certificates?|certification)\b/i.test(p.body), `${path}: a regulation, permit or standards word`);
       assert.ok(!/\bcodes?\b/i.test(p.body.replace(/\bnot codes\b/gi, '')), `${path}: the word "code"`);
       assert.ok(!/\d+(\.\d+)?\s*(%|per cent|percent)/.test(p.body), `${path}: a statistic`);
@@ -1442,8 +1527,429 @@ describe('guides: the seven guides of 2026-11-19 — dates, keywords, structure,
       for (const u of [...must, '/catalogue/', '/sales/clientinformationrequest/']) assert.ok(h.has(u), `${path} does not link ${u}`);
       const rel = p.html.match(/<section id="related"[\s\S]*?<\/section>/)[0];
       assert.equal((rel.match(/<article class="pg-card">/g) || []).length, 3, `${path}: related cards`);
-      assert.equal(p.imgs.filter((i) => /site\/img\/projects\//.test(i.attrs.src)).length, 2, `${path}: the hero and one inline project photograph`);
+      assert.equal(inlineProject(p).length, 1, `${path}: one inline project photograph`);
     }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// The Kitchen Guide as a journal (2026-11-23; specs/KITCHEN-GUIDE-JOURNAL-SPEC.md). The front page and the shared parts of every article are GENERATED
+// (scripts/build-guides-hub.js and scripts/apply-guide-template.js, from scripts/guides-hub.json, the photo manifests scripts/guide-photos-*.json and the Quick answers
+// scripts/guide-answers.json); these tests read the generated pages the way a visitor does, so a hand edit, a stale page or a registry that disagrees with the pages fails here as
+// well as in CHECK 9. Pinned: the registry, the hub's structure (lead, features, Start here, Latest, ten topics with a native <details>, colophon), the photographs and their
+// credits, References and in-text citations, the Quick answers, the editorial standards page, the 2026-11-23 factual corrections, the weight budgets.
+describe('guides: the journal — registry, hub structure, photographs and credits, References and citations, Quick answers, editorial standards, corrections, budgets', () => {
+  const hub = byPath('/guides/');
+  const std = byPath(STANDARDS);
+  const arts = articles;
+  const bySlug = Object.fromEntries(arts.map((a) => [a.slug, a]));
+  const sectionHtml = (id) => (hub.html.match(new RegExp(`<section id="${id}"[\\s\\S]*?</section>`)) || [''])[0];
+  const cardsOf = (html) => [...html.matchAll(/<article class="pg-card[^"]*">[\s\S]*?<\/article>/g)].map((m) => m[0]);
+  const cardSlug = (c) => (c.match(/<h3><a href="\/guides\/([a-z0-9-]+)\/">/) || [])[1];
+  const cardClass = (c) => (c.match(/<article class="([^"]*)">/) || [])[1];
+  const renderedSections = CFG.sections.filter((s) => CFG.articles.filter((a) => a.section === s.id).length >= 3);
+  const newestFirst = (x, y) => (x.published < y.published ? 1 : x.published > y.published ? -1 : CFG.articles.findIndex((a) => a.slug === y.slug) - CFG.articles.findIndex((a) => a.slug === x.slug));
+  const sectionOrder = (s) => {
+    const mine = arts.filter((a) => a.cfg.section === s.id);
+    const pinned = (s.pin || []).map((slug) => bySlug[slug]).filter((a) => a && a.cfg.section === s.id);
+    return [...pinned, ...mine.filter((a) => !pinned.includes(a)).sort(newestFirst)];
+  };
+  const escHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const gz = (t) => zlib.gzipSync(Buffer.from(t), { level: 9 }).length;
+
+  it('has a registry (scripts/guides-hub.json) that is consistent: every article a page, every page an article, one section each, a dek of 160 characters or fewer with no brand name, valid dates, the pillar present, no repeated teaser', () => {
+    const slugs = CFG.articles.map((a) => a.slug);
+    assert.equal(new Set(slugs).size, slugs.length, 'a slug is registered twice');
+    const onDisk = fs.readdirSync(path.join(ROOT, 'guides'), { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== 'editorial-standards').map((e) => e.name).sort();
+    assert.deepEqual([...slugs].sort(), onDisk, 'the registry and the guides/ folder list different articles');
+    const secIds = CFG.sections.map((s) => s.id);
+    assert.equal(CFG.sections.length, 10);
+    assert.deepEqual(secIds, ['planning', 'design', 'codes', 'equipment', 'stainless-steel', 'ventilation-gas', 'business', 'home', 'care', 'areas'], 'the ten topics, in page order');
+    for (const a of CFG.articles) {
+      assert.ok(secIds.includes(a.section), `${a.slug}: section ${a.section}`);
+      assert.ok(typeof a.dek === 'string' && a.dek.length > 40 && a.dek.length <= 160, `${a.slug}: dek is ${a.dek && a.dek.length} characters`);
+      assert.ok(!/barro/i.test(a.dek) && !RE.money.test(a.dek) && !RE.priceWords.test(a.dek) && !RE.us.test(a.dek) && !RE.superlative.test(a.dek), `${a.slug}: the dek breaks a content rule`);
+      assert.ok(!/ - | -- |\s{2,}/.test(a.dek), `${a.slug}: dek punctuation`);
+      if (a.modified) assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(a.modified) && a.modified >= bySlug[a.slug].published, `${a.slug}: modified`);
+    }
+    for (const s of CFG.sections) assert.ok(CFG.articles.filter((a) => a.section === s.id).length >= 3, `${s.id}: a topic needs 3 articles or it is not shown`);
+    const picks = [CFG.lead, ...CFG.features, ...CFG.startHere];
+    assert.equal(new Set(picks).size, picks.length, 'lead, features and startHere repeat a slug');
+    for (const slug of [...picks, CFG.pillar]) assert.ok(bySlug[slug], `${slug} is not an article`);
+    assert.equal(CFG.features.length, 4); assert.equal(CFG.startHere.length, 5);
+    assert.equal(new Set(CFG.features.map((s) => bySlug[s].cfg.section)).size, 4, 'the four features come from four different topics');
+    assert.equal(CFG.pillar, 'how-to-build-a-restaurant-kitchen');
+    assert.ok(CFG.lead === CFG.pillar || CFG.startHere.length === 5, 'the pillar leads the front (owner ruling 2026-11-23: the lead story at launch) or the navy card of Start here');
+    for (const s of CFG.sections) for (const slug of s.pin || []) assert.ok(bySlug[slug], `${s.id}: pinned ${slug} is not an article`);
+  });
+
+  it('has a hub in the order the spec gives: masthead, topic bar, Featured (lead and four features), Start here, Latest, the ten topics in the registry\'s order, colophon, closing call to action — and every old anchor still resolves, with the new ones', () => {
+    const at = (needle) => { const i = hub.html.indexOf(needle); assert.ok(i > 0, `the hub has no ${needle}`); return i; };
+    const order = [at('<section class="pg-hero pg-hero-plain kg-mast">'), at('<nav class="kg-nav" aria-label="Topics">'), at('<section id="featured" class="site-sec kg-front"'), at('<section id="start-here"'), at('<section id="latest"'), ...renderedSections.map((s) => at(`<section id="${s.id}" class="site-sec kg-sec"`)), at('<section class="site-sec kg-colophon"'), at('<section class="pg-cta" id="get-a-quote"')];
+    assert.deepEqual([...order].sort((a, b) => a - b), order, 'sections out of order');
+    assert.equal(renderedSections.length, 10, 'every topic has 3 articles or more: ten topics are shown');
+    assert.ok(hub.html.includes('<h2 id="featured-h">'), 'the opening tag of the Featured heading is pinned (a test replaces this string)');
+    const ids = new Set(hub.S.elements.map((e) => e.attrs.id).filter(Boolean));
+    for (const id of ['featured', 'areas', 'equipment', 'ventilation-gas', 'business', 'planning', 'get-a-quote', 'site-main', 'start-here', 'latest', 'design', 'codes', 'stainless-steel', 'home', 'care']) assert.ok(ids.has(id), `the anchor #${id} is gone`);
+    assert.ok(!ids.has('building-codes'), 'the code articles\' kicker uses the spec\'s #codes (nothing links the old #building-codes)');
+    assert.ok(hub.html.includes('<p class="kg-by">by Barro Kitchens</p>') && !/issue no|\bno\.\s*\d/i.test(hub.main), 'the journal has a byline and no issue number');
+    assert.ok(!/<a class="site-btn[^>]*>(Get a quote|Our services)/.test(sectionOf(hub.html, 'pg-hero pg-hero-plain kg-mast')), 'no sales button in the masthead (the closing call to action keeps the quote button)');
+    function sectionOf(html, cls) { return (html.match(new RegExp(`<section class="${cls}">[\\s\\S]*?</section>`)) || [''])[0]; }
+  });
+
+  it('has a masthead whose counts, date and standards link are true: N articles · 10 topics, "Updated" = the newest published or modified date of any article, a link to the editorial standards; the topic bar lists Start here, Latest and the ten topics with their counts', () => {
+    const mast = (hub.html.match(/<section class="pg-hero pg-hero-plain kg-mast">[\s\S]*?<\/section>/) || [''])[0];
+    assert.ok(mast.includes(`<p class="kg-count">${arts.length} articles · 10 topics · <a href="${STANDARDS}">How we research and cite</a></p>`), 'the masthead count line');
+    const newest = arts.reduce((m, a) => (a.modified > m ? a.modified : a.published > m ? a.published : m), '0000-00-00');
+    assert.ok(mast.includes(`<span>Updated <time datetime="${newest}">${longDate(newest)}</time></span>`), 'the dateline date');
+    assert.ok(mast.includes('<span>Quezon City, Philippines</span>'));
+    assert.equal(mast.match(/<h1>The Kitchen Guide<\/h1>/g).length, 1);
+    const nav = [...hub.html.match(/<nav class="kg-nav" aria-label="Topics">[\s\S]*?<\/nav>/)[0].matchAll(/<li><a href="#([^"]+)">([^<]*?)(?: <span>(\d+)<\/span>)?<\/a><\/li>/g)].map((m) => [m[1], m[2], m[3] ? Number(m[3]) : null]);
+    assert.deepEqual(nav, [['start-here', 'Start here', null], ['latest', 'Latest', null], ...renderedSections.map((s) => [s.id, s.title, arts.filter((a) => a.cfg.section === s.id).length])]);
+  });
+
+  it('puts the pillar at the head of the front: the lead story (owner ruling 2026-11-23) — and, when another article leads, the navy pillar card first in "Start here"; the five steps follow in reading order; the four features and the lead are teasers with their topic as a kicker, one eager image', () => {
+    const front = cardsOf(sectionHtml('featured'));
+    assert.equal(front.length, 5);
+    assert.deepEqual(front.map(cardSlug), [CFG.lead, ...CFG.features]);
+    assert.ok(/kg-lead-story/.test(cardClass(front[0])) && front.slice(1).every((c) => /kg-tease kg-row/.test(cardClass(c))));
+    for (const c of front) {
+      const a = bySlug[cardSlug(c)];
+      assert.ok(c.includes(`<span class="kg-kicker">${escHtml(CFG.sections.find((s) => s.id === a.cfg.section).title)}</span>`), `${a.slug}: the teaser kicker is its topic`);
+      assert.ok(c.includes(`>${a.h1}</a></h3>`) && c.includes(`<time datetime="${a.published}">`));
+    }
+    assert.ok(front[0].includes(`<p>${escHtml(bySlug[CFG.lead].cfg.dek)}</p>`), 'the lead story has its dek');
+    assert.ok(front.slice(1).every((c) => !/<p>[^<]/.test(c.replace(/<p class="kg-meta">[\s\S]*?<\/p>/, ''))), 'the four features have no dek');
+    const start = sectionHtml('start-here');
+    const sc = cardsOf(start);
+    if (CFG.lead === CFG.pillar) {
+      assert.ok(!/kg-pillar/.test(start), 'the pillar already leads the front: it is not repeated as a navy card');
+      assert.deepEqual(sc.map(cardSlug), CFG.startHere);
+    } else {
+      assert.ok(/kg-pillar/.test(cardClass(sc[0])) && cardSlug(sc[0]) === CFG.pillar, 'the pillar is first in Start here');
+      assert.deepEqual(sc.slice(1).map(cardSlug), CFG.startHere);
+    }
+    assert.ok(/<ol class="kg-steps">/.test(start) && (start.match(/<li><article/g) || []).length === 5, 'the five steps are a real <ol>');
+    assert.ok(/<p class="eyebrow">Start here<\/p>/.test(start) && /<h2 id="start-here-h">Building a kitchen, step by step<\/h2>/.test(start));
+  });
+
+  it('lists "Latest" as the six newest articles not already shown above, in date order (a tie goes to the later registry position)', () => {
+    const shown = new Set([CFG.lead, ...CFG.features, CFG.pillar, ...CFG.startHere]);
+    const want = arts.filter((a) => !shown.has(a.slug)).sort(newestFirst).slice(0, 6).map((a) => a.slug);
+    const got = cardsOf(sectionHtml('latest')).map(cardSlug);
+    assert.deepEqual(got, want);
+    const dates = got.map((s) => bySlug[s].published);
+    assert.deepEqual([...dates].sort().reverse(), dates, 'Latest is in date order');
+  });
+
+  it('gives every article exactly one canonical card (kg-entry) in its topic, in the topic\'s order (pinned first, then newest first); three photo cards, then rows, then a native <details> with a <summary> only when the topic has more than nine; no topic below three', () => {
+    const seen = [];
+    for (const s of renderedSections) {
+      const html = sectionHtml(s.id);
+      const want = sectionOrder(s).map((a) => a.slug);
+      const entries = cardsOf(html).filter((c) => /kg-entry/.test(cardClass(c)));
+      assert.deepEqual(entries.map(cardSlug), want, `${s.id}: its cards`);
+      assert.ok(entries.length >= 3);
+      assert.ok(html.includes(`<p class="eyebrow">${entries.length} articles</p>`) && html.includes(`<h2 id="${s.id}-h">${escHtml(s.title)}</h2>`) && html.includes(`<p>${escHtml(s.blurb)}</p>`), `${s.id}: its head`);
+      const top = cardsOf((html.match(/<div class="kg-top">[\s\S]*?\n    <\/div>/) || [''])[0]);
+      assert.deepEqual(top.map(cardSlug), want.slice(0, 3), `${s.id}: the three photo cards`);
+      const details = html.match(/<details class="kg-more">[\s\S]*?<\/details>/);
+      assert.equal(!!details, want.length > 9, `${s.id}: a <details> only when the topic has more than nine`);
+      if (details) {
+        assert.ok(details[0].includes(`<summary>Show the other ${want.length - 9} article${want.length - 9 === 1 ? '' : 's'} in ${escHtml(s.title)}</summary>`), `${s.id}: the summary`);
+        assert.deepEqual(cardsOf(details[0]).map(cardSlug), want.slice(9));
+      }
+      assert.equal((html.match(/<details/g) || []).length, details ? 1 : 0);
+      seen.push(...want);
+    }
+    assert.deepEqual([...seen].sort(), arts.map((a) => a.slug).sort(), 'each article has exactly one canonical card');
+    const canonical = cardsOf(hub.main).filter((c) => /kg-entry/.test(cardClass(c))).map(cardSlug);
+    for (const slug of arts.map((a) => a.slug)) assert.equal(canonical.filter((s) => s === slug).length, 1, `${slug}: canonical cards`);
+    assert.ok(!/<script/.test(hub.main) && !/<details[^>]*\sopen/.test(hub.main), 'no script, and every <details> starts closed: the overflow is native');
+  });
+
+  it('writes every hub card the same way: one <h3><a> whose text is the exact H1, its date and reading time, a topic kicker only on a teaser, one picture whose slot matches (lead 1000 w eager; photo card and row 320 / 600 w; never the 1000 w file in a card), the dek of the registry on a canonical card', () => {
+    const all = cardsOf(hub.main);
+    assert.ok(all.length >= arts.length + 15, 'the canonical cards and the teasers');
+    for (const c of all) {
+      const a = bySlug[cardSlug(c)];
+      assert.ok(a, `a card for an unknown article: ${c.slice(0, 120)}`);
+      assert.equal((c.match(/<h3>/g) || []).length, 1); assert.equal((c.match(/<img /g) || []).length, 1); assert.equal((c.match(/<a /g) || []).length, 1, 'one link per card');
+      assert.ok(c.includes(`<h3><a href="/guides/${a.slug}/">${a.h1}</a></h3>`), `${a.slug}: the headline is the exact H1`);
+      assert.ok(c.includes(`<p class="kg-meta"><time datetime="${a.published}">${shortDate(a.published)}</time><span aria-hidden="true">·</span><span>${a.html.match(/<span>(\d+) min read<\/span>/)[1]} min read</span></p>`), `${a.slug}: date and reading time`);
+      const cls = cardClass(c);
+      assert.equal(/kg-tease/.test(cls), /class="kg-kicker"/.test(c), `${a.slug}: a kicker only on a teaser`);
+      if (/kg-entry/.test(cls)) assert.ok(c.includes(`<p>${escHtml(a.cfg.dek)}</p>`), `${a.slug}: the dek`);
+      const img = c.match(/<img [^>]*>/)[0];
+      const attrs = (n) => (img.match(new RegExp(`\\s${n}="([^"]*)"`)) || [])[1];
+      if (/kg-lead-story/.test(cls)) assert.ok(/fetchpriority="high"/.test(img) && !/loading=/.test(img));
+      else { assert.equal(attrs('loading'), 'lazy'); assert.ok(!/fetchpriority/.test(img)); }
+      if (/kg-entry|kg-row/.test(cls) && !/kg-pillar|kg-lead-story/.test(cls)) assert.ok(!/-1000\.webp|\/hero-/.test(attrs('srcset') || ''), `${a.slug}: a card never offers the 1000 w file`);
+    }
+  });
+
+  it('keeps the hub within its budgets: the HTML 300 KB raw and 55 KB gzipped, css/guides.css 20 KB, the inline stylesheet of a guide 78 KB raw and 19.5 KB gzipped; and a page that has no Quick answer still lays out as before (the grid rules are gated on .has-answer)', () => {
+    // (KB here is 1000 bytes, the stricter reading of the spec's budgets)
+    assert.ok(Buffer.byteLength(hub.html) <= 300000, `the hub is ${(Buffer.byteLength(hub.html) / 1000).toFixed(0)} KB`);
+    assert.ok(gz(hub.html) <= 55000, `the hub is ${(gz(hub.html) / 1000).toFixed(1)} KB gzipped`);
+    const css = read('css/guides.css');
+    assert.ok(Buffer.byteLength(css) <= 20000, `css/guides.css is ${(Buffer.byteLength(css) / 1000).toFixed(1)} KB`);
+    const inline = ['css/site.css', 'css/pages.css', 'css/guides.css'].map((f) => read(f).replace(/\s+$/, '')).join('\n');
+    assert.ok(Buffer.byteLength(inline) <= 78000 && gz(inline) <= 19500, `the inline css is ${(Buffer.byteLength(inline) / 1000).toFixed(1)} KB, ${(gz(inline) / 1000).toFixed(1)} KB gzipped`);
+    assert.ok(!/\.art-cards|\.kg-feature(?![-\w])|\.kg-side|\.kg-big|\.kg-lead(?![-\w])/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')), 'the rules the redesign made dead are gone');
+    assert.ok(/#site \.art-wrap\.has-answer \.art-answer\{grid-column:2;grid-row:1\}/.test(css) && !/\.has-answer/.test(css.replace(/#site \.art-wrap\.has-answer/g, '')), 'the answer grid is gated on .has-answer, never :has()');
+    assert.ok(!/:has\(/.test(css));
+  });
+
+  it('writes, on every article, the spec\'s template parts: the kicker (a topic the hub shows), "By Barro Kitchens" and the date as before, then the note — "Updated <date>" only when the article was modified after it was published, always the link to the editorial standards — and the one copyright sentence', () => {
+    const shownTopics = new Map(renderedSections.map((s) => [s.id, s.title]));
+    for (const p of arts) {
+      const m = p.html.match(/<p class="eyebrow kg-kicker"><a href="\/guides\/#([a-z-]+)">([^<]+)<\/a><\/p>/);
+      assert.ok(m, `${p.path}: kicker`);
+      assert.equal(m[1], p.cfg.section, `${p.path}: the kicker names the article's topic`);
+      assert.equal(shownTopics.get(m[1]), m[2], `${p.path}: the kicker text is the topic's title, and the hub shows that topic`);
+      const meta = `<p class="art-meta"><span>By Barro Kitchens</span><span aria-hidden="true">·</span><time datetime="${p.published}">${longDate(p.published)}</time><span aria-hidden="true">·</span><span>${p.html.match(/<span>(\d+) min read<\/span>/)[1]} min read</span></p>`;
+      assert.ok(p.html.includes(meta), `${p.path}: the byline is unchanged`);
+      const note = p.html.match(/<p class="art-meta-note">([\s\S]*?)<\/p>/);
+      assert.ok(note && p.html.indexOf(note[0]) === p.html.indexOf(meta) + meta.length + '\n      '.length, `${p.path}: the note comes right after the byline`);
+      const link = `<a href="${STANDARDS}">How we research and cite</a>`;
+      if (p.modified > p.published) assert.equal(note[1], `Updated <time datetime="${p.modified}">${longDate(p.modified)}</time><span aria-hidden="true">·</span>${link}`, `${p.path}: the Updated note`);
+      else assert.equal(note[1], link, `${p.path}: never modified, so no "Updated"`);
+      assert.equal((p.html.match(/<p class="art-meta-note">/g) || []).length, 1);
+    }
+    assert.ok(arts.every((p) => p.modified >= p.published));
+    assert.ok(arts.filter((p) => p.modified > p.published).length >= 100, 'in this release the guides that gained References or a Quick answer carry the release date as "Updated"');
+  });
+
+  it('shows, under every hero photograph, the caption, the credit and the disclaimer in that order (a stock photograph: "Photo: <photographer, linked to the source page> / Unsplash or Pexels. Stock photo for illustration — not a Barro Kitchens project."; the owner\'s own photograph: "Photo: Barro Kitchens." and no disclaimer), with the manifest\'s picture, alt text and 70vw sizes', () => {
+    for (const p of arts) {
+      const e = MANIFEST[p.slug];
+      assert.ok(e, `${p.slug}: no manifest entry`);
+      const fig = p.html.match(/<figure class="pg-hero-media">([\s\S]*?)<\/figure>/)[1];
+      const img = fig.match(/<img [^>]*>/)[0];
+      assert.ok(img.includes(`src="${e.src}"`) && img.includes(`alt="${escHtml(e.alt)}"`) && img.includes('sizes="(min-width:900px) 520px, 70vw"') && /fetchpriority="high" decoding="async">$/.test(img), `${p.slug}: the hero picture`);
+      for (const u of e.srcset.split(',').map((x) => x.trim().split(/\s+/)[0])) assert.ok(img.includes(u), `${p.slug}: srcset ${u}`);
+      const cap = fig.match(/<figcaption>([\s\S]*?)<\/figcaption>/)[1];
+      if (e.own) {
+        assert.equal(cap, `${escHtml(e.caption)} <span class="art-credit">Photo: Barro Kitchens.</span>`, `${p.slug}: an own photograph is credited to Barro Kitchens, with no disclaimer`);
+        assert.ok(/site\/img\/projects\/(ispsc|dmmmsu)\//.test(e.src) && !cap.includes('Stock photo'));
+      } else {
+        const host = new URL(e.source_page).host === 'unsplash.com' ? 'Unsplash' : 'Pexels';
+        const base = e.caption.slice(0, e.caption.indexOf(DISCLAIMER)).trim();
+        assert.equal(e.disclaimer, DISCLAIMER, `${p.slug}: the manifest disclaimer`);
+        assert.equal(cap, `${escHtml(base)} <span class="art-credit">Photo: <a href="${escHtml(e.source_page)}" rel="noopener nofollow" target="_blank">${escHtml(e.photographer)}</a> / ${host}. ${DISCLAIMER}</span>`, `${p.slug}: caption, credit, disclaimer`);
+        assert.ok(/\.$/.test(base) && !/\b(AI|ChatGPT|generated)\b/.test(cap), `${p.slug}: the caption is a sentence, and never mentions how a picture was made`);
+      }
+    }
+  });
+
+  it('keeps the photographs: every manifest slug is an article, every article has an entry, all four sizes exist (1600, 1000, 600 wide; 320 x 240 and 16 KB at most), the credit fields are real, the owner\'s own photograph is a project photograph', () => {
+    assert.deepEqual(Object.keys(MANIFEST).sort(), arts.map((a) => a.slug).sort());
+    for (const [slug, e] of Object.entries(MANIFEST)) {
+      const cand = Object.fromEntries(e.srcset.split(',').map((x) => x.trim().split(/\s+/)).map(([u, w]) => [w, u]));
+      const files = [[e.src, 1600], [cand['1000w'], 1000], [cand['600w'], 600]];
+      for (const [f, w] of files) { assert.ok(f && exists(f.slice(1)), `${slug}: ${f}`); assert.equal(webpSize(f.slice(1)).w, w, `${slug}: ${f} is ${w} wide`); }
+      const f320 = e.src320 || e.src.replace(/\.webp$/, '-320.webp');
+      assert.ok(exists(f320.slice(1)), `${slug}: ${f320} is missing (python3 scripts/make-guide-photo-320.py)`);
+      assert.deepEqual([webpSize(f320.slice(1)).w, webpSize(f320.slice(1)).h], [320, 240], `${slug}: the 320 variant is 320 x 240`);
+      assert.ok(fs.statSync(path.join(ROOT, f320)).size <= 16 * 1024, `${slug}: ${f320} is over 16 KB`);
+      assert.ok(e.alt && e.alt.length >= 20 && !/\b(AI|ChatGPT|generated|render)\b/i.test(e.alt), `${slug}: alt`);
+      assert.ok(e.photographer && /\.$/.test(e.own ? e.caption : e.caption.slice(0, e.caption.indexOf(DISCLAIMER)).trim()), `${slug}: photographer and caption`);
+      if (!e.own) assert.ok(/^https:\/\/(unsplash\.com|www\.pexels\.com)\//.test(e.source_page) && /^(Unsplash|Pexels) License$/.test(e.licence), `${slug}: source page and licence`);
+    }
+  });
+
+  it('gives every guide a References list (section#references > .art-refs > ul.ref-list, each entry a <cite> and a link that opens in a new tab with rel="noopener"), the same sources as the Article\'s JSON-LD "citation", and no link from the text to the list', () => {
+    for (const p of arts) {
+      const lis = [...p.refs.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]);
+      assert.ok(lis.length >= 1, `${p.path}: no reference at all`);
+      assert.ok(/<section id="references" class="site-sec" aria-labelledby="references-h">\s*<div class="site-wrap art-refs">\s*<h2 id="references-h">References<\/h2>\s*<ul class="ref-list">/.test(p.refs), `${p.path}: the References markup`);
+      // a book, report or page has its title in <cite>; a work with no title has its bracketed description; a statute is cited in the legal form (APA 7 does not italicise a law's title)
+      for (const li of lis) assert.ok((/<cite>/.test(li) || /\[[^\]]+\]/.test(li) || /^(Republic Act No\.|Presidential Decree No\.|Batas Pambansa Blg\.)/.test(li)) && /<a href="https?:\/\/[^"]+" rel="noopener" target="_blank">/.test(li), `${p.path}: a reference without its <cite> (or its bracketed description, or the legal form of a statute) or its link: ${li.slice(0, 80)}`);
+      const cit = (p.node('Article')[0] || {}).citation;
+      assert.ok(Array.isArray(cit) && cit.length === lis.length, `${p.path}: the JSON-LD citation lists ${cit && cit.length} sources, the page ${lis.length}`);
+      for (const c of cit) assert.ok(c['@type'] === 'CreativeWork' && c.name && /^https?:\/\//.test(c.url) && c.author, `${p.path}: a malformed citation ${JSON.stringify(c).slice(0, 80)}`);   // (a source with no date, "n.d.", has no datePublished)
+      assert.ok(!/<a [^>]*href="#references"/.test(p.article), `${p.path}: citations are plain text (APA has no link to the list)`);
+    }
+  });
+
+  it('matches every in-text author-date citation with a References entry (a heuristic: the author, an abbreviation defined in the text, or the initials of the cited body), and puts no citation inside a FAQ answer', () => {
+    const decodeT = (h) => decode(h.replace(/<script[\s\S]*?<\/script>/g, ' ').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const norm = (t) => t.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
+    const TITLE = "((?:[A-Z][A-Za-z.&'’-]*(?:(?:\\s+(?:of|and|for|the|on|in|&))*\\s+)){0,8}[A-Z][A-Za-z.&'’-]*)";
+    let total = 0;
+    for (const p of arts) {
+      const faqAt = p.article.indexOf('<section id="faq"');
+      const body = decodeT(faqAt >= 0 ? p.article.slice(0, faqAt) : p.article), all = decodeT(p.article);
+      const faq = faqAt >= 0 ? decodeT(p.article.slice(faqAt)) : '';
+      assert.ok(!/\((?:[^()]*,\s*)?(?:19|20)\d\d[a-z]?[,)]|\bn\.d\./.test(faq), `${p.path}: a citation inside a FAQ answer`);
+      const refs = [...p.refs.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => decodeT(m[1]));
+      const refNorm = refs.map(norm);
+      const abbr = {};
+      for (const m of all.matchAll(new RegExp(TITLE + '\\s\\[([A-Z][A-Za-z&. -]{1,14})\\]', 'g'))) (abbr[m[2]] ||= []).push(m[1]);
+      for (const m of all.matchAll(new RegExp(TITLE + '\\s\\(([A-Z]{2,9}(?:-[A-Z]{2,9})?)[,)]', 'g'))) (abbr[m[2]] ||= []).push(m[1]);
+      const initials = refs.map((r) => r.split(/\s\((?:\d{4}|n\.d\.)/)[0].split(/\s+/).filter((w) => /^[A-Z]/.test(w) && !/^(and|of|the|for)$/i.test(w)).map((w) => w[0]).join(''));
+      const found = [];
+      for (const m of body.matchAll(/(?:\(|;\s*)([^();]{2,140}?),\s*((?:19|20)\d\d[a-z]?|n\.d\.(?:-[a-z])?)\b/g)) found.push({ author: m[1], year: m[2], form: 'paren' });
+      for (const m of body.matchAll(/([A-Z][A-Za-z.&'’ ,-]{2,90}?)\s\(((?:19|20)\d\d[a-z]?|n\.d\.(?:-[a-z])?)[,)]/g)) found.push({ author: m[1], year: m[2], form: 'narr' });
+      total += found.length;
+      for (const f of found) {
+        let a = f.author.replace(/^(?:(?:see|also|e\.g\.,?|cf\.?|and|the|compare)\s+)+/i, '').replace(/\s*\[[^\]]*\]\s*$/, '').replace(/['’]s$/, '').trim().replace(/ et al\.?$/, '');
+        if (f.form === 'paren') a = a.split(',')[0].trim();
+        const tries = [a, ...(abbr[a] || []), ...(abbr[a.split(/\s+/).pop()] || []), ...(abbr[a.split(/\s+/)[0]] || [])];
+        const ok = tries.some((t) => { const w = t.split(/\s+/); for (let n = Math.min(10, w.length); n >= 1; n--) { const cand = norm(w.slice(-n).join(' ')); if (cand.length >= 2 && refNorm.some((r) => (n === 1 ? r.startsWith(cand + ' ') : r.includes(cand)))) return true; } return false; });
+        const caps = a.match(/\b[A-Z]{2,9}\b/g) || [];
+        assert.ok(ok || caps.some((c) => initials.some((i) => i === c || i.startsWith(c))), `${p.path}: the citation "${f.author}, ${f.year}" has no entry under References`);
+      }
+    }
+    assert.ok(total >= 700, `${total} in-text citations were read: the heuristic is not reading the pages`);
+  });
+
+  it('opens every article with a Quick answer (the first child of the reading wrapper, outside the article column): 40-60 words of plain text from scripts/guide-answers.json, no link, not starting with "This guide", "In this article" or the brand name, no "we" or "our"; the wrapper carries has-answer', () => {
+    assert.deepEqual(Object.keys(ANSWERS).sort(), arts.map((a) => a.slug).sort(), 'scripts/guide-answers.json must answer every article, and only articles');
+    for (const p of arts) {
+      const e = ANSWERS[p.slug];
+      assert.ok(e && e.question && /\?$/.test(e.question) && e.answer, `${p.slug}: the answer entry`);
+      assert.equal(p.answer, escHtml(e.answer.trim()), `${p.path}: the page and scripts/guide-answers.json disagree (run node scripts/apply-guide-template.js)`);
+      const n = e.answer.trim().split(/\s+/).length;
+      assert.ok(n >= 40 && n <= 60, `${p.path}: the Quick answer is ${n} words`);
+      assert.ok(!/[<>&]/.test(e.answer) && !/\*\*|\[|\]|\n/.test(e.answer), `${p.path}: plain text only`);
+      assert.ok(!/^(this guide|in this article|barro)/i.test(e.answer.trim()) && !/\b(we|our)\b/i.test(e.answer), `${p.path}: the wording rules for a Quick answer`);
+      assert.ok(p.html.includes('<div class="site-wrap art-wrap has-answer">\n    <div class="art-answer">\n      <p class="art-answer-title">Quick answer</p>'), `${p.path}: the answer is the first child of the wrapper`);
+      assert.ok(!p.article.includes('art-answer'), `${p.path}: the answer is not inside article.art`);
+      assert.equal((p.html.replace(STYLE_RE, '').match(/Quick answer/g) || []).length, 1, `${p.path}: one Quick answer`);
+    }
+  });
+
+  it('gives every article its related reading as photo cards: three <article class="pg-card"> (as before), each a lazy picture of the guide it links, in a kg-related row; and under them the link to More in the topic, with "Start with: how to build a restaurant kitchen" on the topics the spec names (never on the pillar)', () => {
+    const upTopics = new Set(CFG.pillarLinkSections);
+    for (const p of arts) {
+      const rel = p.html.match(/<section id="related"[\s\S]*?<\/section>/)[0];
+      const cards = cardsOf(rel);
+      assert.equal(cards.length, 3, `${p.path}: three related cards`);
+      const targets = cards.map((c) => (c.match(/<h3><a href="([^"]+)">/) || [])[1]);
+      const guideSlugs = targets.map((t) => (t.match(/^\/guides\/([a-z0-9-]+)\/$/) || [])[1]);
+      if (guideSlugs.every((x) => x && bySlug[x])) {
+        // all three are guides with a photograph: photo cards (spec §4.7)
+        assert.ok(/<div class="pg-cards pg-cards-3 kg-related">/.test(rel), `${p.path}: kg-related`);
+        cards.forEach((c, i) => {
+          const slug = guideSlugs[i];
+          const img = c.match(/<img [^>]*>/);
+          assert.ok(img && /loading="lazy" decoding="async">$/.test(img[0]) && img[0].includes(`alt="${escHtml(MANIFEST[slug].alt)}"`) && !/fetchpriority/.test(img[0]), `${p.path}: the picture of ${slug}`);
+          assert.ok(!/-1000\.webp/.test(img[0]), 'a card never offers the 1000 w file');
+        });
+      } else {
+        // a card that points at a product, a service or the catalogue has no photograph: the section stays text cards, as before
+        assert.ok(/<div class="pg-cards pg-cards-3 pg-cards-text">/.test(rel) && !/<img /.test(rel), `${p.path}: text cards when a target is not a guide`);
+      }
+      const up = rel.match(/<p class="kg-up">([\s\S]*?)<\/p>/);
+      assert.ok(up, `${p.path}: the links under the cards`);
+      const topic = CFG.sections.find((s) => s.id === p.cfg.section);
+      const more = `<a class="link-arrow" href="/guides/#${topic.id}">More in ${escHtml(topic.title)}</a>`;
+      const start = '<a class="link-arrow" href="/guides/how-to-build-a-restaurant-kitchen/">Start with: how to build a restaurant kitchen</a>';
+      assert.equal(up[1], (upTopics.has(topic.id) && p.slug !== CFG.pillar ? start : '') + more, `${p.path}: the two links`);
+    }
+  });
+
+  it('has the editorial standards page: the spec\'s head and structure, eight sections the contents list names, the owner\'s rulings (nothing about how drafts are prepared or who drafts or reviews; no sentence about payment for a mention) and the coverage the owner asked for (sources and APA, photographs and credits, dates, corrections by email, the answer-first style, not legal or professional advice)', () => {
+    assert.equal(std.title, 'Editorial Standards for The Kitchen Guide | Barro Kitchens');
+    assert.equal(std.meta('description'), 'How The Kitchen Guide by Barro Kitchens (Barro Industries) is researched, cited, illustrated, dated and corrected, and how to tell us about an error.');
+    assert.equal(std.meta('robots'), 'index,follow,max-image-preview:large');
+    assert.equal(std.meta('og:type'), 'website');
+    const wp = std.node('WebPage')[0];
+    assert.equal(wp['@id'], `${BASE}${STANDARDS}#webpage`);
+    assert.deepEqual(wp.isPartOf, { '@id': `${BASE}/guides/#webpage` });
+    assert.equal(wp.inLanguage, 'en-PH');
+    assert.deepEqual(wp.publisher, hub.node('CollectionPage')[0].publisher, 'the publisher block is the hub\'s');
+    assert.deepEqual(wp.copyrightHolder, hub.node('CollectionPage')[0].copyrightHolder);
+    assert.deepEqual(std.graph.map((n) => n['@type']), ['WebPage', 'BreadcrumbList'], 'no FAQPage and no Article here');
+    const ids = [...std.article.matchAll(/<section id="([^"]+)" aria-labelledby="[^"]+">/g)].map((m) => m[1]);
+    assert.deepEqual(ids, ['about', 'research', 'citations', 'writing', 'photos', 'dates', 'corrections', 'advice']);
+    const toc = [...std.html.match(/<nav class="art-toc"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="#([^"]+)">/g)].map((m) => m[1]);
+    assert.deepEqual(toc, ids);
+    assert.ok(/<p class="art-meta"><span>By Barro Kitchens<\/span><span aria-hidden="true">·<\/span><time datetime="2026-11-23">23 November 2026<\/time><\/p>/.test(std.html));
+    assert.ok(!/<a class="site-btn[^>]*>/.test(std.html.match(/<section class="pg-hero pg-hero-plain">[\s\S]*?<\/section>/)[0]), 'no button in its hero');
+    const t = visibleText(std.article);
+    for (const must of ['APA 7th edition', 'References', 'Unsplash and Pexels', DISCLAIMER, 'Photo: Barro Kitchens', 'hello@barroindustries.com', 'Updated', 'general information, not legal or professional advice', 'metric units and British spelling', 'Quick answer', 'We do not cite a source we have not read']) assert.ok(t.includes(must), `the standards page lacks "${must}"`);
+    assert.ok(std.html.includes('<a href="mailto:hello@barroindustries.com">hello@barroindustries.com</a>'));
+    assert.ok(!/\b(draft\w*|reviewer\w*|reviewed|proofread\w*|edited by|written by|fact[- ]check\w*|editor\w*|sponsor\w*|paid|payment|advertis\w*|commission\w*)\b/i.test(t), 'the owner\'s ruling: nothing about how drafts are prepared or who drafts or reviews, and no sentence about payment');
+    assert.ok(!/\b(prepared|authored)\b/i.test(t.replace(/Photographs are credited[^.]*\./g, '')), 'nothing about who prepares the articles');
+  });
+
+  it('links the editorial standards from the hub masthead and colophon and from every article\'s note — and from neither the site header nor the footer row', () => {
+    assert.equal((hub.html.match(new RegExp(`href="${STANDARDS}"`, 'g')) || []).length, 2, 'masthead and colophon');
+    for (const p of arts) assert.ok(p.html.includes(`<a href="${STANDARDS}">How we research and cite</a>`));
+    for (const p of PAGES) { assert.ok(!p.header.includes(STANDARDS) && !p.footer.includes(STANDARDS), `${p.path}: the header and footer row stay as they are`); }
+    for (const f of ['index.html', 'faq/index.html', 'services/index.html', 'catalogue/index.html']) assert.ok(!read(f).includes(STANDARDS), `${f}: a non-guide page links the standards`);
+  });
+
+  it('lists the journal in sitemap.xml (every guide and the standards page once), in llms.txt (the pillar, the cost, code and standards pages, the ten topics) within its 120 lines, and in no robots rule', () => {
+    const sm = read('sitemap.xml'), llms = read('llms.txt');
+    for (const p of PAGES) assert.equal(sm.split(`<loc>${p.url}</loc>`).length - 1, 1, `${p.path}: sitemap entries`);
+    for (const slug of ['how-to-build-a-restaurant-kitchen', COST_SLUG, 'national-building-code-commercial-kitchens', 'fire-code-kitchen-exhaust-and-suppression', 'sanitation-code-food-establishments', 'how-to-specify-commercial-kitchen-equipment', 'editorial-standards']) assert.ok(llms.includes(`](${BASE}/guides/${slug}/):`), `llms.txt does not list ${slug}`);
+    for (const s of CFG.sections) assert.ok(llms.includes(`](${BASE}/guides/#${s.id}):`), `llms.txt: topic ${s.id}`);
+    assert.ok(llms.split('\n').length <= 121);
+    assert.ok(!/Disallow:\s*\/guides/.test(read('robots.txt')));
+  });
+
+  it('allows the word "cost" on the cost guide and its address and headline where others link to it — and nothing else: a peso amount, "price" and "pricing" still fail there, and every other guide still may not say "cost"', () => {
+    const costPage = byPath(`/guides/${COST_SLUG}/`);
+    const other = byPath('/guides/kitchen-trolley-guide/');
+    assert.ok(/\bcosts?\b/i.test(costPage.mainNoRefs), 'the cost guide says cost');
+    assert.equal(allowCost(costPage, 'It cost ₱5,000 to build').includes('cost'), false, 'the word is allowed on the cost guide');
+    assert.ok(RE.money.test(allowCost(costPage, 'about ₱5,000')) && RE.money.test(allowCost(costPage, 'PHP 5000')), 'a peso amount stays banned on the cost guide');
+    assert.ok(RE.priceWords.test(allowCost(costPage, 'a price list')) && RE.priceWords.test(allowCost(costPage, 'pricing')) && RE.priceWords.test(allowCost(costPage, 'a budget')), 'price, pricing and budget stay banned on the cost guide');
+    assert.ok(RE.priceWords.test(allowCost(other, 'the cost of a kitchen')), 'another guide may not say cost');
+    assert.ok(!RE.priceWords.test(allowCost(other, `see /guides/${COST_SLUG}/`)) && !RE.priceWords.test(allowCost(other, COST_H1)), 'its address and headline may appear on another page');
+    assert.ok(!/\bpric(e|es|ed|ing)\b/i.test(costPage.html.replace(STYLE_RE, '')), 'the cost guide never says price or pricing');
+    for (const p of arts.filter((x) => x !== costPage)) assert.ok(!/\bcosts?\b/i.test(scrub(p, p.html.replace(STYLE_RE, '').replace(/<script[\s\S]*?<\/script>/g, ''))), `${p.path}: says "cost" (only the cost guide may)`);
+  });
+
+  it('has made the factual corrections of 2026-11-23: the warranty sentence is the site\'s (12 months, PMS can be added) on every guide; Brushed finish; LGUs buy through public bidding as the usual mode; a salamander is a high-heat overhead broiler and a cheesemelter the gentler unit; Parañaque and Las Piñas are on Manila Bay and Muntinlupa by Laguna de Bay; SS316 within about 5 km of the sea in Zambales and Subic', () => {
+    for (const p of arts) assert.ok(!/\b(6|six)[- ]months?[- ]warranty|\b(6|six) months of warranty/i.test(p.mainNoRefs) && !/full-kitchen projects include 12 months/.test(p.html), `${p.path}: a 6-month warranty, or "include 12 months"`);
+    const WARRANTY = '12-month warranty on workmanship';
+    for (const slug of ['commercial-range-hood-quotation-guide', 'commercial-kitchen-manila-city', 'commercial-kitchen-pasig-ortigas', 'commercial-kitchen-alabang-south-metro', 'commercial-kitchen-antipolo-rizal']) assert.ok(bySlug[slug].body.includes(`We give a ${WARRANTY}, and full-kitchen projects can add 12 months of preventive maintenance service (PMS) with KitchenShield™.`), `${slug}: the site\'s warranty sentence`);
+    const custom = bySlug['custom-stainless-steel-fabrication-guide'].article;
+    assert.ok(!/hides everyday scratches/.test(custom) && /does not show fingerprints easily; light scratches can be blended out/.test(custom), 'Brushed: BSSA');
+    const lgu = bySlug['community-kitchen-lgu'];
+    assert.ok(!/Local governments buy through public bidding\./.test(lgu.html) && /Public bidding is the usual way local governments buy, and the procurement rules allow other ways in some cases/.test(lgu.article), 'public bidding is the usual mode');
+    assert.ok(lgu.html.includes('Usually through public bidding, and the procurement rules allow other ways in some cases.') && !RE.legal.test(lgu.bodyNoRefs), 'the FAQ says so too (visible and JSON-LD, mirrored by the FAQ test), and the page names no law');
+    const sal = bySlug['salamander-broiler-guide'].article;
+    assert.ok(/A salamander is a high-heat overhead broiler/.test(sal) && /A cheesemelter is a different, gentler unit/.test(sal) && !/or a cheese melter/.test(sal) && !/does not cook food through/.test(sal), 'salamander versus cheesemelter');
+    const alabang = bySlug['commercial-kitchen-alabang-south-metro'].article;
+    assert.ok(!/Muntinlupa, Parañaque and Las Piñas lie south of Manila along the bay/.test(alabang) && /Parañaque and Las Piñas lie south of Manila along Manila Bay[^.]*, and Muntinlupa lies beside Laguna de Bay/.test(alabang), 'the geography');
+    const zam = bySlug['commercial-kitchen-zambales-subic'];
+    const zamSection = (id) => (zam.article.match(new RegExp(`<section id="${id}"[\\s\\S]*?</section>`)) || [''])[0];
+    assert.ok(/As a rule of thumb, within about 5 km of the sea, choose SS316\./.test(zamSection('grade')) && /Further inland, or indoors away from salt air, food-grade SS304 is enough/.test(zamSection('grade')) && /Australian Stainless Steel Development Association, n\.d\./.test(zamSection('grade')), 'the grade section: SS316 within about 5 km, SS304 further inland, ASSDA cited');
+    assert.ok(/Within about 5 km of the sea, choose SS316, which resists salt air and the tea staining it causes\. Further inland, or indoors away from salt air, food-grade SS304, our standard, is enough/.test(zamSection('faq')) && /Within about 5 km of the sea, choose SS316 for salt air/.test(zamSection('faq')) && /SS316 within about 5 km/.test(zam.article.match(/<div class="art-keys">[\s\S]*?<\/div>/)[0]) && !RE.legal.test(zam.bodyNoRefs), 'the FAQ and the key points say the same, and the page names no law');
+    assert.ok(/choose SS316/.test(ANSWERS['commercial-kitchen-zambales-subic'].answer) && /5 km/.test(ANSWERS['commercial-kitchen-zambales-subic'].answer), 'the Quick answer says the same');
+  });
+
+  it('keeps both generators honest: scripts/apply-guide-template.js --check and scripts/build-guides-hub.js --check pass on the repository, and each fails in a scratch copy where a generated part was edited by hand', () => {
+    const run = (cwd, script) => spawnSync('node', [path.join(cwd, 'scripts', script), '--check'], { cwd, encoding: 'utf8' });
+    for (const s of ['apply-guide-template.js', 'build-guides-hub.js']) { const r = run(ROOT, s); assert.equal(r.status, 0, `${s} --check:\n${r.stdout}${r.stderr}`); }
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kg-gen-'));
+    try {
+      for (const f of ['scripts/guides-lib.js', 'scripts/apply-guide-template.js', 'scripts/build-guides-hub.js', 'scripts/guides-hub.json', 'scripts/guide-answers.json', ...fs.readdirSync(path.join(ROOT, 'scripts')).filter((x) => /^guide-photos-.*\.json$/.test(x)).map((x) => 'scripts/' + x)]) { fs.mkdirSync(path.dirname(path.join(tmp, f)), { recursive: true }); fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f)); }
+      for (const p of PAGES) { fs.mkdirSync(path.dirname(path.join(tmp, p.file)), { recursive: true }); fs.writeFileSync(path.join(tmp, p.file), p.html); }
+      // photo files are only stat-ed and measured: link the folders
+      fs.mkdirSync(path.join(tmp, 'site/img'), { recursive: true });
+      for (const d of ['guides', 'projects', 'pages']) fs.symlinkSync(path.join(ROOT, 'site/img', d), path.join(tmp, 'site/img', d));
+      const pairs = [
+        ['apply-guide-template.js', `guides/${CFG.articles[3].slug}/index.html`, (h) => h.replace('<p class="art-answer-title">Quick answer</p>', '<p class="art-answer-title">Short answer</p>'), 'a Quick answer title edited by hand'],
+        ['apply-guide-template.js', `guides/${CFG.articles[4].slug}/index.html`, (h) => h.replace(/<span class="art-credit">Photo:/, '<span class="art-credit">Image:'), 'the photo credit edited by hand'],
+        ['build-guides-hub.js', 'guides/index.html', (h) => h.replace('<h2 id="start-here-h">Building a kitchen, step by step</h2>', '<h2 id="start-here-h">Start here</h2>'), 'a generated heading edited by hand'],
+      ];
+      for (const [script, file, fn, what] of pairs) {
+        const f = path.join(tmp, file), t = fs.readFileSync(f, 'utf8'), next = fn(t);
+        assert.notEqual(next, t, `${what}: the edit changed nothing`);
+        fs.writeFileSync(f, next);
+        const r = run(tmp, script);
+        fs.writeFileSync(f, t);
+        assert.equal(r.status, 1, `${script} did not fail for ${what}:\n${r.stdout}${r.stderr}`);
+        assert.match(r.stderr, /FAIL/, what);
+      }
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 });
 

@@ -225,7 +225,7 @@ describe('uniform with the website: the same header and the same footer as /serv
     const row = f.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
     assert.deepEqual([...row.matchAll(/<a\b[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/a>/g)].map((m) => m[1]), ['Home', 'Services', 'Products', 'Our work', 'Areas we serve', 'FAQ', 'The Kitchen Guide', 'Facebook', 'Message us', 'Get a quote', 'Team portal']);
     assert.ok(row.endsWith('<a class="foot-portal" href="/#login">Team portal</a></p>'), '"Team portal" must be last');
-    assert.match(f, /<p class="foot-legal">© <span id="site-year">\d{4}<\/span> Barro Industries OPC \(<span data-brand-legacy>Barro Kitchens<\/span>\)\. All photos, designs and content on this site are our own work and may not be copied or reused without written permission\.<\/p>/);   // owner 2026-10-22: the copyright notice
+    assert.match(f, /<p class="foot-legal">© <span id="site-year">\d{4}<\/span> Barro Industries OPC \(<span data-brand-legacy>Barro Kitchens<\/span>\)\. Unless credited otherwise, all photos, designs and content on this site are our own work and may not be copied or reused without written permission\.<\/p>/);   // owner 2026-10-22: the copyright notice
   });
 
   it('reuses css/site.css and css/pages.css: the page hero, the breadcrumb, the eyebrow, the lead and the site buttons carry the site\'s own classes', () => {
