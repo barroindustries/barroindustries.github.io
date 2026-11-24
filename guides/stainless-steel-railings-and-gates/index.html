@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-G0fxZ0H96zv/A2IFH01nAgouyo7OWZ7RDpb0/2XKacc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-QGpAhVVpNQWrSvvREaAEVQCEYb9FPOgjAUHX7iYmt4Y=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Stainless Steel Railings and Gates | Barro Kitchens</title>
 <meta name="description" content="Plan stainless steel railings and gates: handrail and infill options, swing or sliding gates, SS304 or SS316 and fixings. By Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/stainless-steel-railings-and-gates/">
@@ -730,6 +730,10 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 }
 
 /* phone contact bar (owner 2026-11-24): built by js/site.js inside #site; phones only; hidden under the quote tray */
+/* trust line under the main buttons (owner 2026-11-24, step 5) */
+#site .trust-line{display:flex;flex-wrap:wrap;gap:6px 18px;margin:16px 0 0;padding:0;list-style:none;font:500 14px/1.4 var(--site-sans);color:var(--site-muted)}
+#site .trust-line li{display:flex;align-items:baseline;gap:7px}
+#site .trust-line li::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--site-gold);transform:translateY(-1px)}
 #site-cbar{display:none}
 @media (max-width:767px){
   html.has-cbar #site-cbar{position:fixed;left:0;right:0;bottom:0;z-index:3;display:block;

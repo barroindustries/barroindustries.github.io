@@ -480,6 +480,10 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 }
 
 /* phone contact bar (owner 2026-11-24): built by js/site.js inside #site; phones only; hidden under the quote tray */
+/* trust line under the main buttons (owner 2026-11-24, step 5) */
+#site .trust-line{display:flex;flex-wrap:wrap;gap:6px 18px;margin:16px 0 0;padding:0;list-style:none;font:500 14px/1.4 var(--site-sans);color:var(--site-muted)}
+#site .trust-line li{display:flex;align-items:baseline;gap:7px}
+#site .trust-line li::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--site-gold);transform:translateY(-1px)}
 #site-cbar{display:none}
 @media (max-width:767px){
   html.has-cbar #site-cbar{position:fixed;left:0;right:0;bottom:0;z-index:3;display:block;

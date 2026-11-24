@@ -10,7 +10,7 @@
      data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu, project photo lightbox, map highlight) and /js/late-fonts.js.
      Not in the service worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD and visible breadcrumb
      in step: tests/seo-pages.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-5t+f9Jktw9lZYxVRN/c9be7vWZ03mQqyw+IhTQg7uqs=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-0sqk4QxkszUCwmqieiYyQ7QPTgMvybOPxSfa7uFPziU=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Kitchen Exhaust &amp; Ventilation Systems, Manila | Barro Kitchens</title>
 <meta name="description" content="Kitchen exhaust and ventilation systems in Metro Manila and Luzon: stainless range hoods, ducting, blowers and fresh air by Barro Kitchens.">
 <link rel="canonical" href="https://barroindustries.com/services/exhaust-and-fresh-air-systems/">
@@ -665,6 +665,10 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 }
 
 /* phone contact bar (owner 2026-11-24): built by js/site.js inside #site; phones only; hidden under the quote tray */
+/* trust line under the main buttons (owner 2026-11-24, step 5) */
+#site .trust-line{display:flex;flex-wrap:wrap;gap:6px 18px;margin:16px 0 0;padding:0;list-style:none;font:500 14px/1.4 var(--site-sans);color:var(--site-muted)}
+#site .trust-line li{display:flex;align-items:baseline;gap:7px}
+#site .trust-line li::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--site-gold);transform:translateY(-1px)}
 #site-cbar{display:none}
 @media (max-width:767px){
   html.has-cbar #site-cbar{position:fixed;left:0;right:0;bottom:0;z-index:3;display:block;
@@ -970,6 +974,7 @@ body{margin:0;background:#fff;color:#0E1116}
       <p class="site-lead">A well-ventilated kitchen is essential for both safety and comfort. We design, fabricate and install exhaust hoods, ducting and fresh-air systems that remove smoke, grease and heat while keeping the air in your kitchen moving.</p>
       <p class="site-lead">We plan them together with your cooking line, gas line and fire suppression, as part of one kitchen layout.</p>
       <p class="pg-hero-cta"><a class="site-btn site-btn-primary" href="/sales/clientinformationrequest/">Get a quote</a><a class="site-btn site-btn-outline" href="https://m.me/barrokitchens" rel="noopener" target="_blank" data-brand><svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>Message us</a></p>
+      <ul class="trust-line" aria-label="Why Barro Kitchens"><li>12-month warranty on workmanship</li><li>Built by our own team</li><li>Serving Luzon</li></ul>
     </div>
     <figure class="pg-hero-media">
       <img src="/site/img/projects/ispsc/01.webp" srcset="/site/img/projects/ispsc/01-thumb.webp 600w, /site/img/pages/hero-ispsc-01.webp 1000w, /site/img/projects/ispsc/01.webp 1600w" sizes="(min-width:900px) 520px, 100vw" width="1600" height="1200" alt="ISPSC 2026 — wide view of the cooking stations with range ovens, sinks and overhead hoods" fetchpriority="high" decoding="async">

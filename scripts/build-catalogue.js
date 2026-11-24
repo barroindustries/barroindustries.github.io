@@ -1396,6 +1396,8 @@ function renderCatalogue(db, opts) {
   // it are the owner's own, unchanged (tests/catalogue-layout.test.mjs, catalogue-public.test.mjs and site-public-surface.test.mjs pin them).
   lines.push('<h1>Commercial kitchen equipment catalogue</h1>');
   lines.push('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, built by our own team in SS304 stainless steel (SS316 on request) and built to your sizes. Sizes are in mm. The “From” figure on each card is a starting amount before VAT; your quotation depends on the size and options you choose.</p>');
+  // trust line (owner 2026-11-24, Google Ads step 5): the three approved proof points, no price, no hype
+  lines.push('<ul class="trust-line" aria-label="Why Barro Kitchens"><li>12-month warranty on workmanship</li><li>Built by our own team</li><li>Serving Luzon</li></ul>');
   lines.push('<form class="cat-search" id="cat-search-form" role="search">');
   lines.push('<label class="sr-only" for="cat-search">Search products</label>');
   lines.push(SEARCH_ICON);

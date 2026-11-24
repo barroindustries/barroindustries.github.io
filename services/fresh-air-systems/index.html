@@ -12,7 +12,7 @@
      tests/seo-products.test.mjs pins all of them. The social photo is a crop of a project photo (site/img/seo/). No amount appears on this
      page, ever (owner ruling R1): the one sentence about money is the owner's own, "Prices depend on size and options.", and it sends the
      visitor to the online estimate. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-5t+f9Jktw9lZYxVRN/c9be7vWZ03mQqyw+IhTQg7uqs=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-0sqk4QxkszUCwmqieiYyQ7QPTgMvybOPxSfa7uFPziU=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Fresh Air System for Commercial Kitchens | Barro Kitchens</title>
 <meta name="description" content="A fresh air system for commercial kitchens: outside air that replaces what the exhaust removes, designed and installed by Barro Kitchens.">
 <link rel="canonical" href="https://barroindustries.com/services/fresh-air-systems/">
@@ -770,6 +770,10 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 }
 
 /* phone contact bar (owner 2026-11-24): built by js/site.js inside #site; phones only; hidden under the quote tray */
+/* trust line under the main buttons (owner 2026-11-24, step 5) */
+#site .trust-line{display:flex;flex-wrap:wrap;gap:6px 18px;margin:16px 0 0;padding:0;list-style:none;font:500 14px/1.4 var(--site-sans);color:var(--site-muted)}
+#site .trust-line li{display:flex;align-items:baseline;gap:7px}
+#site .trust-line li::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--site-gold);transform:translateY(-1px)}
 #site-cbar{display:none}
 @media (max-width:767px){
   html.has-cbar #site-cbar{position:fixed;left:0;right:0;bottom:0;z-index:3;display:block;

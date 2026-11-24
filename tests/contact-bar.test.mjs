@@ -87,3 +87,23 @@ describe('design & build landing page (owner 2026-11-24, step 4: the design & bu
     assert.equal((html.match(/id="get-a-quote"/g) || []).length, 1);
   });
 });
+
+describe('trust line (owner 2026-11-24, step 5): the three approved proof points under the main buttons', () => {
+  const TRUST = '<ul class="trust-line" aria-label="Why Barro Kitchens"><li>12-month warranty on workmanship</li><li>Built by our own team</li><li>Serving Luzon</li></ul>';
+  for (const p of ['commercial-kitchen-fit-out', 'exhaust-and-fresh-air-systems', 'stainless-steel-fabrication']) {
+    it(`${p}: right under the hero buttons`, () => {
+      const html = read(`services/${p}/index.html`);
+      assert.ok(/<p class="pg-hero-cta">[^\n]*<\/p>\n      <ul class="trust-line"/.test(html));
+      assert.equal(html.split(TRUST).length - 1, 1);
+    });
+  }
+  it('the catalogue: under the opening sentence, in the page AND in its generator (scripts/build-catalogue.js)', () => {
+    const html = read('catalogue/index.html');
+    assert.ok(html.includes('the size and options you choose.</p>\n' + TRUST + '\n'));
+    assert.ok(read('scripts/build-catalogue.js').includes("lines.push('" + TRUST + "');"));
+  });
+  it('says only what the owner approved: 12 months (never 6), no price, no hype', () => {
+    assert.ok(!/6-month|six-month|premium|best|leading|free|₱/i.test(TRUST));
+    assert.match(css, /#site \.trust-line\{display:flex;flex-wrap:wrap;/);
+  });
+});

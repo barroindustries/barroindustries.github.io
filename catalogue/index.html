@@ -11,7 +11,7 @@
      shell for /catalogue/). <html data-view="site"> is static: it is what lets css/site.css show #site without the
      app's head script. No inline script; the one inline stylesheet is the generated PAGE-CSS block (scripts/inline-page-css.js, its sha256 in the CSP) and the Google Fonts are requested after the load (js/late-fonts.js; the <noscript> link is the same URL), so the CSP below needs neither 'unsafe-inline': it allows the Firebase
      SDK from gstatic and calls to the one functions host, and nothing more. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-lch0llVKhcvRzi8TsdPYbSanu7oyS69+MOZog67TdpE=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-8WlSmmYBArbIBxZjhhvwpeCn0pBa0+L4/OAKZwC88rQ=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://asia-east1-barro-industries.cloudfunctions.net https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <!-- PERMANENT (owner ruling, 2026-10-22): "Barro Kitchens" is a permanent, historic name of the business, not only a swappable brand: it stays in this title and description (and in the homepage's alternateName) even after a rebrand. -->
 <title>Commercial Kitchen Equipment | Barro Kitchens</title>
 <meta name="description" content="Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: sinks, work tables, gas stoves, range hoods and shelving.">
@@ -560,6 +560,10 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 }
 
 /* phone contact bar (owner 2026-11-24): built by js/site.js inside #site; phones only; hidden under the quote tray */
+/* trust line under the main buttons (owner 2026-11-24, step 5) */
+#site .trust-line{display:flex;flex-wrap:wrap;gap:6px 18px;margin:16px 0 0;padding:0;list-style:none;font:500 14px/1.4 var(--site-sans);color:var(--site-muted)}
+#site .trust-line li{display:flex;align-items:baseline;gap:7px}
+#site .trust-line li::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--site-gold);transform:translateY(-1px)}
 #site-cbar{display:none}
 @media (max-width:767px){
   html.has-cbar #site-cbar{position:fixed;left:0;right:0;bottom:0;z-index:3;display:block;
@@ -1091,6 +1095,7 @@ html.qr-kb-open #qr-root .qr-preview{margin-bottom:8px}
 <p class="eyebrow"><span data-brand>Barro Kitchens</span></p>
 <h1>Commercial kitchen equipment catalogue</h1>
 <p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens, built by our own team in SS304 stainless steel (SS316 on request) and built to your sizes. Sizes are in mm. The “From” figure on each card is a starting amount before VAT; your quotation depends on the size and options you choose.</p>
+<ul class="trust-line" aria-label="Why Barro Kitchens"><li>12-month warranty on workmanship</li><li>Built by our own team</li><li>Serving Luzon</li></ul>
 <form class="cat-search" id="cat-search-form" role="search">
 <label class="sr-only" for="cat-search">Search products</label>
 <svg class="cat-search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
