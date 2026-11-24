@@ -52,6 +52,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const BRIEF_LED = ['/services/commercial-kitchen-fit-out/', '/services/exhaust-and-fresh-air-systems/', '/services/stainless-steel-fabrication/'];
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const exists = (rel) => fs.existsSync(path.join(ROOT, rel));
 const BASE = 'https://barroindustries.com';
@@ -1040,7 +1041,11 @@ describe('links: every internal link resolves, the hubs list every child, every 
     each((p) => {
       const h = hrefs(p);
       assert.ok(h.includes('/') && h.includes('/catalogue/'), `${p.path}: home / catalogue`);
-      assert.ok(h.filter((u) => u === '/catalogue/?quote=1').length >= 3, `${p.path}: quote links ${h.filter((u) => u === '/catalogue/?quote=1').length}`);
+      // the design & build, exhaust and fabrication pages send their hero and closing "Get a quote" to the project brief (owner 2026-11-24,
+      // Google Ads test); their shared header and footer keep the catalogue quote link
+      const briefLed = BRIEF_LED.includes(p.path);
+      assert.ok(h.filter((u) => u === '/catalogue/?quote=1').length >= (briefLed ? 2 : 3), `${p.path}: quote links ${h.filter((u) => u === '/catalogue/?quote=1').length}`);
+      if (briefLed) assert.ok(h.filter((u) => u === '/sales/clientinformationrequest/').length >= 3, `${p.path}: brief links`);
       assert.ok(h.includes('tel:+639276836300') && h.includes('mailto:hello@barroindustries.com'));
       assert.ok(h.includes('/sales/clientinformationrequest/'));
       assert.ok(!/data-qr-start/.test(p.html), 'the quote-request script is not on these pages');
@@ -1328,7 +1333,8 @@ describe('"Message us": the Messenger chat is linked from every public footer, t
   });
 
   it('links Messenger exactly where it was asked for: 2 places on the homepage (contact + footer), the catalogue and the FAQ page (call to action + footer), 1 on each other page (footer) — never in the header, the phone menu, the JSON-LD or the hero', () => {
-    const expected = { '/': 2, '/catalogue/': 2, '/faq/': 2 };
+    // + the hero and the closing band on the three brief-led service pages (owner 2026-11-24: Messenger beside "Get a quote")
+    const expected = { '/': 2, '/catalogue/': 2, '/faq/': 2, ...Object.fromEntries(BRIEF_LED.map((x) => [x, 3])) };
     for (const [p, html] of ALL) {
       assert.equal(msgAnchors(html).length, expected[p] || 1, `${p}: Messenger links`);
       assert.deepEqual(msgAnchors(section(html, /<header id="site-header">[\s\S]*?<\/header>/)), [], `${p}: the header keeps "Get a quote" only`);

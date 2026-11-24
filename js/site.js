@@ -125,6 +125,49 @@
     } else if (root.getAttribute('data-view') === 'site') loaded(begin);
   }
 
+  var CBAR = { messenger: 'https://m.me/barrokitchens', tel: 'tel:+639208018475', note: 'We reply within 1 hour, Mon–Sat' };
+  function svgIcon(paths) {
+    var NS = 'http://www.w3.org/2000/svg', svg = d.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none'); svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2'); svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round'); svg.setAttribute('aria-hidden', 'true');
+    for (var i = 0; i < paths.length; i++) { var p = d.createElementNS(NS, 'path'); p.setAttribute('d', paths[i]); svg.appendChild(p); }
+    return svg;
+  }
+  function contactBar(site) {
+    try {
+      if (!site || $('site-cbar')) return;
+      if (/^\/sales\/clientinformationrequest(\/|$)/.test(window.location.pathname || '')) return;
+      var bar = d.createElement('div');
+      bar.id = 'site-cbar';
+      bar.setAttribute('role', 'region');
+      bar.setAttribute('aria-label', 'Contact Barro Kitchens');
+      var note = d.createElement('p'); note.className = 'cbar-note'; note.textContent = CBAR.note;
+      var row = d.createElement('div'); row.className = 'cbar-row';
+      function btn(text, href, cls, icon) {
+        var a = d.createElement('a');
+        a.className = 'cbar-btn' + (cls ? ' ' + cls : '');
+        a.setAttribute('href', href);
+        if (icon) a.appendChild(svgIcon(icon));
+        a.appendChild(d.createTextNode(text));
+        return a;
+      }
+      var msg = btn('Message us', CBAR.messenger, 'is-primary', ['M7.9 20A9 9 0 1 0 4 16.1L2 22Z']);
+      msg.setAttribute('target', '_blank'); msg.setAttribute('rel', 'noopener');
+      msg.setAttribute('aria-label', 'Message us on Messenger');
+      var call = btn('Call', CBAR.tel, '', ['M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z']);
+      call.setAttribute('aria-label', 'Call 0920 801 8475');
+      // the page's own main quote button: the hero's on a content page (the design & build, exhaust and fabrication pages send it to the project
+      // brief), else the header's (with its data-qr-start, so the homepage's quote sheet opens as from the header)
+      var head = d.querySelector('#site .pg-hero-cta a.site-btn-primary') || d.querySelector('#site-header .site-head-cta');
+      var quote = btn('Get a quote', (head && head.getAttribute('href')) || '/catalogue/?quote=1', '', null);
+      if (head && head.hasAttribute('data-qr-start')) quote.setAttribute('data-qr-start', '');
+      row.appendChild(msg); row.appendChild(call); row.appendChild(quote);
+      bar.appendChild(note); bar.appendChild(row);
+      site.appendChild(bar);
+      d.documentElement.classList.add('has-cbar');
+    } catch (_) { /* the bar is a convenience: the page is complete without it */ }
+  }
+
   function init() {
     var site = $('site'), header = $('site-header');
 
@@ -138,6 +181,13 @@
         if (!have) { var at = d.createElement('script'); at.defer = true; at.src = '/js/ads-tag.js'; d.head.appendChild(at); }
       }
     } catch (_) { /* tracking is optional */ }
+
+    // ── Phone contact bar (owner 2026-11-24: "Yes, steps 1–3"; reply line "Yes, within 1 hour"; Call = the sales line). Most ad visitors are on
+    // phones and the call / Messenger links sat only at the very bottom of the page, so a fixed bar carries Message us · Call · Get a quote on
+    // every public page. It is built here (no page markup to keep in step), inside #site so the staff app's views never draw it; css/site.css
+    // shows it below 768px only and hides it while the catalogue's quote tray is up. Not on the project-brief form (it IS the enquiry).
+    // "Get a quote" copies the header button (same target, and its data-qr-start). The taps are counted by js/ads-tag.js's click listener.
+    contactBar(site);
 
     // Footer year (the static text is the fallback).
     var yr = $('site-year');

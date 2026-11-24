@@ -10,7 +10,7 @@
      from the JSON-LD data block below) and no style attribute. The scripts are the shared /js/site.js (phone menu) and /js/late-fonts.js. Not in the service
      worker's PRECACHE. Edit the text in the page, then keep the title, description, canonical, Open Graph, JSON-LD (the FAQ and the breadcrumb) and the visible
      text in step: tests/content-assets.test.mjs pins all of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-LHfrBvGCBGzRtlSHWsze0orocjUjrt5otfMH8bLdYwc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'sha256-G0fxZ0H96zv/A2IFH01nAgouyo7OWZ7RDpb0/2XKacc=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://www.facebook.com; connect-src 'self' https://www.google.com https://googleads.g.doubleclick.net https://www.googleadservices.com https://*.google.com https://www.facebook.com https://connect.facebook.net; frame-src https://td.doubleclick.net https://www.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Range Hood Types Compared: Wall, Island, Slim | Barro Kitchens</title>
 <meta name="description" content="Compare range hood types: wall, island and slim canopies and the rear-pitch hood. Where each fits and what to ask. By Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/guides/range-hood-types-compared/">
@@ -709,6 +709,26 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   /* no logo intro at all for a visitor who asked for less motion: the overlay is not drawn (js/site.js does not start it, and the two sources carry the same media gate, so no clip is fetched) */
   #site .hero-ghost{display:none !important}
 }
+
+/* phone contact bar (owner 2026-11-24): built by js/site.js inside #site; phones only; hidden under the quote tray */
+#site-cbar{display:none}
+@media (max-width:767px){
+  html.has-cbar #site-cbar{position:fixed;left:0;right:0;bottom:0;z-index:3;display:block;
+    padding:6px max(12px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));
+    background:#fff;border-top:1px solid var(--site-line);box-shadow:0 -6px 18px rgba(11,27,63,.08)}
+  #site-cbar .cbar-note{margin:0 0 6px;font:500 12px/1.3 var(--site-sans);color:var(--site-muted,#5B6478);text-align:center}
+  #site-cbar .cbar-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  #site-cbar .cbar-btn{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 6px;border:1px solid var(--site-navy);border-radius:6px;
+    background:#fff;color:var(--site-navy);font:600 14px/1.1 var(--site-sans);text-align:center;text-decoration:none;white-space:nowrap}
+  #site-cbar .cbar-btn svg{flex:none;width:17px;height:17px}
+  #site-cbar .cbar-btn.is-primary{background:var(--site-navy);color:#fff}
+  #site-cbar .cbar-btn:focus-visible{outline:2px solid var(--site-gold);outline-offset:2px}
+  html.has-cbar #site-footer{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+  html.has-cbar #site .cat-top{bottom:calc(98px + env(safe-area-inset-bottom))}
+  html.has-cbar.qr-has-tray #site-cbar{display:none}
+}
+@media (max-width:359px){#site-cbar .cbar-btn svg{display:none}#site-cbar .cbar-btn{font-size:13px}}
+@media print{#site-cbar{display:none !important}}
 /* css/pages.css — the public content pages: /services/ (and its six service pages), /work/ (and its two project pages),
    /areas-we-serve/ and /faq/. Loads AFTER css/site.css, which supplies the tokens, the header, the buttons, the footer, the
    "How we work" steps, the warranty cards, the registration badges, the photo gallery and the Luzon map; this file adds only what

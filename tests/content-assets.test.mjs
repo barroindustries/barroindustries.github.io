@@ -1704,14 +1704,15 @@ describe('guides: the journal — registry, hub structure, photographs and credi
     }
   });
 
-  it('keeps the hub within its budgets: the HTML 300 KB raw and 55 KB gzipped, css/guides.css 20 KB, the inline stylesheet of a guide 78 KB raw and 19.5 KB gzipped; and a page that has no Quick answer still lays out as before (the grid rules are gated on .has-answer)', () => {
+  it('keeps the hub within its budgets: the HTML 300 KB raw and 55 KB gzipped, css/guides.css 20 KB, the inline stylesheet of a guide 80 KB raw and 19.5 KB gzipped; and a page that has no Quick answer still lays out as before (the grid rules are gated on .has-answer)', () => {
     // (KB here is 1000 bytes, the stricter reading of the spec's budgets)
     assert.ok(Buffer.byteLength(hub.html) <= 300000, `the hub is ${(Buffer.byteLength(hub.html) / 1000).toFixed(0)} KB`);
     assert.ok(gz(hub.html) <= 55000, `the hub is ${(gz(hub.html) / 1000).toFixed(1)} KB gzipped`);
     const css = read('css/guides.css');
     assert.ok(Buffer.byteLength(css) <= 20000, `css/guides.css is ${(Buffer.byteLength(css) / 1000).toFixed(1)} KB`);
     const inline = ['css/site.css', 'css/pages.css', 'css/guides.css'].map((f) => read(f).replace(/\s+$/, '')).join('\n');
-    assert.ok(Buffer.byteLength(inline) <= 78000 && gz(inline) <= 19500, `the inline css is ${(Buffer.byteLength(inline) / 1000).toFixed(1)} KB, ${(gz(inline) / 1000).toFixed(1)} KB gzipped`);
+    // raw budget 78 → 80 KB on 2026-11-24 for the owner-approved phone contact bar in css/site.css (+0.7 KB raw); the gzipped budget is unchanged
+    assert.ok(Buffer.byteLength(inline) <= 80000 && gz(inline) <= 19500, `the inline css is ${(Buffer.byteLength(inline) / 1000).toFixed(1)} KB, ${(gz(inline) / 1000).toFixed(1)} KB gzipped`);
     assert.ok(!/\.art-cards|\.kg-feature(?![-\w])|\.kg-side|\.kg-big|\.kg-lead(?![-\w])/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')), 'the rules the redesign made dead are gone');
     assert.ok(/#site \.art-wrap\.has-answer \.art-answer\{grid-column:2;grid-row:1\}/.test(css) && !/\.has-answer/.test(css.replace(/#site \.art-wrap\.has-answer/g, '')), 'the answer grid is gated on .has-answer, never :has()');
     assert.ok(!/:has\(/.test(css));
