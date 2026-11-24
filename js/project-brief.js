@@ -974,6 +974,8 @@
     return heading; // focus lands here once the receipt is shown (the screen-reader announcement; no id lookup needed)
   }
   function onSent(res) {
+    // Google Ads + Meta enquiry conversion (js/ads-tag.js), once, on a real successful send only — never for a ?mock=1 rehearsal (owner 2026-11-24)
+    if (!MOCK) { try { window.bkConversion && window.bkConversion('quote'); } catch (_) { /* tracking never breaks the receipt */ } }
     clearDraftStorage();
     var h = renderDone(res);
     form.hidden = true; layoutEl.querySelector('.brief-aside').hidden = true; offlineEl.hidden = true; expiredEl.hidden = true;

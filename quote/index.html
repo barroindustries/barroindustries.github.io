@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- /quote/ — a typed shortcut (owner 2026-11-24). It had no page, so people who typed barroindustries.com/quote got the
+     not-found page. GitHub Pages has no server redirects, so this page sends the visitor straight on to the quote form on
+     /catalogue/ with a meta refresh (no script: nothing inline under the CSP). noindex + canonical: search engines index the
+     catalogue, never this page. Not in the sitemap, not in the service worker's PRECACHE. tests/quote-shortcut.test.mjs pins it. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="refresh" content="0; url=/catalogue/?quote=1">
+<meta name="robots" content="noindex,follow">
+<link rel="canonical" href="https://barroindustries.com/catalogue/">
+<title>Get a quote | Barro Kitchens</title>
+</head>
+<body>
+<p><a href="/catalogue/?quote=1">Continue to the Barro Kitchens quote form</a></p>
+</body>
+</html>
