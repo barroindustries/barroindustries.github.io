@@ -65,3 +65,25 @@ describe('service pages: Get a quote → project brief, Message us beside it', (
     });
   }
 });
+
+describe('design & build landing page (owner 2026-11-24, step 4: the design & build ad lands here)', () => {
+  const html = read('services/commercial-kitchen-fit-out/index.html');
+  const order = ['class="pg-hero"', 'id="site-visit"', 'id="projects"', 'id="included"'].map((k) => html.indexOf(k));
+  it('puts the site-visit offer and the project photographs straight after the hero, before what a fit-out includes', () => {
+    assert.ok(order.every((i) => i > 0), String(order));
+    assert.deepEqual([...order].sort((a, b) => a - b), order);
+  });
+  it('the site-visit band books through the project brief, offers Messenger and the sales line, and promises only what the owner approved', () => {
+    const band = (html.match(/<section class="pg-cta" id="site-visit"[\s\S]*?<\/section>/) || [''])[0];
+    assert.match(band, /<h2 id="visit-h">Book a site visit<\/h2>/);
+    assert.match(band, /href="\/sales\/clientinformationrequest\/">Book a site visit<\/a>/);
+    assert.match(band, /href="https:\/\/m\.me\/barrokitchens" rel="noopener" target="_blank" data-brand>/);
+    assert.match(band, /We reply within 1 hour, Mon–Sat\./);
+    assert.match(band, /href="tel:\+639208018475">0920 801 8475<\/a>/);
+    assert.ok(!/free|guarantee|best|leading|premium/i.test(band.replace(/<[^>]+>/g, ' ')), 'no unapproved promise or hype word');
+  });
+  it('keeps one projects section and one closing call to action', () => {
+    assert.equal((html.match(/<section id="projects"/g) || []).length, 1);
+    assert.equal((html.match(/id="get-a-quote"/g) || []).length, 1);
+  });
+});

@@ -1334,7 +1334,7 @@ describe('"Message us": the Messenger chat is linked from every public footer, t
 
   it('links Messenger exactly where it was asked for: 2 places on the homepage (contact + footer), the catalogue and the FAQ page (call to action + footer), 1 on each other page (footer) — never in the header, the phone menu, the JSON-LD or the hero', () => {
     // + the hero and the closing band on the three brief-led service pages (owner 2026-11-24: Messenger beside "Get a quote")
-    const expected = { '/': 2, '/catalogue/': 2, '/faq/': 2, ...Object.fromEntries(BRIEF_LED.map((x) => [x, 3])) };
+    const expected = { '/': 2, '/catalogue/': 2, '/faq/': 2, ...Object.fromEntries(BRIEF_LED.map((x) => [x, 3])), '/services/commercial-kitchen-fit-out/': 4 };   // + the site-visit band (owner 2026-11-24, the design & build ad's landing page)
     for (const [p, html] of ALL) {
       assert.equal(msgAnchors(html).length, expected[p] || 1, `${p}: Messenger links`);
       assert.deepEqual(msgAnchors(section(html, /<header id="site-header">[\s\S]*?<\/header>/)), [], `${p}: the header keeps "Get a quote" only`);
