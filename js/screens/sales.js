@@ -272,6 +272,48 @@ const WON_FILTERS = [
   { key:'all',       label:'All',            test:()=>true },
 ];
 
+// ── Sales won per person (owner, 2026-11-25: "on the sales tab lets put sales won per person") ──
+// Groups won jobs by the salesperson on the quote that won them. The person is the quote's
+// `salesperson` field (typed in the builder), then its agentName, then createdByName. Names are
+// matched on their first word, case-insensitive, so "NEIL BARRO", "Neil Barro" and "Uriel" fold into
+// one row each, and the row shows the longest spelling it saw. A job with no quote (entered straight into
+// Projects, e.g. the Nov 20 catch-up entries) is credited to the job's own salesperson field, else to whoever
+// created it (owner, 2026-11-25: those three are Neil's). Only a job with neither goes under "Not recorded". Cancelled jobs are never counted. The period is judged on the job's
+// createdAt (the day it was won) in Manila time: 'month' = this calendar month, 'year' = this
+// calendar year, 'all' = everything. Collected and balance are to date, for the jobs won in the period.
+const SWP_PERIODS = [
+  { key:'month', label:'This month' },
+  { key:'year',  label:'This year' },
+  { key:'all',   label:'All time' },
+];
+function salesWonByPerson(projects, quoteById, period, now) {
+  const manila = d => new Date(d.getTime() + 8 * 3600 * 1000);
+  const toDate = v => { const d = v && typeof v.toDate === 'function' ? v.toDate() : (v ? new Date(v) : null); return d && !isNaN(d) ? d : null; };
+  const nowM = manila(now instanceof Date ? now : new Date());
+  const inPeriod = p => {
+    if (period === 'all') return true;
+    const d = toDate(p.createdAt); if (!d) return false;
+    const m = manila(d);
+    if (m.getUTCFullYear() !== nowM.getUTCFullYear()) return false;
+    return period === 'year' || m.getUTCMonth() === nowM.getUTCMonth();
+  };
+  const rows = new Map();
+  (projects || []).forEach(p => {
+    if (!p || p.stage === 'cancelled' || !inPeriod(p)) return;
+    const q = (quoteById && p.quoteId && quoteById[p.quoteId]) || null;
+    const clean = v => String(v || '').trim().replace(/\s+/g, ' ');
+    const raw = q ? (clean(q.salesperson) || clean(q.agentName) || clean(q.createdByName)) : (clean(p.salesperson) || clean(p.createdByName));
+    const key = raw ? raw.split(' ')[0].toLowerCase() : '~none';
+    const contract = Number(p.contractAmount) || 0;
+    const collected = Number(p.amountCollected) || 0;
+    const r = rows.get(key) || { key, name: raw ? '' : 'Not recorded', jobs: 0, contract: 0, collected: 0, balance: 0 };
+    if (raw && raw.length > r.name.length) r.name = raw.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    r.jobs += 1; r.contract += contract; r.collected += collected; r.balance += Math.max(0, contract - collected);
+    rows.set(key, r);
+  });
+  return [...rows.values()].sort((a, b) => (a.key === '~none') - (b.key === '~none') || b.contract - a.contract || b.jobs - a.jobs);
+}
+
 async function renderSalesWonProjects(content, currentUser, currentRole) {
   content.innerHTML = window.skeletonHtml('rows');
   const showMoney = typeof isProductionOnlyViewer === 'function' && !isProductionOnlyViewer();
@@ -314,6 +356,14 @@ async function renderSalesWonProjects(content, currentUser, currentRole) {
       <div class="kpi-card"><div class="kpi-label">Contract value</div><div class="kpi-value" style="font-size:15px">₱${fmt(kContract)}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Collected</div><div class="kpi-value" style="font-size:15px">₱${fmt(kCollected)}</div></div>
       <div class="kpi-card ${kBalance>0?'warn':''}"><div class="kpi-label">Balance due</div><div class="kpi-value" style="font-size:15px">₱${fmt(kBalance)}</div></div>` : ''}
+    </div>
+    <div class="card swp-card" style="margin-bottom:14px;padding:14px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+        <strong style="font-size:14px">Sales won per person</strong>
+        <div class="chip-tabs swp-periods" style="margin:0">${SWP_PERIODS.map(x=>`<button type="button" class="chip-tab${x.key==='year'?' active':''}" data-swp="${x.key}">${escHtml(x.label)}</button>`).join('')}</div>
+      </div>
+      <div class="swp-body">${window.skeletonHtml('rows')}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px">Counted by the salesperson on the winning quote and the day the job was won. Cancelled jobs are left out; collected and balance are to date.</div>
     </div>
     <div style="margin-bottom:10px"><input type="text" class="ms-input won-search" placeholder="Search client, quote no. or project no." style="width:100%;max-width:420px"/></div>
     <div class="chip-tabs won-filters" style="margin-bottom:12px">${WON_FILTERS.map(f=>{
@@ -373,6 +423,38 @@ async function renderSalesWonProjects(content, currentUser, currentRole) {
   }));
   content.querySelector('.won-search').addEventListener('input', e => { q = e.target.value; draw(); });
   draw();
+
+  // Sales won per person — the winning quote of each job names the salesperson. Soft-fail per quote:
+  // a quote that can't be read leaves its job under "Not recorded" instead of breaking the list.
+  const swpBody = content.querySelector('.swp-body');
+  const quoteById = {};
+  const wanted = [...new Map(live.filter(p => p.quoteId).map(p => [p.quoteId, p.quoteCollection || 'bk_quotes'])).entries()];
+  await Promise.all(wanted.map(([id, coll]) => db.collection(coll).doc(id).get()
+    .then(d => { if (d.exists) quoteById[id] = d.data(); }).catch(() => {})));
+  let swpPeriod = 'year';
+  const drawSwp = () => {
+    if (!swpBody || !swpBody.isConnected) return;
+    const rows = salesWonByPerson(projects, quoteById, swpPeriod, new Date());
+    if (!rows.length) { swpBody.innerHTML = `<div style="font-size:13px;color:var(--text-muted);padding:6px 0">No jobs won in this period yet.</div>`; return; }
+    const tot = rows.reduce((t, r) => ({ jobs: t.jobs + r.jobs, contract: t.contract + r.contract, collected: t.collected + r.collected, balance: t.balance + r.balance }), { jobs: 0, contract: 0, collected: 0, balance: 0 });
+    // tc-expanded keeps the figures open on a phone: table-cards otherwise hides tc-detail until a row is tapped.
+    const tr = (r, bold) => `<tr class="tc-expanded"${bold ? ' style="font-weight:700"' : ''}>
+      <td class="tc-name">${escHtml(r.name)}</td>
+      ${showMoney ? `<td class="tc-net">₱${fmt(r.contract)}</td>` : ''}
+      <td class="tc-detail" data-label="Jobs won">${r.jobs}</td>
+      ${showMoney ? `<td class="tc-detail" data-label="Collected">₱${fmt(r.collected)}</td>
+      <td class="tc-detail" data-label="Balance">₱${fmt(r.balance)}</td>` : ''}
+    </tr>`;
+    swpBody.innerHTML = `<div class="table-wrap"><table class="data-table table-cards swp-table">
+      <thead><tr><th>Salesperson</th>${showMoney ? '<th>Won value</th>' : ''}<th>Jobs won</th>${showMoney ? '<th>Collected</th><th>Balance</th>' : ''}</tr></thead>
+      <tbody>${rows.map(r => tr(r)).join('')}${rows.length > 1 ? tr({ name: 'Total', ...tot }, true) : ''}</tbody></table></div>`;
+  };
+  const swpBar = content.querySelector('.swp-periods');
+  swpBar?.querySelectorAll('.chip-tab').forEach(btn => btn.addEventListener('click', () => {
+    swpBar.querySelectorAll('.chip-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active'); swpPeriod = btn.dataset.swp; drawSwp();
+  }));
+  drawSwp();
 }
 
 // ══════════════════════════════════════════════════
